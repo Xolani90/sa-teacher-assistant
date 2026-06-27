@@ -1,0 +1,239 @@
+'use strict';
+
+/**
+ * AI-powered intent classifier.
+ *
+ * This replaces regex/keyword matching as the primary way the bot decides
+ * what a teacher's message means. Instead of pattern-matching against fixed
+ * phrases, it asks Claude to actually read the message — the same way a
+ * knowledgeable colleague would — and infer intent, grade, subject, topic
+ * and marks from context, profile defaults, typos, code-switching between
+ * English and SA home languages, and indirect phrasing.
+ *
+ * CONTRACT: classifyIntent() always resolves to the exact same shape that
+ * utils/intentParser.js's parseIntent() returns:
+ *   { type, grade, subject, topic, marks, language }
+ * This means every downstream consumer (processGeneration, the flow
+ * handlers, the topic-ambiguity check, intentLabel, PDF generation) keeps
+ * working completely unchanged — only the *understanding* step changes.
+ *
+ * RELIABILITY: if the AI call fails, times out, or returns malformed JSON,
+ * this falls back to the deterministic regex parser automatically. A
+ * teacher should never see a broken response just because a classification
+ * call had a network hiccup.
+ */
+
+const { generateContent } = require('./aiService');
+const { parseIntent: regexParseIntent, INTENT_TYPES } = require('../utils/intentParser');
+
+const VALID_TYPES = Object.values(INTENT_TYPES);
+
+const VALID_SUBJECTS = [
+  'mathematics', 'physical sciences', 'natural sciences', 'life sciences',
+  'english', 'history', 'geography', 'accounting', 'business studies',
+  'economics', 'isizulu', 'isixhosa', 'afrikaans', 'sepedi', 'setswana',
+  'tourism', 'cat', 'dramatic arts', 'visual arts', 'music',
+  'agricultural sciences', 'consumer studies', 'hospitality studies',
+  'civil technology', 'electrical technology', 'life orientation',
+  'religion', 'physical education', 'general',
+];
+
+/**
+ * Builds the classifier's system prompt. Deliberately short and strict —
+ * this call needs to be fast and cheap (Haiku-class model), and the only
+ * job is structured classification, not conversation or generation.
+ *
+ * @returns {string}
+ */
+function buildClassifierSystemPrompt() {
+  return `You are the intent classifier for a WhatsApp bot used by South African (CAPS curriculum) teachers. You read one teacher message and decide what they want, the way an experienced colleague would — not by keyword spotting, but by actually understanding what's being asked, including typos, SMS-shorthand, code-switching between English and SA languages (Afrikaans, isiZulu, isiXhosa, Sesotho, Setswana, Sepedi, Xitsonga, siSwati, Tshivenda, isiNdebele), and indirect phrasing.
+
+Respond with ONLY a single JSON object, no other text, no markdown fences, no preamble. The JSON must have exactly these fields:
+
+{
+  "type": one of [${VALID_TYPES.map(t => `"${t}"`).join(', ')}],
+  "grade": integer 1-12, or null if not stated or impliable from profile,
+  "subject": one of [${VALID_SUBJECTS.map(s => `"${s}"`).join(', ')}] — use "general" if not stated or impliable,
+  "topic": short string describing the specific topic, or null,
+  "marks": integer (default 20 if a test/quiz but no number given; null for non-assessment types),
+  "language": the language the teacher should receive their CONTENT in (e.g. "english", "afrikaans", "isizulu") — default "english" unless the teacher wrote in or explicitly asked for another language
+}
+
+TYPE DEFINITIONS:
+- worksheet: practice questions/activities on a topic, no marking memo expected
+- test: a formal assessment with marks/memo expected, or the words test/quiz/exam/assessment with a mark count
+- lessonPlan: a plan for teaching a lesson (objectives, activities, timing)
+- explanation: teacher wants a topic explained simply, often for their own understanding or to relay to learners
+- reportComment: teacher wants report card comments for one or more learners
+- parentMessage: teacher wants a message/letter to send to a parent or guardian
+- quickQuiz: a short warm-up/starter/bell-work quiz, distinct from a full test
+- atp: Annual Teaching Plan — full-year CAPS pacing/coverage document for a subject and grade. Topic is always null for this type.
+- assessmentAnalysis: teacher wants help understanding/diagnosing how their class performed on an assessment they already gave (e.g. "how did my class do", "analyse my test results", "where are learners struggling", "item analysis"). This is about PAST performance data, not generating a new test.
+- interventionPlan: teacher wants a structured remediation/catch-up plan for learners who are behind, OR practical guidance on School-Based Assessment (SBA) requirements/scheduling/weighting. Distinct from assessmentAnalysis: this is about WHAT TO DO about a known gap, not diagnosing one.
+- greeting: a simple hello/hi with no actual request
+- smallTalk: "how are you", "are you there" type chit-chat with no request
+- emotionalSupport: teacher is venting about stress, exhaustion, a hard day, difficult learners/parents, burnout — with NO concrete content request attached
+- thanks: a thank-you with no further request
+- unknown: genuinely unclear what they want, or a request outside what this bot does (the bot only handles CAPS teaching content — lesson materials, assessments, parent/report communication, intervention/SBA support)
+
+CRITICAL DISAMBIGUATION RULES:
+- If a message contains BOTH an emotional statement AND a concrete request (e.g. "I'm so stressed, can you give me a worksheet on fractions"), classify by the CONCRETE REQUEST, not the emotion. The emotion can be acknowledged in conversation but the actionable type wins.
+- "struggling" alone is ambiguous: "I'm struggling today" (venting, no request) = emotionalSupport. "My learners are struggling with fractions" or "intervention plan for struggling readers" (concrete ask) = interventionPlan.
+- The word "assessment" alone, with a topic and grade, asking to CREATE something (e.g. "give me an assessment on photosynthesis grade 9") = test, NOT assessmentAnalysis. assessmentAnalysis is only when the teacher is asking about results/performance THEY ALREADY HAVE.
+- Never invent a grade or subject the teacher didn't state or that isn't given to you as their known profile default — leave as null/"general" if genuinely unstated. Do not guess.
+- If the teacher writes in a South African language other than English, set "language" to that language so their content is generated in it, but still classify "type" correctly regardless of language.
+- A message that is ONLY a topic with no other context (e.g. "fractions") should still be classified using the most recent type the teacher was working with if you're given that context; otherwise default to worksheet.
+
+Return ONLY the JSON object. No explanation, no markdown code fences.`;
+}
+
+/**
+ * Safely extracts the first JSON object from a string, tolerating cases
+ * where the model wraps it in markdown fences or adds stray whitespace.
+ *
+ * @param {string} text
+ * @returns {object|null}
+ */
+function extractJson(text) {
+  if (!text) return null;
+  let cleaned = text.trim();
+  // Strip markdown code fences if present, despite being told not to use them
+  cleaned = cleaned.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/i, '').trim();
+  const start = cleaned.indexOf('{');
+  const end = cleaned.lastIndexOf('}');
+  if (start === -1 || end === -1 || end < start) return null;
+  try {
+    return JSON.parse(cleaned.slice(start, end + 1));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Validates and normalizes a raw classifier response into the exact shape
+ * the rest of the codebase expects. Any field that's missing, malformed,
+ * or outside the allowed set falls back to a safe default rather than
+ * propagating garbage into prompt builders and flow handlers.
+ *
+ * @param {object} raw
+ * @returns {{type: string, grade: number|null, subject: string, topic: string|null, marks: number|null, language: string}}
+ */
+function normalize(raw) {
+  const type = VALID_TYPES.includes(raw?.type) ? raw.type : INTENT_TYPES.UNKNOWN;
+
+  let grade = null;
+  if (typeof raw?.grade === 'number' && Number.isFinite(raw.grade)) {
+    grade = Math.min(12, Math.max(1, Math.round(raw.grade)));
+  } else if (typeof raw?.grade === 'string' && /^\d{1,2}$/.test(raw.grade.trim())) {
+    grade = Math.min(12, Math.max(1, parseInt(raw.grade.trim(), 10)));
+  }
+
+  const subject = VALID_SUBJECTS.includes(raw?.subject) ? raw.subject : 'general';
+
+  let topic = typeof raw?.topic === 'string' ? raw.topic.trim() : null;
+  if (!topic || topic.length === 0) topic = null;
+
+  // These types never carry a free-text topic — same rule as the regex parser
+  if ([INTENT_TYPES.ATP, INTENT_TYPES.ASSESSMENT_ANALYSIS, INTENT_TYPES.INTERVENTION_PLAN, INTENT_TYPES.PARENT_MESSAGE].includes(type)) {
+    topic = null;
+  }
+
+  let marks = null;
+  if (typeof raw?.marks === 'number' && Number.isFinite(raw.marks)) {
+    marks = Math.min(100, Math.max(5, Math.round(raw.marks)));
+  } else if ([INTENT_TYPES.TEST, INTENT_TYPES.QUICK_QUIZ, INTENT_TYPES.WORKSHEET].includes(type)) {
+    marks = 20; // matches regexParseIntent's default
+  }
+
+  const KNOWN_LANGUAGES = ['english', 'afrikaans', 'isizulu', 'isixhosa', 'sesotho', 'setswana', 'sepedi', 'xitsonga', 'siswati', 'tshivenda', 'isindebele'];
+  const language = KNOWN_LANGUAGES.includes(raw?.language) ? raw.language : 'english';
+
+  return { type, grade, subject, topic, marks, language };
+}
+
+/**
+ * Classifies a teacher's message using Claude, with the deterministic regex
+ * parser as an automatic fallback on any failure (timeout, network error,
+ * malformed response). Never throws — always resolves to a usable intent.
+ *
+ * LATENCY GUARANTEE: even if the Anthropic API is slow, this function
+ * resolves within CLASSIFIER_DEADLINE_MS (default 4 seconds). If the AI
+ * hasn't responded by then, the regex fallback fires immediately rather
+ * than making the teacher wait up to the full 12-second HTTP timeout.
+ * The AI call is still allowed to complete in the background — if it
+ * returns after the deadline, the result is simply discarded (the teacher
+ * already got a response via the regex fallback). This is correct because
+ * the regex result is always safe — it may be less nuanced than the AI
+ * result, but it never produces a broken or wrong intent for standard
+ * phrasings, and for anything truly ambiguous the teacher can just rephrase.
+ *
+ * @param {string} text - The teacher's raw message
+ * @param {{ grade?: number|null, subject?: string|null, lastIntentType?: string|null }} [profile] -
+ *   Known profile defaults, used so the classifier doesn't have to guess
+ *   things the teacher already told the bot in a previous session.
+ * @returns {Promise<{type: string, grade: number|null, subject: string, topic: string|null, marks: number|null, language: string, _source: 'ai'|'fallback'|'fallback-timeout'}>}
+ */
+
+// Maximum wall-clock time we're willing to spend on classification before
+// falling back to the regex parser. Must be well under the AI HTTP timeout
+// (12 000ms) so the race actually fires before the HTTP layer times out.
+const CLASSIFIER_DEADLINE_MS = 4_000;
+
+async function classifyIntent(text, profile = {}) {
+  const fallback = (reason = 'fallback') => ({ ...regexParseIntent(text), _source: reason });
+
+  // Build the AI call promise
+  const aiPromise = (async () => {
+    try {
+      const profileContext = [
+        profile.grade   ? `Teacher's default grade (use only if message doesn't override it): ${profile.grade}` : null,
+        profile.subject ? `Teacher's default subject (use only if message doesn't override it): ${profile.subject}` : null,
+        profile.lastIntentType ? `Teacher's last request type: ${profile.lastIntentType}` : null,
+      ].filter(Boolean).join('\n');
+
+      const userPrompt = `${profileContext ? profileContext + '\n\n' : ''}Teacher's message: "${text}"`;
+
+      const raw = await generateContent(userPrompt, 'classifier', {
+        systemPrompt: buildClassifierSystemPrompt(),
+        temperature: 0,
+      });
+
+      const parsed = extractJson(raw);
+      if (!parsed) {
+        console.warn('[CLASSIFIER] Could not parse JSON from AI response, falling back to regex. Raw:', String(raw).slice(0, 200));
+        return fallback('fallback-malformed-response');
+      }
+
+      const normalized = normalize(parsed);
+      return { ...normalized, _source: 'ai' };
+    } catch (err) {
+      console.warn('[CLASSIFIER] AI classification failed, falling back to regex:', err.message);
+      return fallback('fallback-ai-error');
+    }
+  })();
+
+  // Race the AI call against a hard deadline — whichever resolves first wins.
+  // This guarantees the teacher never waits more than CLASSIFIER_DEADLINE_MS
+  // for classification, regardless of API latency or Anthropic outages.
+  //
+  // IMPORTANT: Promise.race does NOT cancel the losing promise — if aiPromise
+  // wins, the setTimeout below keeps running in the background and still
+  // fires its console.warn a few seconds later, falsely logging "Deadline
+  // exceeded" even though classification already succeeded via AI. We clear
+  // the timer explicitly once aiPromise settles to prevent that stale log.
+  let deadlineTimer;
+  const deadlinePromise = new Promise(resolve => {
+    deadlineTimer = setTimeout(() => {
+      console.warn(`[CLASSIFIER] Deadline exceeded (${CLASSIFIER_DEADLINE_MS}ms) — falling back to regex for: "${text.slice(0, 60)}"`);
+      resolve(fallback('fallback-timeout'));
+    }, CLASSIFIER_DEADLINE_MS);
+  });
+
+  // Clear the deadline timer as soon as the AI path settles (success or
+  // failure) so it never fires after the race is already decided.
+  aiPromise.finally(() => clearTimeout(deadlineTimer));
+
+  return Promise.race([aiPromise, deadlinePromise]);
+}
+
+module.exports = { classifyIntent, buildClassifierSystemPrompt, normalize, extractJson };

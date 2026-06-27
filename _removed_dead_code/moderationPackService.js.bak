@@ -1,0 +1,342 @@
+'use strict';
+
+/**
+ * Moderation Pack Generator Service
+ * Generates moderation packs for South African schools to ensure assessment standardization.
+ * Includes assessment papers, memoranda, marking guidelines, and moderation checklists.
+ */
+
+/**
+ * Generates a moderation pack for an assessment.
+ *
+ * @param {number} assessmentId - Assessment ID
+ * @returns {Object} Moderation pack
+ */
+function generateModerationPack(assessmentId) {
+  const { getDb } = require('../utils/database');
+  const db = getDb();
+
+  const assessment = db.prepare(`
+    SELECT * FROM assessments WHERE id = ?
+  `).get(assessmentId);
+
+  if (!assessment) {
+    return { error: 'Assessment not found' };
+  }
+
+  const pack = {
+    assessmentId,
+    assessment: {
+      title: assessment.title,
+      grade: assessment.grade,
+      subject: assessment.subject,
+      term: assessment.term,
+      type: assessment.assessment_type,
+      totalMarks: assessment.total_marks,
+      duration: estimateDuration(assessment.total_marks),
+    },
+    components: {
+      questionPaper: generateQuestionPaperTemplate(assessment),
+      memorandum: generateMemorandumTemplate(assessment),
+      markingGuidelines: generateMarkingGuidelines(assessment),
+      moderationChecklist: generateModerationChecklist(assessment),
+      cognitiveLevelAnalysis: generateCognitiveLevelAnalysis(assessment),
+    },
+    generatedAt: new Date().toISOString(),
+  };
+
+  return pack;
+}
+
+/**
+ * Estimates assessment duration based on total marks.
+ *
+ * @param {number} totalMarks - Total marks for assessment
+ * @returns {string} Estimated duration
+ */
+function estimateDuration(totalMarks) {
+  if (totalMarks <= 20) return '30 minutes';
+  if (totalMarks <= 40) return '45 minutes';
+  if (totalMarks <= 60) return '1 hour';
+  if (totalMarks <= 80) return '1.5 hours';
+  return '2 hours';
+}
+
+/**
+ * Generates a question paper template.
+ *
+ * @param {Object} assessment - Assessment details
+ * @returns {Object} Question paper template
+ */
+function generateQuestionPaperTemplate(assessment) {
+  return {
+    title: assessment.title,
+    instructions: [
+      'Read all instructions carefully',
+      'Write neatly and legibly',
+      'Show all working where required',
+      'Number your answers clearly',
+    ],
+    sections: [
+      {
+        section: 'A',
+        title: 'Multiple Choice / Short Questions',
+        marks: Math.round(assessment.total_marks * 0.3),
+        instructions: 'Answer all questions',
+      },
+      {
+        section: 'B',
+        title: 'Structured Questions',
+        marks: Math.round(assessment.total_marks * 0.4),
+        instructions: 'Answer all questions',
+      },
+      {
+        section: 'C',
+        title: 'Extended Questions',
+        marks: Math.round(assessment.total_marks * 0.3),
+        instructions: 'Answer all questions',
+      },
+    ],
+    totalMarks: assessment.total_marks,
+    duration: estimateDuration(assessment.total_marks),
+  };
+}
+
+/**
+ * Generates a memorandum template.
+ *
+ * @param {Object} assessment - Assessment details
+ * @returns {Object} Memorandum template
+ */
+function generateMemorandumTemplate(assessment) {
+  return {
+    title: `${assessment.title} - Memorandum`,
+    grade: assessment.grade,
+    subject: assessment.subject,
+    totalMarks: assessment.total_marks,
+    sections: [
+      {
+        section: 'A',
+        answers: 'Provide correct answers with mark allocation',
+        markingNotes: 'Award full marks for correct answers, partial marks for partially correct',
+      },
+      {
+        section: 'B',
+        answers: 'Provide detailed answers with step-by-step solutions',
+        markingNotes: 'Award marks for method and final answer',
+      },
+      {
+        section: 'C',
+        answers: 'Provide comprehensive answers with explanations',
+        markingNotes: 'Award marks for content, structure, and explanation',
+      },
+    ],
+    specialInstructions: [
+      'Accept alternative correct answers',
+      'Award method marks where appropriate',
+      'Be consistent in marking across all scripts',
+    ],
+  };
+}
+
+/**
+ * Generates marking guidelines.
+ *
+ * @param {Object} assessment - Assessment details
+ * @returns {Object} Marking guidelines
+ */
+function generateMarkingGuidelines(assessment) {
+  return {
+    title: `${assessment.title} - Marking Guidelines`,
+    generalPrinciples: [
+      'Mark consistently according to the memorandum',
+      'Award method marks for correct procedures',
+      'Accept alternative correct methods',
+      'Deduct marks for calculation errors but award method marks',
+      'Be fair and consistent across all learners',
+    ],
+    cognitiveLevelAllocation: {
+      knowledge: '30%',
+      application: '40%',
+      analysis: '20%',
+      evaluation: '10%',
+    },
+    timeAllocation: {
+      readingTime: '5 minutes',
+      writingTime: estimateDuration(assessment.total_marks),
+    },
+    markAllocation: {
+      sectionA: Math.round(assessment.total_marks * 0.3),
+      sectionB: Math.round(assessment.total_marks * 0.4),
+      sectionC: Math.round(assessment.total_marks * 0.3),
+    },
+  };
+}
+
+/**
+ * Generates a moderation checklist.
+ *
+ * @param {Object} assessment - Assessment details
+ * @returns {Object} Moderation checklist
+ */
+function generateModerationChecklist(assessment) {
+  return {
+    title: `${assessment.title} - Moderation Checklist`,
+    moderatedBy: '_________________________',
+    date: '_________________________',
+    checklist: [
+      {
+        category: 'Alignment',
+        items: [
+          'Assessment is aligned to CAPS requirements',
+          'Content coverage is appropriate for grade and term',
+          'Cognitive levels are appropriately distributed',
+          'Questions are clear and unambiguous',
+        ],
+      },
+      {
+        category: 'Technical',
+        items: [
+          'Total marks add up correctly',
+          'Time allocation is appropriate',
+          'Instructions are clear and complete',
+          'Layout and formatting are professional',
+        ],
+      },
+      {
+        category: 'Memorandum',
+        items: [
+          'Memorandum is complete and accurate',
+          'Mark allocation is clear and fair',
+          'Alternative answers are considered',
+          'Marking guidelines are comprehensive',
+        ],
+      },
+      {
+        category: 'Fairness',
+        items: [
+          'Language level is appropriate',
+          'Questions are free from bias',
+          'Assessment is accessible to all learners',
+          'Context is appropriate and relevant',
+        ],
+      },
+    ],
+    moderatorComments: '___________________________________________________',
+    recommendation: 'Approved / Needs revision / Reject',
+    signature: '_________________________',
+  };
+}
+
+/**
+ * Generates cognitive level analysis.
+ *
+ * @param {Object} assessment - Assessment details
+ * @returns {Object} Cognitive level analysis
+ */
+function generateCognitiveLevelAnalysis(assessment) {
+  return {
+    title: `${assessment.title} - Cognitive Level Analysis`,
+    totalMarks: assessment.total_marks,
+    distribution: [
+      {
+        level: 'Knowledge',
+        description: 'Recall, recognition, and basic understanding',
+        targetPercentage: 30,
+        targetMarks: Math.round(assessment.total_marks * 0.3),
+        actualMarks: 'To be completed',
+        actualPercentage: 'To be completed',
+      },
+      {
+        level: 'Application',
+        description: 'Apply knowledge to familiar and unfamiliar situations',
+        targetPercentage: 40,
+        targetMarks: Math.round(assessment.total_marks * 0.4),
+        actualMarks: 'To be completed',
+        actualPercentage: 'To be completed',
+      },
+      {
+        level: 'Analysis',
+        description: 'Break down information and identify relationships',
+        targetPercentage: 20,
+        targetMarks: Math.round(assessment.total_marks * 0.2),
+        actualMarks: 'To be completed',
+        actualPercentage: 'To be completed',
+      },
+      {
+        level: 'Evaluation',
+        description: 'Judge, critique, and justify decisions',
+        targetPercentage: 10,
+        targetMarks: Math.round(assessment.total_marks * 0.1),
+        actualMarks: 'To be completed',
+        actualPercentage: 'To be completed',
+      },
+    ],
+    notes: 'Ensure cognitive level distribution aligns with CAPS requirements for the subject and grade.',
+  };
+}
+
+/**
+ * Generates a summary of the moderation pack.
+ *
+ * @param {Object} pack - Moderation pack
+ * @returns {string} Summary text
+ */
+function generateModerationSummary(pack) {
+  let summary = `*Moderation Pack: ${pack.assessment.title}*\n\n`;
+  summary += `Grade ${pack.assessment.grade} ${pack.assessment.subject} - Term ${pack.assessment.term}\n`;
+  summary += `Type: ${pack.assessment.type}\n`;
+  summary += `Total Marks: ${pack.assessment.totalMarks}\n`;
+  summary += `Duration: ${pack.assessment.duration}\n\n`;
+
+  summary += `*Pack Components*\n`;
+  summary += `✅ Question Paper Template\n`;
+  summary += `✅ Memorandum Template\n`;
+  summary += `✅ Marking Guidelines\n`;
+  summary += `✅ Moderation Checklist\n`;
+  summary += `✅ Cognitive Level Analysis\n\n`;
+
+  summary += `*Next Steps*\n`;
+  summary += `1. Complete the question paper with actual questions\n`;
+  summary += `2. Develop the memorandum with detailed answers\n`;
+  summary += `3. Review against moderation checklist\n`;
+  summary += `4. Submit for moderation by subject head or department\n`;
+  summary += `5. Make any required revisions\n`;
+  summary += `6. Finalize and prepare for printing\n`;
+
+  return summary;
+}
+
+/**
+ * Generates a moderation report after moderation is complete.
+ *
+ * @param {number} assessmentId - Assessment ID
+ * @param {Object} moderationData - Moderator feedback
+ * @returns {Object} Moderation report
+ */
+function generateModerationReport(assessmentId, moderationData) {
+  const pack = generateModerationPack(assessmentId);
+
+  if (pack.error) {
+    return pack;
+  }
+
+  const report = {
+    assessmentId,
+    moderationDate: moderationData.date || new Date().toISOString(),
+    moderator: moderationData.moderator || 'Not specified',
+    overallDecision: moderationData.decision || 'Pending',
+    findings: moderationData.findings || [],
+    recommendations: moderationData.recommendations || [],
+    approved: moderationData.decision === 'Approved',
+    generatedAt: new Date().toISOString(),
+  };
+
+  return report;
+}
+
+module.exports = {
+  generateModerationPack,
+  generateModerationSummary,
+  generateModerationReport,
+};
