@@ -1876,35 +1876,44 @@ async function handleCommand(from, text) {
     const teacher = getTeacherByPhone(from);
     const name    = teacher?.name || 'there';
     await safeSendMessage(from,
-      `Hey ${name} 👋 here's what I can do:\n\n` +
-      `📝 *QUICK GENERATION*\n` +
-      `• Grade 7 Maths worksheet on fractions\n` +
-      `• 30-mark test on photosynthesis, Grade 9\n` +
-      `• Lesson plan, Grade 10 Accounting\n` +
-      `• Explain the water cycle simply\n` +
-      `• Parent message: Thabo absent 3 days\n\n` +
+      `👋 Hey ${name}! Here's what I can do:\n\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `📝 *GENERATE RESOURCES*\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `Just describe what you need, e.g.:\n` +
+      `_"Grade 7 Maths worksheet on fractions"_\n` +
+      `_"30-mark test on photosynthesis, Grade 9"_\n` +
+      `_"Lesson plan, Grade 10 Accounting"_\n` +
+      `_"Parent message: Thabo absent 3 days"_\n\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
       `⭐ *PRO FEATURES*\n` +
-      `• Annual Teaching Plans (full CAPS ATP)\n` +
-      `• Assessment analysis — find the gaps\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `• Annual Teaching Plans (CAPS ATP)\n` +
+      `• Assessment analysis & gap reports\n` +
       `• Intervention plans & SBA support\n` +
-      `• Moderation packs — checklist, cover sheet & sign-off\n\n` +
+      `• Moderation packs & sign-off sheets\n\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
       `📊 *AFTER UPLOADING MARKS*\n` +
-      `REPORT — full diagnostic PDF\n` +
-      `HOD REPORT — for department submission\n` +
-      `PARENT REPORT — for one learner or the class\n\n` +
-      `🏫 *YOUR WORKSPACE*\\n` +
-      `WORKSPACE — overview: classes, assessments & progress\\n` +
-      `MY CLASSES — list your classes (NEW CLASS to add one)\\n` +
-      `MY ASSESSMENTS — history with class averages\\n` +
-      `MY PROGRESS — curriculum coverage from your assessments\\n\\n` +
-      `🎯 *AFTER A WORKSHEET*\n` +
-      `Reply EASIER · HARDER · VISUAL · ORAL\n\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `*REPORT* — full diagnostic PDF\n` +
+      `*HOD REPORT* — for department submission\n` +
+      `*PARENT REPORT* — for one learner or class\n\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `🏫 *YOUR WORKSPACE*\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `*WORKSPACE* — classes, assessments & progress\n` +
+      `*MY CLASSES* — list classes (NEW CLASS to add)\n` +
+      `*MY ASSESSMENTS* — history with averages\n` +
+      `*MY PROGRESS* — CAPS curriculum coverage\n\n` +
+      `━━━━━━━━━━━━━━━━━━━\n` +
       `👤 *YOUR ACCOUNT*\n` +
-      `STATUS — usage & plan\n` +
-      `PRO — upgrade\n` +
-      `PROFILE — view your defaults\n` +
-      `UPDATE — change them\n\n` +
-      `Just type what you need, like you'd ask a colleague. 😊`
+      `━━━━━━━━━━━━━━━━━━━\n` +
+      `*STATUS* — usage & plan\n` +
+      `*PRO* — upgrade to Pro\n` +
+      `*PROFILE* — view your defaults\n` +
+      `*UPDATE* — change your defaults\n\n` +
+      `💡 _After a worksheet, reply_ *EASIER · HARDER · VISUAL · ORAL* _to adapt it._\n\n` +
+      `Type anything to get started. 😊`
     );
     return true;
   }
