@@ -1,0 +1,15 @@
+node_modules
+.env
+.env.*
+!.env.example
+data
+*.db
+*.sqlite
+*.sqlite3
+logs
+*.log
+coverage
+tmp
+.cache
+.DS_Store
+Thumbs.db

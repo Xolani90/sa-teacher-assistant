@@ -1,0 +1,42 @@
+services:
+  - type: web
+    name: sa-teacher-assistant
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    healthCheckPath: /
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: 3000
+      - key: DB_PATH
+        value: /var/data/teacher_assistant.db
+      # Set these manually in the Render dashboard — never commit secrets
+      - key: WHATSAPP_TOKEN
+        sync: false
+      - key: WHATSAPP_PHONE_NUMBER_ID
+        sync: false
+      - key: VERIFY_TOKEN
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: PDF_SECRET
+        sync: false
+      - key: PII_SECRET
+        sync: false
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: ADMIN_SECRET
+        sync: false
+      - key: APP_URL
+        sync: false
+      - key: YOCO_SECRET_KEY
+        sync: false
+      - key: YOCO_WEBHOOK_SECRET
+        sync: false
+    disk:
+      name: data
+      mountPath: /var/data
+      sizeGB: 1

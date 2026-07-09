@@ -1,0 +1,409 @@
+'use strict';
+
+/**
+ * SBA (School-Based Assessment) Support Service
+ * Supports teachers with CAPS-aligned SBA tasks, mark sheets, and record keeping.
+ * Provides term-based SBA schedules and progress tracking.
+ */
+
+/**
+ * SBA task types by subject and grade (simplified for demonstration)
+ */
+const SBA_TASKS = {
+  mathematics: {
+    7: {
+      1: ['Controlled Test', 'Practical Investigation'],
+      2: ['Controlled Test', 'Project'],
+      3: ['Controlled Test', 'Assignment'],
+      4: ['Controlled Test', 'Examination'],
+    },
+    8: {
+      1: ['Controlled Test', 'Practical Investigation'],
+      2: ['Controlled Test', 'Project'],
+      3: ['Controlled Test', 'Assignment'],
+      4: ['Controlled Test', 'Examination'],
+    },
+  },
+  physical_sciences: {
+    10: {
+      1: ['Practical Investigation', 'Controlled Test'],
+      2: ['Practical Investigation', 'Controlled Test'],
+      3: ['Practical Investigation', 'Controlled Test'],
+      4: ['Examination'],
+    },
+  },
+  life_sciences: {
+    10: {
+      1: ['Practical Task', 'Controlled Test'],
+      2: ['Practical Task', 'Controlled Test'],
+      3: ['Practical Task', 'Controlled Test'],
+      4: ['Examination'],
+    },
+  },
+};
+
+/**
+ * SBA weighting by term (percentage contribution to final mark)
+ */
+const SBA_WEIGHTING = {
+  mathematics: {
+    7: { 1: 25, 2: 25, 3: 25, 4: 25 },
+    8: { 1: 25, 2: 25, 3: 25, 4: 25 },
+  },
+  physical_sciences: {
+    10: { 1: 25, 2: 25, 3: 25, 4: 25 },
+  },
+  life_sciences: {
+    10: { 1: 25, 2: 25, 3: 25, 4: 25 },
+  },
+};
+
+/**
+ * Generates an SBA schedule for a subject and grade.
+ *
+ * @param {number} grade - Grade level
+ * @param {string} subject - Subject name
+ * @returns {Object} SBA schedule
+ */
+function generateSBASchedule(grade, subject) {
+  const normalizedSubject = subject.toLowerCase().replace(' ', '_');
+  const tasks = SBA_TASKS[normalizedSubject]?.[grade];
+  const weighting = SBA_WEIGHTING[normalizedSubject]?.[grade];
+
+  if (!tasks || !weighting) {
+    return { error: 'SBA schedule not available for this subject and grade combination.' };
+  }
+
+  const schedule = {
+    grade,
+    subject,
+    terms: [],
+  };
+
+  for (const term of [1, 2, 3, 4]) {
+    schedule.terms.push({
+      term,
+      tasks: tasks[term],
+      weighting: weighting[term],
+      totalTasks: tasks[term].length,
+    });
+  }
+
+  return schedule;
+}
+
+/**
+ * Generates an SBA mark sheet template.
+ *
+ * @param {number} grade - Grade level
+ * @param {string} subject - Subject name
+ * @param {number} term - Term number
+ * @param {Array} learnerNames - Array of learner names
+ * @returns {Object} Mark sheet template
+ */
+function generateSBAMarkSheet(grade, subject, term, learnerNames = []) {
+  const schedule = generateSBASchedule(grade, subject);
+  
+  if (schedule.error) {
+    return schedule;
+  }
+
+  const termTasks = schedule.terms.find(t => t.term === term);
+  
+  const markSheet = {
+    grade,
+    subject,
+    term,
+    tasks: termTasks.tasks,
+    weighting: termTasks.weighting,
+    learners: [],
+    generatedAt: new Date().toISOString(),
+  };
+
+  for (const name of learnerNames) {
+    markSheet.learners.push({
+      name,
+      taskMarks: {},
+      termTotal: 0,
+      termPercentage: 0,
+    });
+
+    // Initialize task marks
+    for (const task of termTasks.tasks) {
+      markSheet.learners[markSheet.learners.length - 1].taskMarks[task] = 0;
+    }
+  }
+
+  return markSheet;
+}
+
+/**
+ * Generates SBA task guidelines and requirements.
+ *
+ * @param {string} taskType - Type of SBA task
+ * @param {string} subject - Subject
+ * @param {number} grade - Grade
+ * @returns {Object} Task guidelines
+ */
+function generateTaskGuidelines(taskType, subject, grade) {
+  const guidelines = {
+    taskType,
+    subject,
+    grade,
+    requirements: [],
+    assessmentCriteria: [],
+    weighting: 0,
+    duration: '',
+    resources: [],
+  };
+
+  switch (taskType.toLowerCase()) {
+    case 'controlled test':
+      guidelines.requirements = [
+        'Written assessment under controlled conditions',
+        'Duration: 1 hour for Grades 7-9, 1.5 hours for Grade 10-12',
+        'Cover work done during the term',
+        'Include a variety of question types',
+      ];
+      guidelines.assessmentCriteria = [
+        'Knowledge and understanding',
+        'Application of skills',
+        'Problem-solving ability',
+      ];
+      guidelines.weighting = 50;
+      guidelines.duration = grade >= 10 ? '1.5 hours' : '1 hour';
+      guidelines.resources = ['Question paper', 'Answer sheet', 'Calculator if applicable'];
+      break;
+
+    case 'practical investigation':
+      guidelines.requirements = [
+        'Hands-on investigation or experiment',
+        'Written report including hypothesis, method, results, conclusion',
+        'Individual or small group work',
+        'Assess scientific method and practical skills',
+      ];
+      guidelines.assessmentCriteria = [
+        'Hypothesis formulation',
+        'Experimental procedure',
+        'Data collection and recording',
+        'Analysis and conclusion',
+      ];
+      guidelines.weighting = 50;
+      guidelines.duration = '2-3 hours over multiple sessions';
+      guidelines.resources = ['Laboratory equipment', 'Investigation worksheet', 'Report template'];
+      break;
+
+    case 'project':
+      guidelines.requirements = [
+        'Extended task completed over several weeks',
+        'Research and application component',
+        'Written report and presentation',
+        'Individual work with teacher guidance',
+      ];
+      guidelines.assessmentCriteria = [
+        'Research skills',
+        'Content knowledge',
+        'Presentation',
+        'Originality and creativity',
+      ];
+      guidelines.weighting = 50;
+      guidelines.duration = '4-6 weeks';
+      guidelines.resources = ['Project guidelines', 'Research materials', 'Presentation tools'];
+      break;
+
+    case 'assignment':
+      guidelines.requirements = [
+        'Short to medium-length task',
+        'Completed in class or as homework',
+        'Focus on specific skills or content',
+        'Clear guidelines and criteria provided',
+      ];
+      guidelines.assessmentCriteria = [
+        'Completion',
+        'Accuracy',
+        'Understanding',
+      ];
+      guidelines.weighting = 50;
+      guidelines.duration = '1-2 weeks';
+      guidelines.resources = ['Assignment instructions', 'Reference materials'];
+      break;
+
+    case 'practical task':
+      guidelines.requirements = [
+        'Hands-on activity or demonstration',
+        'Focus on practical skills',
+        'May include observation checklist',
+        'Individual or small group',
+      ];
+      guidelines.assessmentCriteria = [
+        'Technique',
+        'Safety procedures',
+        'Results',
+      ];
+      guidelines.weighting = 50;
+      guidelines.duration = '1-2 hours';
+      guidelines.resources = ['Practical equipment', 'Observation checklist', 'Safety gear'];
+      break;
+
+    case 'examination':
+      guidelines.requirements = [
+        'End-of-year or end-of-term examination',
+        'Cover work from the term or year',
+        'Formal examination conditions',
+        'Include variety of cognitive levels',
+      ];
+      guidelines.assessmentCriteria = [
+        'Knowledge',
+        'Application',
+        'Analysis',
+        'Evaluation',
+      ];
+      guidelines.weighting = 100;
+      guidelines.duration = grade >= 10 ? '2-3 hours' : '1.5-2 hours';
+      guidelines.resources = ['Examination paper', 'Answer sheet', 'Calculator if applicable'];
+      break;
+
+    default:
+      guidelines.requirements = ['Follow CAPS guidelines for this task type'];
+      guidelines.assessmentCriteria = ['As specified in CAPS'];
+  }
+
+  return guidelines;
+}
+
+/**
+ * Calculates SBA progress for a teacher.
+ *
+ * @param {string} phoneHash - Teacher's phone hash
+ * @param {number} grade - Grade
+ * @param {string} subject - Subject
+ * @param {number} currentTerm - Current term (1-4)
+ * @returns {Object} SBA progress report
+ */
+function calculateSBAProgress(phoneHash, grade, subject, currentTerm) {
+  const schedule = generateSBASchedule(grade, subject);
+
+  if (schedule.error) {
+    return schedule;
+  }
+
+  const progress = {
+    grade,
+    subject,
+    currentTerm,
+    overallProgress: 0,
+    termProgress: [],
+    recommendations: [],
+  };
+
+  let totalTasks = 0;
+  let completedTasks = 0;
+
+  for (const term of schedule.terms) {
+    const termProgress = {
+      term: term.term,
+      totalTasks: term.totalTasks,
+      completedTasks: 0,
+      status: 'pending',
+    };
+
+    if (term.term < currentTerm) {
+      // Past terms should be complete
+      termProgress.completedTasks = term.totalTasks;
+      termProgress.status = 'should_be_complete';
+    } else if (term.term === currentTerm) {
+      // Current term - assume half complete for demonstration
+      termProgress.completedTasks = Math.floor(term.totalTasks / 2);
+      termProgress.status = 'in_progress';
+    } else {
+      // Future terms
+      termProgress.status = 'upcoming';
+    }
+
+    totalTasks += term.totalTasks;
+    completedTasks += termProgress.completedTasks;
+    progress.termProgress.push(termProgress);
+  }
+
+  progress.overallProgress = Math.round((completedTasks / totalTasks) * 100);
+
+  // Generate recommendations
+  if (progress.overallProgress < 50) {
+    progress.recommendations.push('You are behind schedule. Prioritize completing outstanding SBA tasks.');
+  }
+  
+  const currentTermProgress = progress.termProgress.find(t => t.term === currentTerm);
+  if (currentTermProgress && currentTermProgress.completedTasks < currentTermProgress.totalTasks) {
+    progress.recommendations.push(`Complete remaining Term ${currentTerm} SBA tasks before the end of the term.`);
+  }
+
+  return progress;
+}
+
+/**
+ * Generates an SBA summary report for a teacher.
+ *
+ * @param {string} phoneHash - Teacher's phone hash
+ * @param {number} grade - Grade
+ * @param {string} subject - Subject
+ * @returns {string} SBA summary
+ */
+function generateSBASummary(phoneHash, grade, subject) {
+  const currentTerm = getCurrentTerm();
+  const progress = calculateSBAProgress(phoneHash, grade, subject, currentTerm);
+  const schedule = generateSBASchedule(grade, subject);
+
+  if (progress.error) {
+    return progress.error;
+  }
+
+  let summary = `*SBA Summary: Grade ${grade} ${subject}*\n\n`;
+  summary += `Current Term: ${currentTerm}\n`;
+  summary += `Overall Progress: ${progress.overallProgress}%\n\n`;
+
+  summary += `*Term-by-Term Status*\n`;
+  for (const term of progress.termProgress) {
+    const statusEmoji = term.status === 'should_be_complete' ? '✅' :
+                       term.status === 'in_progress' ? '🟡' :
+                       term.status === 'upcoming' ? '⏳' : '❌';
+    summary += `${statusEmoji} Term ${term.term}: ${term.completedTasks}/${term.totalTasks} tasks (${term.status})\n`;
+  }
+
+  summary += `\n*SBA Schedule*\n`;
+  for (const term of schedule.terms) {
+    summary += `Term ${term.term}: ${term.tasks.join(', ')} (${term.weighting}%)\n`;
+  }
+
+  if (progress.recommendations.length > 0) {
+    summary += `\n*Recommendations*\n`;
+    for (const rec of progress.recommendations) {
+      summary += `• ${rec}\n`;
+    }
+  }
+
+  return summary;
+}
+
+/**
+ * Determines the current school term based on date.
+ * Simplified - in production, this would use actual South African school calendar.
+ *
+ * @returns {number} Current term (1-4)
+ */
+function getCurrentTerm() {
+  const month = new Date().getMonth() + 1; // 1-12
+  
+  if (month >= 1 && month <= 3) return 1;
+  if (month >= 4 && month <= 6) return 2;
+  if (month >= 7 && month <= 9) return 3;
+  return 4;
+}
+
+module.exports = {
+  generateSBASchedule,
+  generateSBAMarkSheet,
+  generateTaskGuidelines,
+  calculateSBAProgress,
+  generateSBASummary,
+  getCurrentTerm,
+};
