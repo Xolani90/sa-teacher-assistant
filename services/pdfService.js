@@ -75,9 +75,9 @@ function ensureSpace(doc, neededHeight) {
  * Draws the standard school document header.
  *
  * @param {PDFDocument} doc
- * @param {{ title, grade, subject, school, date }} meta
+ * @param {{ title, grade, subject, school, date, marks }} meta
  */
-function drawHeader(doc, { title, grade, subject, school, date } = {}) {
+function drawHeader(doc, { title, grade, subject, school, date, marks } = {}) {
   const pageWidth = doc.page.width;
   const margin    = 50;
 
@@ -98,7 +98,21 @@ function drawHeader(doc, { title, grade, subject, school, date } = {}) {
     .font(FONTS.heading)
     .fontSize(9)
     .fillColor(COLORS.white)
-    .text(school || 'SA Teacher Assistant', margin, 14, { width: pageWidth - margin * 2, lineBreak: false });
+    .text(school || 'SA Teacher Assistant', margin, 14, { width: pageWidth - margin * 2 - 90, lineBreak: false });
+
+  // "CAPS Aligned" badge (top right, green pill) — small brand mark repeated
+  // on every page so any single printed/shared page is recognisable.
+  const badgeLabel = 'CAPS ALIGNED';
+  const badgeW = 88;
+  const badgeH = 16;
+  const badgeX = pageWidth - margin - badgeW;
+  const badgeY = 10;
+  doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 8).fill(COLORS.accent);
+  doc
+    .font(FONTS.heading)
+    .fontSize(7)
+    .fillColor(COLORS.white)
+    .text(badgeLabel, badgeX, badgeY + 5, { width: badgeW, align: 'center', lineBreak: false });
 
   // Document title (bold, centered)
   doc
@@ -107,8 +121,10 @@ function drawHeader(doc, { title, grade, subject, school, date } = {}) {
     .fillColor(COLORS.white)
     .text(title || '', margin, 28, { width: pageWidth - margin * 2, align: 'center', lineBreak: false });
 
-  // Subtitle row: Subject | Grade | Date
-  const subtitle = [subject, grade, date || new Date().toLocaleDateString('en-ZA')].filter(Boolean).join('  |  ');
+  // Subtitle row: Subject | Grade | Date | Total Marks
+  const subtitleParts = [subject, grade, date || new Date().toLocaleDateString('en-ZA')];
+  if (marks) subtitleParts.push(`Total: ${marks} Marks`);
+  const subtitle = subtitleParts.filter(Boolean).join('   |   ');
   doc
     .font(FONTS.body)
     .fontSize(9)
@@ -127,36 +143,109 @@ function drawHeader(doc, { title, grade, subject, school, date } = {}) {
 }
 
 /**
- * Draws the student info row (Name / Class / Date / Total).
+ * Draws the learner/teacher info box (Learner Name / Class / Teacher / Date / Total).
+ * Rendered inside a light bordered box, two rows of fields, for a more
+ * professional "official document" feel than a bare underline row.
  *
  * @param {PDFDocument} doc
  * @param {number} totalMarks
  */
 function drawStudentInfoRow(doc, totalMarks) {
   const margin = 50;
-  const y      = doc.y + 8;
-  const w      = (doc.page.width - margin * 2) / 4;
+  const boxW   = doc.page.width - margin * 2;
+  const boxTop = doc.y + 6;
+  const rowH   = 26;
+  const boxH   = rowH * 2 + 8;
 
-  doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText);
+  doc.rect(margin, boxTop, boxW, boxH).lineWidth(0.75).stroke(COLORS.border);
 
-  const fields = [
-    { label: 'Name:', underlineWidth: w - 40 },
-    { label: 'Class:', underlineWidth: w - 40 },
-    { label: 'Date:', underlineWidth: w - 40 },
-    { label: `Total: ___/${totalMarks || ''}`, underlineWidth: 0 },
+  const drawField = (label, x, y, underlineWidth) => {
+    doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText).text(label, x, y, { lineBreak: false });
+    const labelWidth = doc.font(FONTS.body).fontSize(10).widthOfString(label);
+    doc.moveTo(x + labelWidth + 6, y + 12).lineTo(x + labelWidth + 6 + underlineWidth, y + 12).stroke(COLORS.midGray);
+  };
+
+  // Row 1: Learner Name (wide) | Class | Date
+  const row1Y = boxTop + 8;
+  const nameW = boxW * 0.46;
+  const classW = boxW * 0.24;
+  const dateW = boxW * 0.24;
+  drawField('Learner Name:', margin + 10, row1Y, nameW - 100);
+  drawField('Class:', margin + 10 + nameW, row1Y, classW - 55);
+  drawField('Date:', margin + 10 + nameW + classW, row1Y, dateW - 50);
+
+  // Row 2: Teacher (wide) | Total marks (bold, accent, right-aligned)
+  const row2Y = row1Y + rowH;
+  const teacherW = boxW * 0.6;
+  drawField('Teacher:', margin + 10, row2Y, teacherW - 65);
+  doc
+    .font(FONTS.heading)
+    .fontSize(11)
+    .fillColor(COLORS.accent)
+    .text(`Total: ___ / ${totalMarks || '___'} marks`, margin + 10 + teacherW, row2Y - 1, {
+      width: boxW - teacherW - 20,
+      align: 'right',
+    });
+
+  doc.y = boxTop + boxH + 10;
+}
+
+/**
+ * Draws an instructions box near the top of assessment-style documents
+ * (worksheets, tests, exam papers, quizzes, SBA tasks). Wording adapts
+ * slightly to the document type and total marks.
+ *
+ * @param {PDFDocument} doc
+ * @param {{ type: string, marks?: number }} opts
+ */
+function drawInstructionsBox(doc, { type, marks } = {}) {
+  const margin = 50;
+  const boxW   = doc.page.width - margin * 2;
+
+  const baseInstructions = [
+    'Answer all questions in the spaces provided.',
+    'Show all calculations where required.',
+    'Write neatly and legibly.',
   ];
+  if (type === 'test' || type === 'examPaper') {
+    baseInstructions.push('Non-programmable calculators may be used unless stated otherwise.');
+  }
+  if (marks) {
+    baseInstructions.push(`This document is out of ${marks} marks.`);
+  }
 
-  fields.forEach((field, i) => {
-    const x = margin + i * w;
-    doc.text(field.label, x, y);
-    if (field.underlineWidth > 0) {
-      doc.moveTo(x + 40, y + 12).lineTo(x + 40 + field.underlineWidth, y + 12).stroke(COLORS.midGray);
-    }
+  // Measure required height first so we can reserve space as one block.
+  doc.font(FONTS.body).fontSize(9);
+  const lineGap = 13;
+  const innerPad = 10;
+  const titleH = 16;
+  const contentH = baseInstructions.length * lineGap;
+  const boxH = titleH + contentH + innerPad;
+
+  ensureSpace(doc, boxH + 10);
+
+  const boxTop = doc.y;
+  doc.rect(margin, boxTop, boxW, boxH).fill(COLORS.lightGray);
+  doc.rect(margin, boxTop, 4, boxH).fill(COLORS.accent); // left accent stripe
+  doc.rect(margin, boxTop, boxW, boxH).lineWidth(0.75).stroke(COLORS.border);
+
+  doc
+    .font(FONTS.heading)
+    .fontSize(9)
+    .fillColor(COLORS.primary)
+    .text('INSTRUCTIONS', margin + innerPad + 4, boxTop + 6, { lineBreak: false });
+
+  let lineY = boxTop + titleH + 4;
+  baseInstructions.forEach((line) => {
+    doc
+      .font(FONTS.body)
+      .fontSize(9)
+      .fillColor(COLORS.darkText)
+      .text(`•  ${line}`, margin + innerPad + 4, lineY, { width: boxW - innerPad * 2, lineBreak: false });
+    lineY += lineGap;
   });
 
-  doc.y = y + 24;
-  doc.moveTo(margin, doc.y).lineTo(doc.page.width - margin, doc.y).stroke(COLORS.border);
-  doc.y += 10;
+  doc.y = boxTop + boxH + 12;
 }
 
 /**
@@ -178,11 +267,16 @@ function drawSectionHeading(doc, heading, marks) {
     .rect(margin, y, doc.page.width - margin * 2, 22)
     .fill(COLORS.lightGray);
 
+  // Accent stripe on the left edge of the box for a more polished, on-brand look
+  doc
+    .rect(margin, y, 4, 22)
+    .fill(COLORS.accent);
+
   doc
     .font(FONTS.heading)
     .fontSize(10)
     .fillColor(COLORS.primary)
-    .text(heading, margin + 8, y + 6);
+    .text(heading, margin + 12, y + 6);
 
   if (marks) {
     doc
@@ -196,13 +290,16 @@ function drawSectionHeading(doc, heading, marks) {
 }
 
 /**
- * Draws the footer on each page.
- * Called automatically via the `pageAdded` event.
+ * Draws the footer on the CURRENT page only. Does not know the total page
+ * count — callers that want "Page X of Y" should use `finalizeFooters`
+ * instead, which loops over all buffered pages once the full page count is
+ * known (only possible after all content has been rendered).
  *
  * @param {PDFDocument} doc
  * @param {string} [schoolName]
+ * @param {{ pageNum?: number, totalPages?: number }} [pageInfo]
  */
-function drawFooter(doc, schoolName) {
+function drawFooter(doc, schoolName, pageInfo = {}) {
   const pageWidth = doc.page.width;
   const y = doc.page.height - 36;
 
@@ -220,15 +317,67 @@ function drawFooter(doc, schoolName) {
   const savedY = doc.y;
   doc.page.margins.bottom = 0;
 
+  const { pageNum, totalPages } = pageInfo;
+  const pageLabel = totalPages
+    ? `Page ${pageNum} of ${totalPages}`
+    : `Page ${doc.bufferedPageRange().start + 1}`;
+  const genDate = new Date().toLocaleDateString('en-ZA');
+
   doc
     .font(FONTS.body)
     .fontSize(8)
     .fillColor(COLORS.midGray)
-    .text('Generated by SA Teacher Assistant — CAPS Aligned', 50, y + 6, { align: 'left', lineBreak: false })
-    .text(`Page ${doc.bufferedPageRange().start + 1}`, 50, y + 6, { align: 'right', width: pageWidth - 100, lineBreak: false });
+    .text(`Generated by SA Teacher Assistant — CAPS Aligned — ${genDate}`, 50, y + 6, { align: 'left', lineBreak: false, width: pageWidth - 150 })
+    .text(pageLabel, 50, y + 6, { align: 'right', width: pageWidth - 100, lineBreak: false });
 
   doc.page.margins.bottom = savedBottom;
   doc.y = savedY; // Restore cursor — never let footer position bleed into content
+}
+
+/**
+ * Writes the final footer (with accurate "Page X of Y") onto every buffered
+ * page. Must be called after all content is rendered and BEFORE doc.end(),
+ * with `bufferPages: true` set on the PDFDocument constructor — otherwise
+ * pdfkit flushes each page to the output stream immediately and pages can
+ * no longer be revisited.
+ *
+ * @param {PDFDocument} doc
+ * @param {string} [schoolName]
+ */
+function finalizeFooters(doc, schoolName) {
+  const range = doc.bufferedPageRange(); // { start, count }
+  for (let i = 0; i < range.count; i++) {
+    doc.switchToPage(range.start + i);
+    drawFooter(doc, schoolName, { pageNum: i + 1, totalPages: range.count });
+  }
+}
+
+/**
+ * Draws a small, subtle teacher-reference box (difficulty / Bloom level /
+ * estimated completion time). Purely additive — only renders when at least
+ * one of these values is actually supplied, so documents generated by the
+ * current call sites (which don't pass this data yet) are unaffected.
+ *
+ * @param {PDFDocument} doc
+ * @param {{ difficulty?: string, bloomLevel?: string, estimatedTime?: string }} meta
+ */
+function drawMetadataBox(doc, { difficulty, bloomLevel, estimatedTime } = {}) {
+  const parts = [];
+  if (difficulty)     parts.push(`Difficulty: ${difficulty}`);
+  if (bloomLevel)      parts.push(`Bloom Level: ${bloomLevel}`);
+  if (estimatedTime)   parts.push(`Est. time: ${estimatedTime}`);
+  if (parts.length === 0) return; // nothing to show — stay invisible
+
+  const margin = 50;
+  const label = parts.join('   •   ');
+
+  ensureSpace(doc, 16);
+  doc
+    .font(FONTS.italic)
+    .fontSize(7.5)
+    .fillColor(COLORS.midGray)
+    .text(label, margin, doc.y, { width: doc.page.width - margin * 2, align: 'right', lineBreak: false });
+  doc.y += 12;
 }
 
 // ── Table helper ───────────────────────────────────────────────────────────
@@ -308,6 +457,13 @@ function renderFormattedText(doc, text, margin = 50) {
       doc.y += 4;
       doc.moveTo(margin, doc.y).lineTo(doc.page.width - margin, doc.y).stroke(COLORS.border);
       doc.y += 8;
+      continue;
+    }
+
+    // Stray formatting artefacts left over from AI/WhatsApp formatting
+    // (e.g. a lone "--", "• --", or an empty bullet) — drop silently rather
+    // than rendering a meaningless dash on the page.
+    if (/^[•\-]\s*-{1,3}\s*$/.test(line) || /^-{1,3}$/.test(line) || /^[•\-]\s*$/.test(line)) {
       continue;
     }
 
@@ -460,13 +616,23 @@ function renderFormattedText(doc, text, margin = 50) {
       }
     }
 
-    // Answer lines (blank lines for writing)
+    // Answer / Working lines — reserve ruled writing space for the learner.
+    // "Working:" (calculations) gets more room than a short "Answer:" line.
     if (line.startsWith('Answer:') || line.startsWith('Working:')) {
-      ensureSpace(doc, 30);
+      const isWorking = line.startsWith('Working:');
+      const ruleCount = isWorking ? 3 : 1;
+      const ruleGap = 16;
+      ensureSpace(doc, 20 + ruleCount * ruleGap);
+
       doc
         .font(FONTS.italic).fontSize(10).fillColor(COLORS.midGray)
         .text(line, margin, doc.y, { width: bodyWidth });
-      doc.y += 16; // Extra space for student to write
+      doc.y += 14;
+
+      for (let r = 0; r < ruleCount; r++) {
+        doc.moveTo(margin, doc.y).lineTo(doc.page.width - margin, doc.y).stroke(COLORS.border);
+        doc.y += ruleGap;
+      }
       continue;
     }
 
@@ -547,7 +713,7 @@ function renderInlineBold(doc, line, margin, width) {
  * @param {number} [params.marks]   - Total marks (for tests/worksheets)
  * @returns {Promise<{ filePath: string, filename: string, fileId: string }>}
  */
-async function generatePdf({ content, type, topic, grade, subject, school, marks }) {
+async function generatePdf({ content, type, topic, grade, subject, school, marks, difficulty, bloomLevel, estimatedTime }) {
   ensurePdfDir();
 
   const fileId   = uuidv4();
@@ -573,9 +739,20 @@ async function generatePdf({ content, type, topic, grade, subject, school, marks
 
   const title = titles[type] || `SA TEACHER ASSISTANT: ${topic || subject || 'CAPS'}`;
 
+  // Document types where a learner fills in the PDF by hand (name/class/teacher
+  // fields + an instructions box make sense). Teacher-facing planning docs
+  // (lesson plans, ATPs, intervention plans, etc.) skip these — unchanged
+  // from the previous behaviour, just named as an explicit set for clarity.
+  const ASSESSMENT_TYPES = new Set(['worksheet', 'test', 'examPaper', 'quickQuiz', 'sbaTask']);
+  const isAssessment = ASSESSMENT_TYPES.has(type);
+
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: 'A4',
+      // bufferPages lets us revisit every page after all content has been
+      // rendered, which is required to print an accurate "Page X of Y" —
+      // the total page count isn't known until rendering finishes.
+      bufferPages: true,
       margins: { top: 110, bottom: 60, left: 50, right: 50 },
       info: {
         Title:    title,
@@ -589,25 +766,33 @@ async function generatePdf({ content, type, topic, grade, subject, school, marks
     const stream = fs.createWriteStream(filePath);
     doc.pipe(stream);
 
-    // Draw header on first page
-    drawHeader(doc, { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA') });
+    const headerMeta = { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA'), marks };
 
-    // Draw student info row for assessments
-    if (type === 'worksheet' || type === 'test') {
+    // Draw header on first page
+    drawHeader(doc, headerMeta);
+
+    // Draw learner/teacher info box + instructions for assessment-style docs
+    if (isAssessment) {
       drawStudentInfoRow(doc, marks);
+      drawInstructionsBox(doc, { type, marks });
     }
 
-    // Add header + footer to each new page
-    doc.on('pageAdded', () => {
-      drawHeader(doc, { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA') });
-      drawFooter(doc, school);
-    });
+    // Subtle teacher-reference box — only appears if metadata was supplied
+    drawMetadataBox(doc, { difficulty, bloomLevel, estimatedTime });
 
-    // Draw footer on first page too
-    drawFooter(doc, school);
+    // Redraw header on every subsequent page. Footers are handled separately
+    // via finalizeFooters() once the total page count is known, so we don't
+    // draw them here.
+    doc.on('pageAdded', () => {
+      drawHeader(doc, headerMeta);
+    });
 
     // Render the content
     renderFormattedText(doc, content);
+
+    // Now that all pages exist, stamp every page with an accurate
+    // "Page X of Y" footer.
+    finalizeFooters(doc, school);
 
     doc.end();
 
@@ -736,6 +921,7 @@ async function generateReportSummaryPdf(comments, metadata = {}) {
 
   const doc = new PDFDocument({
     size: 'A4',
+    bufferPages: true, // needed for accurate "Page X of Y" footers — see finalizeFooters()
     margins: { top: 110, bottom: 60, left: 50, right: 50 },
   });
 
@@ -743,19 +929,18 @@ async function generateReportSummaryPdf(comments, metadata = {}) {
   doc.pipe(stream);
 
   const title = 'REPORT COMMENTS SUMMARY';
+  const headerMeta = { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA') };
 
   // FIX: drawHeader requires a single meta object — was incorrectly called
   // with positional args (drawHeader(doc, 'title', school, grade, subject))
   // which caused title/grade/subject/school to all be undefined.
-  drawHeader(doc, { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA') });
+  drawHeader(doc, headerMeta);
 
-  // Add footer to each new page
+  // Redraw header on each new page; footers are finalized once at the end
+  // (see finalizeFooters call before doc.end()) so the page total is accurate.
   doc.on('pageAdded', () => {
-    drawHeader(doc, { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA') });
-    drawFooter(doc, school);
+    drawHeader(doc, headerMeta);
   });
-
-  drawFooter(doc, school);
 
   // Summary table
   doc.moveDown(0.5);
@@ -812,6 +997,10 @@ async function generateReportSummaryPdf(comments, metadata = {}) {
 
     doc.moveDown(1);
   });
+
+  // Stamp every page with an accurate "Page X of Y" footer now that the
+  // total page count is known.
+  finalizeFooters(doc, school);
 
   doc.end();
 
