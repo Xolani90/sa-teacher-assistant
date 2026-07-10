@@ -86,7 +86,7 @@ Generate the following sections in full, CAPS/DBE-aligned, ready to print and at
 | Evaluation/Synthesis | | | | |
 | *TOTAL* | *100%* | | | |
 
-[Fill in the CAPS Target % column with the correct recommended percentages for ${gradeStr} ${subjectStr} specifically — these vary by subject and phase, so use real CAPS guidance, not generic defaults.]
+[Fill in the CAPS Target % column with the correct recommended percentages for ${gradeStr} ${subjectStr} specifically — these vary by subject and phase, so use real CAPS guidance, not generic defaults. Do NOT reuse the Senior Phase (Grades 7-9) cognitive-level split for an FET (Grades 10-12) paper, or vice versa — confirm which CAPS phase document ${gradeStr} actually falls under before filling in the targets, since this has previously been a source of grade-band mix-ups.]
 
 ---
 

@@ -64,6 +64,7 @@ CAPS ALIGNMENT REQUIREMENTS:
 - Mark allocations must be clearly shown per question
 - Total marks: ${totalMarks}
 - Include real South African context where possible (SA place names, rand currency, local examples)
+- Any prices, quantities, or measurements used in word problems must be realistic for South Africa (e.g. paint is priced per tin/litre in the R80-R350 per litre range depending on type, not arbitrary round numbers) — sense-check numbers against real-world SA retail pricing before including them
 
 WORKSHEET DETAILS:
 - Topic: ${topic}
@@ -73,11 +74,14 @@ WORKSHEET DETAILS:
 
 OUTPUT — produce a complete worksheet in this EXACT format for WhatsApp:
 
-*WORKSHEET: ${topic}*
+*WORKSHEET: ${topic.charAt(0).toUpperCase() + topic.slice(1)}*
 *${subjectStr} | ${gradeStr} | Total: ____/${totalMarks}*
+
+[School Logo]                    [SA Teacher Assistant Logo]
 
 Name: ________________________________
 Class: ________________ Date: __________
+
 
 ---
 
