@@ -665,24 +665,47 @@ function renderInlineBoldAt(doc, line, x, width, y) {
   // the last segment rendered, leaving PDFKit in a "continued text" state that
   // bleeds into the next doc.text() call on the page.
   const lastNonEmpty = parts.reduce((last, p, i) => (p ? i : last), -1);
-  const startX = x;
-  let curX = x;
+
+  // Root cause of the overlap/garbled-text bug: PDFKit's _initOptions() does
+  // `if (y != null) { this.y = y; }` UNCONDITIONALLY on every .text() call —
+  // it never checks x. The old code always passed the original (fixed) `y`
+  // on every segment, even after curX was set to null. So if the FIRST
+  // segment's own text was long enough to wrap onto a second line (common
+  // with long *bold labels:*), the next segment's call would still pass the
+  // old y and snap doc.y back to the first line, drawing directly on top of
+  // the already-wrapped text. Confirmed via pdftotext -bbox: two segments
+  // landing at overlapping y-coordinates with overlapping x-ranges.
+  //
+  // Fix: only the FIRST segment gets explicit x/y. Every segment after that
+  // is called with no position arguments at all (options-only signature), so
+  // PDFKit continues from wherever its internal cursor actually is -- wrap
+  // or no wrap -- instead of being told to jump back to a stale position.
+  let isFirstSegment = true;
 
   for (let i = 0; i < parts.length; i++) {
     const part = parts[i];
     if (!part) continue;
 
     const isLast = i === lastNonEmpty;
+    const textOptions = { continued: !isLast, width };
 
     if (/^\*[^*]+\*$/.test(part)) {
       // Bold segment
-      doc.font(FONTS.heading).fontSize(10).fillColor(COLORS.darkText)
-         .text(part.replace(/\*/g, ''), curX, y, { continued: !isLast, width: width - (curX - startX) });
+      doc.font(FONTS.heading).fontSize(10).fillColor(COLORS.darkText);
+      if (isFirstSegment) {
+        doc.text(part.replace(/\*/g, ''), x, y, textOptions);
+      } else {
+        doc.text(part.replace(/\*/g, ''), textOptions);
+      }
     } else {
-      doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText)
-         .text(part, curX, y, { continued: !isLast, width: width - (curX - startX) });
+      doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText);
+      if (isFirstSegment) {
+        doc.text(part, x, y, textOptions);
+      } else {
+        doc.text(part, textOptions);
+      }
     }
-    curX = null; // Let PDFKit continue from current position after first segment
+    isFirstSegment = false;
   }
 }
 
