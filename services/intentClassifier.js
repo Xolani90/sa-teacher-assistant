@@ -61,15 +61,21 @@ Respond with ONLY a single JSON object, no other text, no markdown fences, no pr
 
 TYPE DEFINITIONS:
 - worksheet: practice questions/activities on a topic, no marking memo expected
-- test: a formal assessment with marks/memo expected, or the words test/quiz/exam/assessment with a mark count
+- test: a formal assessment with marks/memo expected, or the words test/quiz/exam/assessment with a mark count — a normal classroom-length assessment, not a full formal exam sitting
+- examPaper: a full, formal exam paper (mid-year, June, November, end-of-year, "final exam") with structured sections and an accompanying memo — bigger and more formal than a classroom test. If in doubt between test and examPaper, prefer test unless the teacher clearly signals a formal exam sitting.
+- rubric: teacher wants ONLY a marking/assessment rubric (levels, descriptors, criteria) to evaluate learner work — NOT the task or assessment itself.
+- sbaTask: teacher wants an actual School-Based Assessment task/instrument to hand to learners (e.g. project, assignment, investigation, practical, oral, "SBA task", "POA task") as required by the CAPS Programme of Assessment. If the teacher wants the physical task document itself, this is sbaTask, NOT interventionPlan.
 - lessonPlan: a plan for teaching a lesson (objectives, activities, timing)
 - explanation: teacher wants a topic explained simply, often for their own understanding or to relay to learners
 - reportComment: teacher wants report card comments for one or more learners
 - parentMessage: teacher wants a message/letter to send to a parent or guardian
 - quickQuiz: a short warm-up/starter/bell-work quiz, distinct from a full test
 - atp: Annual Teaching Plan — full-year CAPS pacing/coverage document for a subject and grade. Topic is always null for this type.
-- assessmentAnalysis: teacher wants help understanding/diagnosing how their class performed on an assessment they already gave (e.g. "how did my class do", "analyse my test results", "where are learners struggling", "item analysis"). This is about PAST performance data, not generating a new test.
-- interventionPlan: teacher wants a structured remediation/catch-up plan for learners who are behind, OR practical guidance on School-Based Assessment (SBA) requirements/scheduling/weighting. Distinct from assessmentAnalysis: this is about WHAT TO DO about a known gap, not diagnosing one.
+- assessmentAnalysis: teacher wants help understanding/diagnosing how their class performed on an assessment they already gave, discussed in conversation with no raw marks provided (e.g. "how did my class do", "where are learners struggling", "item analysis"). This is about PAST performance data, not generating a new test.
+- dataAssessment: teacher is uploading, submitting, or referring to actual learner marks/results data (a mark sheet, spreadsheet, CSV, or list of scores) to be captured for statistical analysis (item analysis, error analysis, learner grouping). Distinct from assessmentAnalysis: this one involves handing over or referencing raw data, not just discussing performance.
+- interventionPlan: teacher wants a structured remediation/catch-up plan for learners who are behind, OR general advice/talk about School-Based Assessment (SBA) requirements, scheduling, or weighting (no document requested). If the teacher wants the actual SBA task/assignment/project document itself, use sbaTask instead. Distinct from assessmentAnalysis: this is about WHAT TO DO about a known gap, not diagnosing one.
+- moderationPack: teacher wants a moderation/quality-assurance pack for an existing SBA task — typically a sample of tasks plus memo, rubric, and a moderation checklist/cover sheet, usually for HOD or subject-head sign-off.
+- curriculumQuery: teacher is asking a factual status question about their curriculum coverage, ATP pacing, or whether they're on track (e.g. "am I behind", "what should I be teaching this week", "curriculum coverage report") — a status check, NOT a request to generate a new ATP document (that's atp).
 - greeting: a simple hello/hi with no actual request
 - smallTalk: "how are you", "are you there" type chit-chat with no request
 - emotionalSupport: teacher is venting about stress, exhaustion, a hard day, difficult learners/parents, burnout — with NO concrete content request attached
@@ -80,6 +86,9 @@ CRITICAL DISAMBIGUATION RULES:
 - If a message contains BOTH an emotional statement AND a concrete request (e.g. "I'm so stressed, can you give me a worksheet on fractions"), classify by the CONCRETE REQUEST, not the emotion. The emotion can be acknowledged in conversation but the actionable type wins.
 - "struggling" alone is ambiguous: "I'm struggling today" (venting, no request) = emotionalSupport. "My learners are struggling with fractions" or "intervention plan for struggling readers" (concrete ask) = interventionPlan.
 - The word "assessment" alone, with a topic and grade, asking to CREATE something (e.g. "give me an assessment on photosynthesis grade 9") = test, NOT assessmentAnalysis. assessmentAnalysis is only when the teacher is asking about results/performance THEY ALREADY HAVE.
+- SBA requests: wanting the actual task/assignment/project/investigation DOCUMENT to hand to learners = sbaTask. Wanting advice, talk, or planning help about SBA structure, weighting, or scheduling with no document to hand out = interventionPlan.
+- Wanting ONLY a rubric/marking criteria, with no accompanying task = rubric, even if the message also mentions the task topic.
+- A moderation-specific request (a pack/sample for HOD or subject-head sign-off) = moderationPack, not sbaTask or rubric alone.
 - Never invent a grade or subject the teacher didn't state or that isn't given to you as their known profile default — leave as null/"general" if genuinely unstated. Do not guess.
 - If the teacher writes in a South African language other than English, set "language" to that language so their content is generated in it, but still classify "type" correctly regardless of language.
 - A message that is ONLY a topic with no other context (e.g. "fractions") should still be classified using the most recent type the teacher was working with if you're given that context; otherwise default to worksheet.
