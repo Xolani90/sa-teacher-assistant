@@ -124,6 +124,17 @@ function performErrorAnalysis(assessmentId, subject = 'general') {
     SELECT * FROM item_analysis WHERE assessment_id = ?
   `).all(assessmentId);
 
+  // Every question that performItemAnalysis analyzes gets a row here (not just
+  // difficult ones), so zero rows means item analysis never ran for this
+  // assessment — most commonly because marks were submitted without a
+  // per-question breakdown. Without this check, an empty item_analysis table
+  // produces an empty difficultQuestions/errorPatterns list below, which reads
+  // identically to "the class did fine" and reports exactly that — a false
+  // "all clear" when in fact nothing was ever analyzed.
+  if (itemAnalysis.length === 0) {
+    return { error: 'No item analysis available for this assessment — per-question marks are needed before error patterns can be identified.' };
+  }
+
   // Identify error patterns
   const errorPatterns = [];
   const topicErrors = {};
@@ -158,6 +169,31 @@ function performErrorAnalysis(assessmentId, subject = 'general') {
 }
 
 /**
+ * Checks whether a topic string shares real keyword overlap with any of the
+ * given misconception/language pattern descriptions, so classification can
+ * be grounded in actual curriculum content rather than a success-rate guess.
+ * Filters out short words (articles, prepositions) to avoid weak matches.
+ *
+ * @param {string} topic
+ * @param {string[]} patterns
+ * @returns {boolean}
+ */
+function topicMatchesPattern(topic, patterns) {
+  if (!topic || !patterns || patterns.length === 0) return false;
+  const topicWords = topic.toLowerCase().split(/[^a-z]+/).filter(w => w.length > 3);
+  if (topicWords.length === 0) return false;
+  return patterns.some(pattern => {
+    const patternLower = pattern.toLowerCase();
+    return topicWords.some(word => {
+      // Naive singular form too — "fractions" (the most common real topic
+      // string) won't substring-match "...larger fraction" otherwise.
+      const singular = word.endsWith('s') ? word.slice(0, -1) : word;
+      return patternLower.includes(word) || patternLower.includes(singular);
+    });
+  });
+}
+
+/**
  * Classifies the type of error based on topic and performance.
  *
  * @param {string} topic - Question topic
@@ -166,9 +202,33 @@ function performErrorAnalysis(assessmentId, subject = 'general') {
  * @returns {string} Error type
  */
 function classifyErrorType(topic, subject, successRate) {
-  const patterns = ERROR_PATTERNS[subject.toLowerCase().replace(' ', '_')] || ERROR_PATTERNS.general;
-  
-  // Very low success rates often indicate conceptual issues
+  // .replace(' ', '_') without the global flag only replaced the FIRST space,
+  // so multi-word subjects with 2+ spaces (e.g. "English Home Language")
+  // never matched their ERROR_PATTERNS key. Also, ERROR_PATTERNS.general
+  // doesn't exist as a key, so the old fallback silently resolved to
+  // undefined rather than a real pattern set.
+  const subjectKey = (subject || '').toLowerCase().replace(/\s+/g, '_');
+  const patterns = ERROR_PATTERNS[subjectKey];
+
+  // Ground the classification in real curriculum data where we can: if the
+  // topic matches a known misconception (or, for English, a known language
+  // gap) for this subject, use that specific type instead of only ever
+  // falling back to a numeric threshold. This is what makes MISCONCEPTION
+  // and LANGUAGE reachable at all — previously they were defined in
+  // ERROR_PATTERNS but no code path could ever return them.
+  if (patterns) {
+    if (topicMatchesPattern(topic, patterns.misconception)) {
+      return ERROR_TYPES.MISCONCEPTION;
+    }
+    if (subjectKey === 'english' && topicMatchesPattern(topic, patterns.language)) {
+      return ERROR_TYPES.LANGUAGE;
+    }
+  }
+
+  // Fallback when no specific curriculum pattern matched the topic: use
+  // success rate as a coarse signal only. Very low scores more often reflect
+  // conceptual gaps, moderate scores more often reflect procedural slips.
+  // This is an approximation, not a curriculum-grounded classification.
   if (successRate < 0.3) {
     return ERROR_TYPES.CONCEPTUAL;
   }

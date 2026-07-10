@@ -32,9 +32,9 @@ function processAssessmentData(phoneHash, assessmentData) {
   }
 
   // Step 2: Store learner results
-  const resultsStored = storeLearnerResults(assessmentId, assessmentData.learnerResults);
+  const storeResult = storeLearnerResults(assessmentId, assessmentData.learnerResults);
 
-  if (!resultsStored) {
+  if (!storeResult.success) {
     return { error: 'Failed to store learner results' };
   }
 
@@ -63,6 +63,11 @@ function processAssessmentData(phoneHash, assessmentData) {
   const interventionReport = generateInterventionReport(assessmentId);
 
   // Step 9: Compile diagnostic results
+  let teacherSummary = generateTeacherSummary(interventionReport);
+  if (storeResult.skipped.length > 0) {
+    teacherSummary = `⚠️ Could not read marks for: ${storeResult.skipped.join(', ')} — please check their mark format and resubmit for them.\n\n${teacherSummary}`;
+  }
+
   const diagnosticResults = {
     assessmentId,
     assessment: {
@@ -80,7 +85,8 @@ function processAssessmentData(phoneHash, assessmentData) {
       interventionPlan,
     },
     report: interventionReport,
-    teacherSummary: generateTeacherSummary(interventionReport),
+    teacherSummary,
+    skippedLearners: storeResult.skipped,
     processedAt: new Date().toISOString(),
     status: 'complete',
   };
@@ -146,7 +152,18 @@ function storeLearnerResults(assessmentId, learnerResults) {
       ) VALUES (?, ?, ?, ?, ?, ?)
     `);
 
+    const skipped = [];
     for (const result of learnerResults) {
+      // A malformed row (e.g. a teacher typo like "Thabo 5/0") produces
+      // Infinity/NaN here, which then poisons classAverage for the ENTIRE
+      // class (sum + Infinity = Infinity) in learnerGroupingService, and
+      // sorts that one learner into Group A since Infinity >= 80 is true.
+      // Skip the bad row rather than insert garbage that corrupts every
+      // other learner's grouping and the class-wide stats.
+      if (!result.totalMarks || result.totalMarks <= 0 || !Number.isFinite(result.mark)) {
+        skipped.push(result.learnerName || '(unnamed)');
+        continue;
+      }
       const percentage = (result.mark / result.totalMarks) * 100;
       insert.run(
         assessmentId,
@@ -158,12 +175,16 @@ function storeLearnerResults(assessmentId, learnerResults) {
       );
     }
 
+    if (skipped.length > 0) {
+      console.warn(`[diagnosticWorkflow] Skipped ${skipped.length} malformed learner row(s) for assessment ${assessmentId}: ${skipped.join(', ')}`);
+    }
+
     db.prepare('COMMIT').run();
-    return true;
+    return { success: true, skipped };
   } catch (error) {
     try { db.prepare('ROLLBACK').run(); } catch (_) { /* best-effort */ }
     console.error('Failed to store learner results:', error.message);
-    return false;
+    return { success: false, skipped: [] };
   }
 }
 

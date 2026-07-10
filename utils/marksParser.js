@@ -477,32 +477,56 @@ async function extractMarksFromImage(imageBuffer, mimeType) {
  * @returns {{ learners, totalMark, questionCount, questionMaxMarks, questionTopics, warnings, errors }}
  */
 function parseMarks(input, format = 'auto') {
-  if (format === 'xlsx') {
-    return parseXlsxFormat(input);
-  }
+  let result;
 
-  if (format === 'csv' || (format === 'auto' && Buffer.isBuffer(input))) {
+  if (format === 'xlsx') {
+    result = parseXlsxFormat(input);
+  } else if (format === 'csv' || (format === 'auto' && Buffer.isBuffer(input))) {
     // Buffer that isn't explicitly xlsx — check magic bytes for Excel signature
     if (Buffer.isBuffer(input) && input.length >= 4) {
       // XLSX/ZIP magic: PK\x03\x04 (50 4B 03 04)
       // XLS/CFB magic: D0 CF 11 E0
       const isXlsx = input[0] === 0x50 && input[1] === 0x4B && input[2] === 0x03 && input[3] === 0x04;
       const isXls  = input[0] === 0xD0 && input[1] === 0xCF && input[2] === 0x11 && input[3] === 0xE0;
-      if (isXlsx || isXls) return parseXlsxFormat(input);
+      result = (isXlsx || isXls) ? parseXlsxFormat(input) : parseCsvFormat(input);
+    } else {
+      result = parseCsvFormat(input);
     }
-    return parseCsvFormat(input);
+  } else {
+    const text = typeof input === 'string' ? input : input.toString('utf8');
+    if (format === 'auto') {
+      // Heuristic: if the first non-empty line looks like CSV headers (Name,Total or Name,Q1)
+      const firstLine = text.split(/\r?\n/).find(l => l.trim()) || '';
+      const looksLikeCsv = /^name\s*,/i.test(firstLine);
+      result = looksLikeCsv ? parseCsvFormat(text) : parseTextFormat(text);
+    } else {
+      result = parseTextFormat(text);
+    }
   }
 
-  const text = typeof input === 'string' ? input : input.toString('utf8');
-
-  if (format === 'auto') {
-    // Heuristic: if the first non-empty line looks like CSV headers (Name,Total or Name,Q1)
-    const firstLine = text.split(/\r?\n/).find(l => l.trim()) || '';
-    const looksLikeCsv = /^name\s*,/i.test(firstLine);
-    if (looksLikeCsv) return parseCsvFormat(text);
+  // Warn on duplicate learner names — common in SA classrooms (multiple
+  // learners sharing a first name) and otherwise silent: two "Thabo" rows
+  // would be stored as indistinguishable entries, and a report showing
+  // "Thabo: Group A" / "Thabo: Group C" gives the teacher no way to tell
+  // which physical learner is which. We can't fix the ambiguity itself
+  // (there's no learner ID in this input format), but the teacher should
+  // at least be told so they can resubmit with surnames/initials.
+  if (result && Array.isArray(result.learners) && result.learners.length > 0) {
+    const nameCounts = {};
+    for (const learner of result.learners) {
+      const key = (learner.learnerName || '').trim().toLowerCase();
+      if (!key) continue;
+      nameCounts[key] = (nameCounts[key] || 0) + 1;
+    }
+    const duplicates = Object.entries(nameCounts).filter(([, count]) => count > 1).map(([name]) => name);
+    if (duplicates.length > 0) {
+      result.warnings.push(
+        `Duplicate learner name(s) found: ${duplicates.join(', ')}. Reports won't be able to tell these learners apart — consider resubmitting with a surname or initial (e.g. "Thabo M").`
+      );
+    }
   }
 
-  return parseTextFormat(text);
+  return result;
 }
 
 /**

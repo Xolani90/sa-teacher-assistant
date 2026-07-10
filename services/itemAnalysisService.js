@@ -147,9 +147,14 @@ function performItemAnalysis(assessmentId) {
     else if (facilityValue > 0.2) difficultyCategory = 'difficult';
     else difficultyCategory = 'very_difficult';
 
-    // Determine item quality
+    // Determine item quality. Small classes (< 10 learners — common for
+    // intervention re-assessments) can't produce a meaningful discrimination
+    // index; calculateDiscriminationIndex returns exactly 0 for those, which
+    // is a "not enough data" signal, not "this question doesn't discriminate."
+    // Treat that case separately so it isn't reported as a quality problem.
     let itemQuality;
-    if (discriminationIndex > 0.3) itemQuality = 'excellent';
+    if (learnerCount < 10) itemQuality = 'insufficient_data';
+    else if (discriminationIndex > 0.3) itemQuality = 'excellent';
     else if (discriminationIndex > 0.2) itemQuality = 'good';
     else if (discriminationIndex > 0.1) itemQuality = 'acceptable';
     else if (discriminationIndex > 0) itemQuality = 'poor';
@@ -170,6 +175,16 @@ function performItemAnalysis(assessmentId) {
 
   // Sort by question number
   analysisResults.sort((a, b) => a.questionNumber - b.questionNumber);
+
+  // If every submitted result only had a total mark (no per-question breakdown —
+  // a documented, valid input path in marksParser.js), analysisResults will be
+  // empty here. Return an explicit "no data" result instead of letting the
+  // averages below divide by zero and silently produce NaN in the summary text.
+  if (analysisResults.length === 0) {
+    return {
+      error: 'No per-question marks were found for this assessment — item analysis needs Q1/Q2/... breakdowns, not just a total. Ask the teacher to resubmit marks in per-question format.',
+    };
+  }
 
   // Calculate class-level statistics
   const averageFacilityValue = analysisResults.reduce((sum, q) => sum + q.facilityValue, 0) / analysisResults.length;
@@ -197,6 +212,7 @@ function generateItemAnalysisSummary(questions) {
   const difficultQuestions = questions.filter(q => q.difficultyCategory === 'difficult' || q.difficultyCategory === 'very_difficult').length;
   const excellentItems = questions.filter(q => q.itemQuality === 'excellent' || q.itemQuality === 'good').length;
   const poorItems = questions.filter(q => q.itemQuality === 'poor' || q.itemQuality === 'needs_revision').length;
+  const insufficientDataItems = questions.filter(q => q.itemQuality === 'insufficient_data').length;
 
   let summary = `*Item Analysis Summary*\n\n`;
   summary += `Total Questions: ${questions.length}\n\n`;
@@ -206,8 +222,15 @@ function generateItemAnalysisSummary(questions) {
   summary += `• Difficult: ${difficultQuestions} (${Math.round(difficultQuestions / questions.length * 100)}%)\n\n`;
   summary += `*Item Quality:*\n`;
   summary += `• Good/Excellent: ${excellentItems} (${Math.round(excellentItems / questions.length * 100)}%)\n`;
-  summary += `• Poor/Needs Revision: ${poorItems} (${Math.round(poorItems / questions.length * 100)}%)\n\n`;
+  summary += `• Poor/Needs Revision: ${poorItems} (${Math.round(poorItems / questions.length * 100)}%)\n`;
+  if (insufficientDataItems > 0) {
+    summary += `• Not enough data to assess: ${insufficientDataItems} (${Math.round(insufficientDataItems / questions.length * 100)}%)\n`;
+  }
+  summary += `\n`;
 
+  if (insufficientDataItems > 0) {
+    summary += `ℹ️ *Note:* Discrimination can't be calculated reliably below 10 learners — ${insufficientDataItems} question(s) are shown as "not enough data" rather than scored, so a small class isn't mistaken for bad question quality.\n\n`;
+  }
   if (poorItems > 0) {
     summary += `⚠️ *Note:* ${poorItems} question(s) may need revision due to poor discrimination.\n\n`;
   }

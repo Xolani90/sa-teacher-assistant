@@ -374,6 +374,33 @@ function runMigrations() {
       ON payment_ledger(phone_hash);
   `);
 
+  // Migration 020: indexes on the core learner-analytics pipeline tables.
+  // Every one of these is queried by assessment_id or phone_hash in
+  // itemAnalysisService, errorAnalysisService, learnerGroupingService,
+  // diagnosticWorkflowService, interventionReportsService, and
+  // curriculumCoverageService — but had zero index coverage, unlike every
+  // other table in this schema (usage_events, sessions, classes,
+  // saved_resources, reports, payment_ledger all have theirs). At small
+  // scale this doesn't show up; as assessment history grows across
+  // teachers and terms, these become full table scans on the app's hottest
+  // read path. CREATE INDEX IF NOT EXISTS is idempotent and safe to re-run.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_assessments_phone
+      ON assessments(phone_hash);
+    CREATE INDEX IF NOT EXISTS idx_learner_results_assessment
+      ON learner_results(assessment_id);
+    CREATE INDEX IF NOT EXISTS idx_item_analysis_assessment
+      ON item_analysis(assessment_id);
+    CREATE INDEX IF NOT EXISTS idx_error_analysis_assessment
+      ON error_analysis(assessment_id);
+    CREATE INDEX IF NOT EXISTS idx_intervention_plans_phone
+      ON intervention_plans(phone_hash);
+    CREATE INDEX IF NOT EXISTS idx_intervention_plans_assessment
+      ON intervention_plans(assessment_id);
+    CREATE INDEX IF NOT EXISTS idx_curriculum_coverage_phone
+      ON curriculum_coverage(phone_hash);
+  `);
+
   for (const sql of alterations) {
     try {
       db.exec(sql);

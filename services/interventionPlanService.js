@@ -148,31 +148,49 @@ function generateTeachingStrategies(problemAreas, targetGroups) {
     ],
   });
 
-  // Small group intervention
+  // Integrated classroom intervention — folded into normal lesson time rather
+  // than relying on extra pull-out sessions a teacher rarely has time for.
   if (targetGroups.length > 0) {
     strategies.push({
-      name: 'Small Group Intervention',
-      description: 'Focused small-group sessions for learners needing additional support',
+      name: 'Integrated Classroom Intervention (I Do -> We Do -> You Do)',
+      description: 'Intervention built into normal lesson time, not a separate pull-out session',
       actions: [
-        'Schedule 20-minute small group sessions 2-3 times per week',
-        'Focus on specific skill gaps identified in error analysis',
-        'Use hands-on activities and manipulatives',
-        'Provide immediate feedback and correction',
+        'I Do: Teach the concept to the whole class as normal',
+        'We Do: Guided practice with the whole class, checking for understanding before releasing learners',
+        'You Do: During independent practice, the teacher moves directly to the intervention group for targeted, in-the-moment support while the rest of the class works independently',
+        'Repeat this structure across normal lessons rather than scheduling separate sessions — intervention becomes part of how the topic is taught, not an add-on',
       ],
     });
   }
 
-  // Peer tutoring
+  // Peer tutoring, with an explicit briefing so tutors know how to support
+  // without doing the work for their peer.
   strategies.push({
     name: 'Peer Tutoring',
-    description: 'Utilize high-achieving learners to support peers',
+    description: 'Utilize high-achieving learners to support peers, with a short briefing so tutoring is guided rather than answer-giving',
     actions: [
       'Pair Group A learners with Group C/D learners',
-      'Provide structured tutoring activities',
-      'Train peer tutors on effective tutoring strategies',
-      'Monitor and support peer tutoring sessions',
+      'Peer Tutor Briefing (5 minutes before first session): tutors ask guiding questions, they do not give answers. Practice phrases: "What is the first step?", "Show me how you started.", "Why did you choose that method?", "Does your answer make sense?"',
+      'Give tutors a short checklist of the guiding questions to refer to during the session',
+      'Monitor and support peer tutoring sessions; step in if a tutor starts answering instead of guiding',
     ],
   });
+
+  // What the rest of the class does while the teacher is focused on the
+  // intervention group during the "You Do" phase — without this, the
+  // integrated model above isn't actually workable in a real classroom.
+  if (targetGroups.length > 0) {
+    strategies.push({
+      name: 'Independent Learning and Fast Finishers',
+      description: 'Keeps the rest of the class meaningfully occupied for 20-25 minutes while the teacher works with the intervention group',
+      actions: [
+        'Consolidation tasks: practice questions on the current topic at grade level',
+        'Correction stations: learners mark and correct their own recent work against a model answer',
+        'Extension activities and challenge questions for learners who finish early',
+        'Self-check activities (answer sheets or QR-linked memos) so learners can verify their own progress without the teacher',
+      ],
+    });
+  }
 
   // Reteaching strategies for problem areas
   for (const area of problemAreas) {
@@ -277,9 +295,9 @@ function generateResources(problemAreas) {
   }
 
   resources += `\n**Time:**\n`;
-  resources += `• 2-3 small group sessions per week\n`;
-  resources += `• 15-20 minutes per session\n`;
-  resources += `• Additional practice time as needed\n`;
+  resources += `• No extra timetable slots needed — intervention runs inside normal lessons during independent practice ("You Do" time)\n`;
+  resources += `• Independent/self-check materials ready for the rest of the class so the teacher is genuinely free to work with the intervention group\n`;
+  resources += `• Additional practice time outside class as needed for learners who need more than in-lesson support\n`;
 
   return resources;
 }
