@@ -254,6 +254,17 @@ function runMigrations() {
     // This migration converts existing data to match the new format.
     // Idempotent: only affects rows matching the 'Grade N' pattern.
     `UPDATE teachers SET grade = CAST(SUBSTR(grade, 7) AS INTEGER) WHERE grade LIKE 'Grade %'`,
+
+    // Migration 021: Fix "N.0" grade values.
+    // better-sqlite3 binds a raw JS integer to the TEXT `grade` column via
+    // its float string form (e.g. 7 -> "7.0"), not "7". This has been
+    // silently corrupting the column since parseGradeInput started
+    // returning an integer (see migration 019). updateTeacherProfile now
+    // stringifies grade before binding, so this migration is a one-time
+    // cleanup of rows already written with the "N.0" pattern. Idempotent.
+    // (Numbered 021, not 020 — 020 is already used by the learner-analytics
+    // index migration below.)
+    `UPDATE teachers SET grade = CAST(CAST(grade AS REAL) AS INTEGER) WHERE grade LIKE '%.0'`,
   ];
 
   // Migration 008: persistent multi-turn session store

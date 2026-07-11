@@ -272,7 +272,18 @@ function updateTeacherProfile(phoneNumber, fields) {
   for (const key of allowed) {
     if (fields[key] !== undefined) {
       updates.push(`${key} = ?`);
-      values.push(fields[key]);
+      // ROOT CAUSE FIX: `grade` is a TEXT column, but parseGradeInput() and
+      // other callers pass a raw JS integer (e.g. 7). better-sqlite3 binds
+      // a JS number to a TEXT column by coercing it through its string
+      // representation *as a float*, which for an integer produces "7.0"
+      // rather than "7" (confirmed empirically). That "7.0" then leaks into
+      // every PDF header/footer/filename downstream. Explicitly stringify
+      // integer-like values here so TEXT columns always get a clean string.
+      let value = fields[key];
+      if (key === 'grade' && typeof value === 'number' && Number.isInteger(value)) {
+        value = String(value);
+      }
+      values.push(value);
     }
   }
 
