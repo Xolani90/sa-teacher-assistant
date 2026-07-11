@@ -768,34 +768,33 @@ function renderFormattedText(doc, text, margin = 50) {
  *   available width is reduced by (startX - margin) to keep wrapping correct.
  */
 function renderInlineBold(doc, line, margin, width, startX = margin) {
-  const parts = line.split(/(\*[^*]+\*)/);
-  // Find the index of the last non-empty part so `continued` is false only on
-  // the actual final visible segment. Using `parts.length - 1` is wrong when
-  // there are trailing empty strings (common when the line ends with a *bold*
-  // segment), because the empty part gets skipped but the prior part still has
-  // `continued: false` applied — except the empty parts after it would not be
-  // the last segment rendered, leaving PDFKit in a "continued text" state that
-  // bleeds into the next doc.text() call on the page.
-  const lastNonEmpty = parts.reduce((last, p, i) => (p ? i : last), -1);
-  let x = startX;
-  const y = doc.y;
+  const parts = line.split(/(\*[^*]+\*)/).filter((p) => p !== '');
+  const availWidth = width - (startX - margin);
 
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    if (!part) continue;
+  parts.forEach((part, i) => {
+    const isLast = i === parts.length - 1;
+    const isBold = /^\*[^*]+\*$/.test(part);
+    const text = isBold ? part.replace(/\*/g, '') : part;
+    const font = isBold ? FONTS.heading : FONTS.body;
 
-    const isLast = i === lastNonEmpty;
-
-    if (/^\*[^*]+\*$/.test(part)) {
-      // Bold segment
-      doc.font(FONTS.heading).fontSize(10).fillColor(COLORS.darkText)
-         .text(part.replace(/\*/g, ''), x, y, { continued: !isLast, width: width - (x - margin) });
+    if (i === 0) {
+      // Only the FIRST segment gets explicit position + width — this establishes
+      // the wrap box for the whole continued-text chain.
+      doc.font(font).fontSize(10).fillColor(COLORS.darkText)
+         .text(text, startX, doc.y, { continued: !isLast, width: availWidth });
     } else {
-      doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText)
-         .text(part, x, y, { continued: !isLast, width: width - (x - margin) });
+      // Every subsequent segment must NOT repass x/y/width. Doing so (as the
+      // old code did, pinning y to the line's original start and resetting
+      // width on every call) fights PDFKit's own continued-text cursor —
+      // once any one segment was long enough to wrap onto a second line by
+      // itself, the next segment got drawn back at the stale (x=null, y=old)
+      // position instead of after the wrap, scrambling word order in the
+      // rendered PDF (e.g. a long *bold* CAPS reference span followed by
+      // trailing text landing before it instead of after).
+      doc.font(font).fontSize(10).fillColor(COLORS.darkText)
+         .text(text, { continued: !isLast });
     }
-    x = null; // Let PDFKit continue from current position after first segment
-  }
+  });
 
   doc.y += 4;
 }
