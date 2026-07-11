@@ -76,10 +76,56 @@ const UNICODE_SANITISE_MAP = {
   // as a plain "X" since that's an unambiguous, meaningful substitution.
   '✓': '', '✔': '', '✗': 'X', '✘': 'X',
   '•': '-', '–': '-', '—': '-', '’': "'", '‘': "'", '“': '"', '”': '"', '…': '...',
+  // Fallback entries: if convertUnicodeFractions() below doesn't catch a
+  // fraction sequence (e.g. malformed input, or a lone subscript digit with
+  // no matching superscript/slash), these prevent silent deletion. Without
+  // them, the blanket [^\x00-\xFF] strip at the end of sanitiseForPdf()
+  // would just delete these characters outright — which is the root cause
+  // of denominators vanishing (e.g. "¹²⁄₁₈" -> "^1^2^1^8" with "18" gone).
+  '⁄': '/',
+  '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4',
+  '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9',
 };
+
+// Unicode superscript/subscript digit -> plain digit lookup tables, used by
+// convertUnicodeFractions() to reconstruct whole fraction sequences.
+const SUPERSCRIPT_DIGITS = { '⁰': '0', '¹': '1', '²': '2', '³': '3', '⁴': '4', '⁵': '5', '⁶': '6', '⁷': '7', '⁸': '8', '⁹': '9' };
+const SUBSCRIPT_DIGITS   = { '₀': '0', '₁': '1', '₂': '2', '₃': '3', '₄': '4', '₅': '5', '₆': '6', '₇': '7', '₈': '8', '₉': '9' };
+const SUPER_CHARS = Object.keys(SUPERSCRIPT_DIGITS).join('');
+const SUB_CHARS   = Object.keys(SUBSCRIPT_DIGITS).join('');
+
+// Matches an optional whole-number lead-in (no space, e.g. the "2" in
+// "2³⁄₄") directly followed by a superscript numerator, the Unicode
+// fraction slash (U+2044), and a denominator in either subscript or plain
+// ASCII digits (the AI model isn't perfectly consistent about which it
+// emits for the denominator, so both are accepted).
+const UNICODE_FRACTION_RE = new RegExp(`(\\d+)?([${SUPER_CHARS}]+)\u2044([${SUB_CHARS}0-9]+)`, 'g');
+
+/**
+ * Converts whole Unicode fraction sequences (e.g. "¹²⁄₁₈", "2³⁄₄") into
+ * plain-ASCII form ("12/18", "2 3/4") BEFORE the character-by-character
+ * UNICODE_SANITISE_MAP runs.
+ *
+ * This matters because that per-character map treats every superscript
+ * digit as a standalone exponent (² -> "^2"), which is correct for a real
+ * exponent like "5²" but wrong for a fraction numerator: "¹²⁄₁₈" would
+ * otherwise become "^1^2^1^8" with the fraction slash and denominator
+ * silently deleted by the blanket [^\x00-\xFF] strip — real data loss on a
+ * maths paper, not just a cosmetic glitch. Running this first means a
+ * genuine standalone exponent (no fraction slash following it) is left
+ * alone and still gets the correct "^N" treatment afterward.
+ */
+function convertUnicodeFractions(input) {
+  return input.replace(UNICODE_FRACTION_RE, (match, whole, superNum, denom) => {
+    const num = superNum.split('').map((c) => SUPERSCRIPT_DIGITS[c] || c).join('');
+    const den = denom.split('').map((c) => SUBSCRIPT_DIGITS[c] || c).join('');
+    return whole ? `${whole} ${num}/${den}` : `${num}/${den}`;
+  });
+}
+
 function sanitiseForPdf(input) {
   if (typeof input !== 'string') return input;
-  let out = input;
+  let out = convertUnicodeFractions(input);
   for (const [bad, good] of Object.entries(UNICODE_SANITISE_MAP)) {
     if (out.indexOf(bad) !== -1) out = out.split(bad).join(good);
   }
