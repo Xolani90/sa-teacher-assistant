@@ -22,12 +22,16 @@ function verifyWebhookSignature(req, res, buf) {
 
   if (!signature) {
     console.warn('[SECURITY] Webhook POST missing X-Hub-Signature-256 — rejected');
-    throw new Error('Missing webhook signature');
+    const err = new Error('Missing webhook signature');
+    err.statusCode = 403;
+    throw err;
   }
 
   if (!process.env.META_APP_SECRET) {
     console.error('[SECURITY] META_APP_SECRET is not set — cannot verify webhook signature');
-    throw new Error('META_APP_SECRET not configured');
+    const err = new Error('META_APP_SECRET not configured');
+    err.statusCode = 500;
+    throw err;
   }
 
   const expected = 'sha256=' + crypto
@@ -38,7 +42,9 @@ function verifyWebhookSignature(req, res, buf) {
   // Both must be same length for timingSafeEqual
   if (signature.length !== expected.length) {
     console.warn('[SECURITY] Webhook signature length mismatch — rejected');
-    throw new Error('Invalid webhook signature');
+    const err = new Error('Invalid webhook signature');
+    err.statusCode = 403;
+    throw err;
   }
 
   const sigBuf = Buffer.from(signature);
@@ -46,7 +52,9 @@ function verifyWebhookSignature(req, res, buf) {
 
   if (!crypto.timingSafeEqual(sigBuf, expBuf)) {
     console.warn('[SECURITY] Webhook signature mismatch — rejected');
-    throw new Error('Invalid webhook signature');
+    const err = new Error('Invalid webhook signature');
+    err.statusCode = 403;
+    throw err;
   }
 }
 

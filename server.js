@@ -399,7 +399,10 @@ app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, _req, res, _next) => {
   console.error('[ERROR]', err.message);
   if (Sentry) Sentry.captureException(err);
-  res.status(500).json({ error: 'Internal server error' });
+  if (res.headersSent) return; // avoid double-send if a response already went out
+  const statusCode = err.statusCode || 500;
+  const message = statusCode < 500 ? err.message : 'Internal server error';
+  res.status(statusCode).json({ error: message });
 });
 
 // ── PDF cleanup scheduler (hourly) ────────────────────────────────────────
