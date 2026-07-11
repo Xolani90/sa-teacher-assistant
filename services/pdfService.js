@@ -62,8 +62,19 @@ const UNICODE_SANITISE_MAP = {
   '⅙': '1/6', '⅚': '5/6', '⅛': '1/8', '⅜': '3/8', '⅝': '5/8', '⅞': '7/8',
   '⁰': '^0', '¹': '^1', '²': '^2', '³': '^3', '⁴': '^4', '⁵': '^5',
   '⁶': '^6', '⁷': '^7', '⁸': '^8', '⁹': '^9',
+  // U+2212 (true mathematical minus sign) is distinct from the ASCII hyphen
+  // and from the en/em dashes below — it was previously MISSING from this
+  // map entirely, so it fell through to the blanket [^\x00-\xFF] strip and
+  // was silently deleted, producing "5/6 1/3" instead of "5/6 - 1/3".
+  '−': '-',
   '√': 'sqrt', '×': 'x', '÷': '/', '≈': '~=', '≠': '!=', '≤': '<=', '≥': '>=',
-  '✓': "'", '✔': "'", '✗': 'X', '✘': 'X',
+  // Marking-memo ticks/crosses: previously ✓/✔ were mapped to a bare "'"
+  // character, which reads as a stray apostrophe in running text (e.g.
+  // "Proper fraction ' (1)"). Marks are already conveyed by the trailing
+  // "(1)"/"(2)" allocation, so the tick itself is decorative — dropping it
+  // is clearer than rendering a misleading punctuation mark. Crosses stay
+  // as a plain "X" since that's an unambiguous, meaningful substitution.
+  '✓': '', '✔': '', '✗': 'X', '✘': 'X',
   '•': '-', '–': '-', '—': '-', '’': "'", '‘': "'", '“': '"', '”': '"', '…': '...',
 };
 function sanitiseForPdf(input) {
@@ -287,31 +298,115 @@ function drawFooter(doc, schoolName) {
  * @param {number} bodyWidth
  * @param {number} rowHeight
  */
-function drawTableHeaderRow(doc, cells, margin, bodyWidth, rowHeight) {
+/**
+ * Computes the row height needed to fit the tallest cell in a table row
+ * WITHOUT truncating any content — this is what makes table wrapping
+ * possible instead of the previous fixed-height + ellipsis approach, which
+ * hard-truncated any cell content that didn't fit on one line (e.g.
+ * "Properties…", "Investigation/Assignment 1 (50…").
+ *
+ * @param {PDFDocument} doc
+ * @param {string[]} cells
+ * @param {number} colWidth
+ * @param {number} minHeight - Floor height (e.g. single-line row height)
+ * @returns {number}
+ */
+function computeRowHeight(doc, cells, colWidthOrWidths, minHeight) {
+  let maxH = minHeight;
+  cells.forEach((cell, i) => {
+    const w = Array.isArray(colWidthOrWidths) ? colWidthOrWidths[i] : colWidthOrWidths;
+    const h = doc.heightOfString(cell || '', { width: w - 8 }) + 8;
+    if (h > maxH) maxH = h;
+  });
+  return maxH;
+}
+
+// Normalises a colWidths argument into an array of per-column widths.
+// Accepts either a single number (equal-width columns, divided from
+// bodyWidth) or an array of explicit per-column widths (variable-width
+// columns, e.g. the Report Summary table's [Learner, Mark, Comment]).
+function resolveColWidthsArray(colWidths, colCount, bodyWidth) {
+  if (Array.isArray(colWidths)) return colWidths;
+  const w = bodyWidth / colCount;
+  return new Array(colCount).fill(w);
+}
+
+function drawTableHeaderRow(doc, cells, margin, bodyWidthOrWidths, rowHeight) {
   const colCount = cells.length;
-  const colWidth = bodyWidth / colCount;
+  const widths = Array.isArray(bodyWidthOrWidths)
+    ? bodyWidthOrWidths
+    : resolveColWidthsArray(bodyWidthOrWidths, colCount, bodyWidthOrWidths);
+  const bodyWidth = widths.reduce((a, b) => a + b, 0);
   const rowY = doc.y;
 
   doc.rect(margin, rowY, bodyWidth, rowHeight).fill(COLORS.primary);
 
+  let x = margin;
   cells.forEach((cell, i) => {
     doc.font(FONTS.heading)
        .fontSize(9)
        .fillColor(COLORS.white)
-       .text(cell, margin + i * colWidth + 4, rowY + 4, {
-         width: colWidth - 8,
-         height: rowHeight - 4,
-         ellipsis: true,
+       .text(cell, x + 4, rowY + 4, {
+         width: widths[i] - 8,
+         // No fixed `height` / `ellipsis` here — the row height passed in
+         // is already computed (via computeRowHeight) to fit the tallest
+         // cell's wrapped content, so text wraps naturally instead of
+         // being cut off with "…".
        });
+    x += widths[i];
   });
 
   doc.strokeColor(COLORS.border).lineWidth(0.5);
+  x = margin;
   for (let i = 1; i < colCount; i++) {
-    doc.moveTo(margin + i * colWidth, rowY).lineTo(margin + i * colWidth, rowY + rowHeight).stroke();
+    x += widths[i - 1];
+    doc.moveTo(x, rowY).lineTo(x, rowY + rowHeight).stroke();
   }
   doc.rect(margin, rowY, bodyWidth, rowHeight).stroke();
 
   doc.y = rowY + rowHeight + 1;
+}
+
+// Draws one data row of a table with variable (or equal) column widths,
+// wrapping content instead of truncating it. Used by both the pipe-table
+// renderer and the Report Summary table so there is exactly one table
+// data-row implementation in the codebase.
+function drawTableDataRow(doc, cells, margin, colWidthsOrWidth, rowHeight, options = {}) {
+  const widths = Array.isArray(colWidthsOrWidth)
+    ? colWidthsOrWidth
+    : resolveColWidthsArray(colWidthsOrWidth, cells.length, colWidthsOrWidth);
+  const rowY = doc.y;
+  const bodyWidth = widths.reduce((a, b) => a + b, 0);
+
+  if (options.striped) {
+    doc.rect(margin, rowY, bodyWidth, rowHeight).fill(COLORS.lightGray);
+  }
+
+  let x = margin;
+  doc.font(FONTS.body).fontSize(9).fillColor(COLORS.darkText);
+  cells.forEach((cell, i) => {
+    doc.text(cell || '', x + 4, rowY + 4, { width: widths[i] - 8 });
+    x += widths[i];
+  });
+
+  doc.strokeColor(COLORS.border).lineWidth(0.5);
+  x = margin;
+  for (let i = 1; i < cells.length; i++) {
+    x += widths[i - 1];
+    doc.moveTo(x, rowY).lineTo(x, rowY + rowHeight).stroke();
+  }
+  doc.rect(margin, rowY, bodyWidth, rowHeight).stroke();
+
+  doc.y = rowY + rowHeight + 1;
+}
+
+// Formats a mark for display, e.g. "78/100" or "45%". Guards against
+// undefined/null `mark` — previously this fell through to a bare template
+// literal (`${c.mark}%`) which rendered the literal string "undefined%"
+// whenever a comment had no mark recorded.
+function formatMarkStr(c) {
+  if (c.mark === undefined || c.mark === null || c.mark === '') return '—';
+  return c.outOf ? `${c.mark}/${c.outOf}` : `${c.mark}%`;
 }
 
 // ── Text parser: convert WhatsApp-formatted AI output to PDF elements ──────
@@ -338,7 +433,15 @@ function renderFormattedText(doc, text, margin = 50) {
   doc._atpRowCount = 0;
 
   for (const raw of lines) {
-    const line = raw.trim();
+    let line = raw.trim();
+
+    // Normalise markdown **bold** to the *bold* style the rest of this
+    // parser is written for. The AI is instructed to use single-asterisk
+    // *bold* (WhatsApp style), but models sometimes drift back to standard
+    // markdown double-asterisks — without this, "**text**" printed
+    // literally instead of being bolded (asterisks and all), since none of
+    // the single-asterisk regexes below matched it.
+    line = line.replace(/\*\*/g, '*');
 
     // Skip header lines — already rendered in drawHeader
     if (line.startsWith('*WORKSHEET:') || line.startsWith('*LESSON PLAN:') ||
@@ -366,8 +469,31 @@ function renderFormattedText(doc, text, margin = 50) {
       continue;
     }
 
-    // Section dividers (═══ or ---)
-    if (/^[═=─-]{4,}$/.test(line)) {
+    // Markdown ATX headers (#, ##, ###...) — like the ** normalisation
+    // above, this is defensive handling for when the AI drifts to standard
+    // markdown instead of the *bold* style it's instructed to use. Without
+    // this, headers printed literally with their leading "#" characters
+    // (e.g. "# ANNUAL TEACHING PLAN 2026", "## TERM 1 (Weeks 1-10)").
+    const atxMatch = line.match(/^(#{1,6})\s+(.*)$/);
+    if (atxMatch) {
+      const headingText = atxMatch[2].replace(/\*/g, '').trim();
+      const level = atxMatch[1].length;
+      if (level === 1) {
+        // Top-level "# Document Title" duplicates what drawHeader already
+        // renders in the page header bar — skip it, same as the *WORKSHEET:/
+        // *MEMORANDUM skip logic above for the WhatsApp-style equivalent.
+        continue;
+      }
+      drawSectionHeading(doc, headingText);
+      continue;
+    }
+
+    // Section dividers (═══ or ---). Threshold is 3, not 4 — a standard
+    // markdown horizontal rule is exactly "---" (3 characters). At 4+ this
+    // branch was never reached for real markdown dividers: "---" instead
+    // fell through to the bullet-point check below (which only strips a
+    // single leading "-"), rendering as a stray "• --" bullet.
+    if (/^[═=─-]{3,}$/.test(line)) {
       ensureSpace(doc, 16);
       doc.y += 4;
       doc.moveTo(margin, doc.y).lineTo(doc.page.width - margin, doc.y).stroke(COLORS.border);
@@ -389,7 +515,13 @@ function renderFormattedText(doc, text, margin = 50) {
       if (/^\|[\s\-:]+(\|[\s\-:]+)+\|$/.test(line)) {
         continue;
       }
-      const cells = line.split('|').slice(1, -1).map(c => c.trim());
+      // Strip markdown bold markers (*text* or the already-normalised form
+      // of **text**) from cell content. Table cells are drawn with a single
+      // doc.text() call per cell, so mixed bold/normal runs aren't rendered
+      // as true bold — but leaving the asterisks in was worse: they printed
+      // literally (e.g. "**Whole Numbers:**"), which is the actual bug seen
+      // in production ATP/moderation-pack tables.
+      const cells = line.split('|').slice(1, -1).map(c => c.trim().replace(/\*/g, ''));
       const colCount = cells.length;
       if (colCount > 0) {
         const colWidth = bodyWidth / colCount;
@@ -401,20 +533,33 @@ function renderFormattedText(doc, text, margin = 50) {
           doc._atpTableHeaderCells = cells;
           doc._atpRowCount = 0;
 
+          doc.font(FONTS.heading).fontSize(9);
+          const headerRowHeight = computeRowHeight(doc, cells, colWidth, ROW_HEIGHT);
+
           // Ensure room for header row + at least one data row
-          ensureSpace(doc, ROW_HEIGHT * 2);
-          drawTableHeaderRow(doc, cells, margin, bodyWidth, ROW_HEIGHT);
+          ensureSpace(doc, headerRowHeight + ROW_HEIGHT);
+          drawTableHeaderRow(doc, cells, margin, bodyWidth, headerRowHeight);
           continue;
         }
 
-        // Data row — check if it fits; if not, start new page and repeat header
-        ensureSpace(doc, ROW_HEIGHT + 2);
+        // Data row — compute the height needed to fit this row's content
+        // WITHOUT truncating (this is the fix for cells like "Properties…"
+        // being cut off: previously every row used a fixed ROW_HEIGHT=18
+        // with ellipsis:true, which hard-truncated anything that didn't
+        // fit on one line).
+        doc.font(FONTS.body).fontSize(9);
+        const rowHeight = computeRowHeight(doc, cells, colWidth, ROW_HEIGHT);
+
+        // Check if it fits; if not, start new page and repeat header
+        ensureSpace(doc, rowHeight + 2);
 
         // If ensureSpace triggered a page break, doc.y is now at top-of-content.
         // Repeat the table header on the new page so the table is self-contained.
         if (doc._atpTableHeaderCells && doc.y < 130) {
           // doc.y < 130 means we just came from a fresh page (header sets y=100)
-          drawTableHeaderRow(doc, doc._atpTableHeaderCells, margin, bodyWidth, ROW_HEIGHT);
+          doc.font(FONTS.heading).fontSize(9);
+          const repeatHeaderHeight = computeRowHeight(doc, doc._atpTableHeaderCells, colWidth, ROW_HEIGHT);
+          drawTableHeaderRow(doc, doc._atpTableHeaderCells, margin, bodyWidth, repeatHeaderHeight);
           doc._atpRowCount = 0; // restart stripe pattern after repeated header
         }
 
@@ -422,29 +567,27 @@ function renderFormattedText(doc, text, margin = 50) {
         const rowBg = (doc._atpRowCount % 2 === 0) ? COLORS.lightGray : COLORS.white;
 
         // Row background
-        doc.rect(margin, rowY, bodyWidth, ROW_HEIGHT).fill(rowBg);
+        doc.rect(margin, rowY, bodyWidth, rowHeight).fill(rowBg);
         doc._atpRowCount++;
 
-        // Cell text
+        // Cell text — no fixed `height`/`ellipsis`; wraps within rowHeight
         cells.forEach((cell, i) => {
           doc.font(FONTS.body)
              .fontSize(9)
              .fillColor(COLORS.darkText)
              .text(cell, margin + i * colWidth + 4, rowY + 4, {
                width: colWidth - 8,
-               height: ROW_HEIGHT - 4,
-               ellipsis: true,
              });
         });
 
         // Cell dividers
         doc.strokeColor(COLORS.border).lineWidth(0.5);
         for (let i = 1; i < colCount; i++) {
-          doc.moveTo(margin + i * colWidth, rowY).lineTo(margin + i * colWidth, rowY + ROW_HEIGHT).stroke();
+          doc.moveTo(margin + i * colWidth, rowY).lineTo(margin + i * colWidth, rowY + rowHeight).stroke();
         }
-        doc.rect(margin, rowY, bodyWidth, ROW_HEIGHT).stroke();
+        doc.rect(margin, rowY, bodyWidth, rowHeight).stroke();
 
-        doc.y = rowY + ROW_HEIGHT + 1;
+        doc.y = rowY + rowHeight + 1;
         continue;
       }
     }
@@ -852,29 +995,42 @@ async function generateReportSummaryPdf(comments, metadata = {}) {
   doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text('Summary Table', { underline: true });
   doc.moveDown(0.5);
 
-  const tableTop = doc.y;
   const tableLeft = 50;
-  const colWidths = [120, 60, 335]; // Learner, Mark, Comment excerpt
-  const rowHeight = 22;
+  const bodyWidth = doc.page.width - tableLeft * 2; // 495.28pt on A4 — the
+  // old fixed widths [120, 60, 335] summed to 515pt, 20pt WIDER than this,
+  // so the Comment column ran past the right margin. Widths below are
+  // proportional to the old ratio (~24% / 12% / 64%) but scaled to fit
+  // exactly within the printable body width.
+  const colWidths = [
+    Math.round(bodyWidth * 0.24),
+    Math.round(bodyWidth * 0.12),
+    0, // filled in below — absorbs rounding so the row is pixel-exact
+  ];
+  colWidths[2] = bodyWidth - colWidths[0] - colWidths[1];
 
-  // Table header
-  doc.font(FONTS.heading).fontSize(10).fillColor(COLORS.darkText);
-  ['Learner', 'Mark', 'Comment (excerpt)'].forEach((h, i) => {
-    doc.text(h, tableLeft + colWidths.slice(0, i).reduce((a, b) => a + b, 0), tableTop);
-  });
+  const HEADER_ROW_HEIGHT = 20;
+  const MIN_ROW_HEIGHT = 20;
 
-  // Table rows — with pagination guard
-  doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText);
+  ensureSpace(doc, HEADER_ROW_HEIGHT + MIN_ROW_HEIGHT);
+  drawTableHeaderRow(doc, ['Learner', 'Mark', 'Comment (excerpt)'], tableLeft, colWidths, HEADER_ROW_HEIGHT);
+
+  // Table rows — dynamic height so wrapped learner names / excerpts never
+  // overlap the next row (previously a fixed 22pt row height truncated
+  // nothing but also didn't grow, so any 2-line cell bled into the row below).
   comments.forEach((c, i) => {
-    ensureSpace(doc, rowHeight + 4);
-    const y = doc.y;
-    const markStr = c.outOf ? `${c.mark}/${c.outOf}` : `${c.mark}%`;
-    const excerpt = (c.comment || '').substring(0, 60) + (c.comment && c.comment.length > 60 ? '…' : '');
+    const markStr = formatMarkStr(c);
+    const excerpt = (c.comment || '').substring(0, 80) + (c.comment && c.comment.length > 80 ? '…' : '');
+    const cells = [c.learnerName || '—', markStr, excerpt];
 
-    doc.text(c.learnerName || '', tableLeft, y, { width: colWidths[0], ellipsis: true });
-    doc.text(markStr, tableLeft + colWidths[0], y, { width: colWidths[1] });
-    doc.text(excerpt, tableLeft + colWidths[0] + colWidths[1], y, { width: colWidths[2], ellipsis: true });
-    doc.y = y + rowHeight;
+    const rowHeight = computeRowHeight(doc, cells, colWidths, MIN_ROW_HEIGHT);
+    const yBefore = doc.y;
+    ensureSpace(doc, rowHeight);
+    if (doc.y !== yBefore) {
+      // ensureSpace triggered a page break (doc.y reset to top margin) —
+      // repeat the header row so the continuation isn't headerless.
+      drawTableHeaderRow(doc, ['Learner', 'Mark', 'Comment (excerpt)'], tableLeft, colWidths, HEADER_ROW_HEIGHT);
+    }
+    drawTableDataRow(doc, cells, tableLeft, colWidths, rowHeight, { striped: i % 2 === 1 });
   });
 
   doc.moveDown(2);
@@ -888,7 +1044,7 @@ async function generateReportSummaryPdf(comments, metadata = {}) {
       doc.addPage();
     }
 
-    const markStr = c.outOf ? `${c.mark}/${c.outOf}` : `${c.mark}%`;
+    const markStr = formatMarkStr(c);
 
     doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text(`Learner: ${c.learnerName || ''}`);
     doc.font(FONTS.body).fontSize(11).fillColor(COLORS.darkText).text(`Mark: ${markStr}`);
@@ -911,4 +1067,4 @@ async function generateReportSummaryPdf(comments, metadata = {}) {
   });
 }
 
-module.exports = { generatePdf, getPdfPath, cleanupOldPdfs, generateReportSummaryPdf };
+module.exports = { generatePdf, getPdfPath, cleanupOldPdfs, generateReportSummaryPdf, sanitiseForPdf, formatMarkStr };

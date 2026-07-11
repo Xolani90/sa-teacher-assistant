@@ -70,34 +70,53 @@ db.exec(`
     reteach_action TEXT,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
+  -- The following three tables were missing from this mock schema even
+  -- though processAssessmentData's real pipeline (Steps 6-8) touches all
+  -- of them via generateInterventionPlan, updateCoverageFromAssessment,
+  -- and generateInterventionReport. Production's utils/database.js does
+  -- create these (runMigrations() at server startup), so this was a test
+  -- fixture gap, not a production bug -- but it meant this suite was
+  -- failing for the wrong reason (missing table) rather than testing what
+  -- it was meant to test (atomicity). Definitions copied verbatim from
+  -- utils/database.js so the mock stays a faithful stand-in for the real
+  -- schema.
   CREATE TABLE intervention_plans (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone_hash TEXT NOT NULL,
-    assessment_id INTEGER,
-    problem_area TEXT NOT NULL,
-    target_group TEXT NOT NULL,
-    goals TEXT NOT NULL,
-    duration_days INTEGER NOT NULL,
-    strategies TEXT NOT NULL,
-    resources TEXT,
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone_hash      TEXT    NOT NULL,
+    assessment_id   INTEGER,
+    problem_area    TEXT    NOT NULL,
+    target_group    TEXT NOT NULL,
+    goals           TEXT NOT NULL,
+    duration_days   INTEGER NOT NULL,
+    strategies      TEXT NOT NULL,
+    resources       TEXT,
     monitoring_plan TEXT,
     success_indicators TEXT,
-    status TEXT NOT NULL DEFAULT 'active',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
-    FOREIGN KEY (assessment_id) REFERENCES assessments(id)
+    status          TEXT NOT NULL DEFAULT 'active',
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+  );
+  CREATE TABLE curriculum_coverage (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone_hash      TEXT    NOT NULL,
+    grade           INTEGER NOT NULL,
+    subject         TEXT    NOT NULL,
+    term            INTEGER NOT NULL,
+    topic           TEXT    NOT NULL,
+    covered         INTEGER NOT NULL DEFAULT 0,
+    date_covered    TEXT,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
+    UNIQUE(phone_hash, grade, subject, term, topic)
   );
   CREATE TABLE reports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone_hash TEXT NOT NULL,
-    assessment_id INTEGER NOT NULL,
-    report_type TEXT NOT NULL,
-    learner_name TEXT,
-    content TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
-    FOREIGN KEY (assessment_id) REFERENCES assessments(id)
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone_hash      TEXT    NOT NULL,
+    assessment_id   INTEGER NOT NULL,
+    report_type     TEXT    NOT NULL,
+    learner_name    TEXT,
+    content         TEXT    NOT NULL,
+    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
   );
 `);
 
@@ -195,8 +214,20 @@ try {
   {
     // storeLearnerResults itself is not exported, so exercise it through
     // the documented public entry point. A throw deep in the per-learner
-    // loop (BigInt mark, which neither JSON.stringify nor better-sqlite3
-    // bind accepts) must leave zero learner_results rows, not a partial set.
+    // loop must leave zero learner_results rows, not a partial set.
+    //
+    // NOTE: a BigInt mark does NOT trigger this anymore -- storeLearnerResults
+    // has a `Number.isFinite(result.mark)` guard that skips non-finite marks
+    // (added to stop malformed marks poisoning classAverage in
+    // learnerGroupingService) and BigInt fails that check silently, before
+    // ever reaching the INSERT bind step. So a BigInt mark is gracefully
+    // skipped, not thrown -- it no longer exercises the rollback path this
+    // test is meant to verify. A circular questionData object does: it
+    // passes the isFinite guard (mark/totalMarks are normal numbers) and
+    // throws inside JSON.stringify(), still mid-transaction.
+    const circularQuestionData = {};
+    circularQuestionData.self = circularQuestionData;
+
     const assessmentData = {
       title: 'CSV upload test',
       grade: 7,
@@ -207,21 +238,16 @@ try {
       learnerResults: [
         { learnerName: 'A', mark: 10, totalMarks: 20, questionData: {} },
         { learnerName: 'B', mark: 15, totalMarks: 20, questionData: {} },
-        { learnerName: 'BAD', mark: 5n, totalMarks: 20, questionData: {} }, // BigInt mark -> throws on bind
+        { learnerName: 'BAD', mark: 5, totalMarks: 20, questionData: circularQuestionData }, // circular ref -> throws in JSON.stringify()
         { learnerName: 'D', mark: 12, totalMarks: 20, questionData: {} },
       ],
     };
 
     const result = diagnosticService.processAssessmentData('p1', assessmentData);
-    // Current (intentional) behaviour: malformed rows are skipped rather
-    // than aborting the whole batch -- see diagnosticWorkflowService.js
-    // storeLearnerResults, which filters bad rows, commits the valid ones,
-    // and reports what was skipped instead of an all-or-nothing failure.
-    check(result && result.status === 'complete' && !result.error, 'C2-D06: processAssessmentData succeeds despite one malformed row (graceful skip, not all-or-nothing failure)');
-    check(Array.isArray(result.skippedLearners) && result.skippedLearners.includes('BAD'), 'C2-D06b: the malformed row is reported in skippedLearners[]');
+    check(result && result.error === 'Failed to store learner results', 'C2-D06: processAssessmentData reports the storage failure');
 
     const rowCount = db.prepare(`SELECT COUNT(*) AS n FROM learner_results`).get().n;
-    check(rowCount === 3, 'C2-D07: exactly the 3 valid learner rows persisted, malformed row correctly excluded');
+    check(rowCount === 0, 'C2-D07: zero learner_results rows persisted after the throw (no partial write)');
   }
 
   console.log('\n─────────────────────────────────');
