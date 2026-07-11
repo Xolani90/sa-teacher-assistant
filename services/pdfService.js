@@ -123,9 +123,56 @@ function convertUnicodeFractions(input) {
   });
 }
 
+// Matches \frac{a}{b}, \dfrac{a}{b}, or \tfrac{a}{b}, with an optional
+// whole-number lead-in directly before it for mixed numbers (e.g. the "3"
+// in "3\frac{2}{7}"). PDFKit has no LaTeX renderer, so unconverted LaTeX
+// prints as literal backslashes and braces in the PDF — this is a separate
+// failure mode from the Unicode fraction glyphs handled above, seen when
+// the AI model emits maths as LaTeX instead (e.g. "$\frac{5}{8}$" printing
+// verbatim rather than as "5/8"). Numerator/denominator are kept generic
+// (not digit-only) since they occasionally contain a nested expression
+// rather than a bare number.
+const LATEX_FRAC_RE = /(\d+)?\\(?:d|t)?frac\{([^{}]*)\}\{([^{}]*)\}/g;
+
+// Other common LaTeX maths commands that show up in AI-generated content.
+// Order matters: \sqrt{...} needs its own regex (has braced content), the
+// rest are simple string substitutions.
+const LATEX_SQRT_RE = /\\sqrt\{([^{}]*)\}/g;
+const LATEX_COMMAND_MAP = {
+  '\\times': 'x', '\\cdot': 'x', '\\div': '/',
+  '\\pm': '+/-', '\\mp': '-/+',
+  '\\le': '<=', '\\leq': '<=', '\\ge': '>=', '\\geq': '>=', '\\neq': '!=',
+  '\\left(': '(', '\\right)': ')', '\\left[': '[', '\\right]': ']',
+  '\\left|': '|', '\\right|': '|',
+  '\\%': '%', '\\ ': ' ',
+};
+
+/**
+ * Converts LaTeX maths markup to plain ASCII, mirroring what
+ * convertUnicodeFractions() does for Unicode fraction glyphs. Runs before
+ * the per-character UNICODE_SANITISE_MAP so the "$" delimiters and stray
+ * backslashes/braces don't fall through to the blanket [^\x00-\xFF]-style
+ * cleanup and get silently mangled.
+ */
+function convertLatexMath(input) {
+  let out = input.replace(LATEX_FRAC_RE, (match, whole, num, den) => (
+    whole ? `${whole} ${num}/${den}` : `${num}/${den}`
+  ));
+  out = out.replace(LATEX_SQRT_RE, 'sqrt($1)');
+  for (const [bad, good] of Object.entries(LATEX_COMMAND_MAP)) {
+    if (out.indexOf(bad) !== -1) out = out.split(bad).join(good);
+  }
+  // Inline/display math delimiters ($...$ or $$...$$) — the content in
+  // between has already been converted above, so the delimiters themselves
+  // are just stripped rather than rendered as literal dollar signs.
+  out = out.replace(/\$/g, '');
+  return out;
+}
+
 function sanitiseForPdf(input) {
   if (typeof input !== 'string') return input;
-  let out = convertUnicodeFractions(input);
+  let out = convertLatexMath(input);
+  out = convertUnicodeFractions(out);
   for (const [bad, good] of Object.entries(UNICODE_SANITISE_MAP)) {
     if (out.indexOf(bad) !== -1) out = out.split(bad).join(good);
   }
