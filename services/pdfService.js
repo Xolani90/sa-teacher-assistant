@@ -95,6 +95,27 @@ function makePdfTextSafe(doc) {
   return doc;
 }
 
+// ── Grade label normalisation ──────────────────────────────────────────────
+//
+// Grade may arrive here as an integer (7), a "Grade N" string, or — from
+// historically-corrupted DB rows — a "7.0"-style float string (see the
+// ROOT CAUSE FIX comment in usageTracker.js#updateTeacherProfile). This
+// normalises any of those shapes to a clean "Grade N" label so the header,
+// subtitle, PDF metadata, and filename can never print "Grade 7.0" again,
+// regardless of what any caller passes in.
+//
+// @param {string|number} grade
+// @returns {string} - "Grade N", or '' if grade doesn't parse to 1-12
+function formatGradeLabel(grade) {
+  if (grade === null || grade === undefined || grade === '') return '';
+  const str = String(grade).trim();
+  const match = str.match(/(\d+(?:\.\d+)?)/);
+  if (!match) return '';
+  const num = parseInt(match[1], 10); // truncates any ".0" etc.
+  if (Number.isNaN(num) || num < 1 || num > 12) return '';
+  return `Grade ${num}`;
+}
+
 // ── Pagination helper ──────────────────────────────────────────────────────
 
 /**
@@ -132,7 +153,7 @@ function ensureSpace(doc, neededHeight) {
  * @param {PDFDocument} doc
  * @param {{ title, grade, subject, school, date }} meta
  */
-function drawHeader(doc, { title, grade, subject, school, date } = {}) {
+function drawHeader(doc, { title, grade, subject, school, date, marks } = {}) {
   const pageWidth = doc.page.width;
   const margin    = 50;
 
@@ -153,7 +174,21 @@ function drawHeader(doc, { title, grade, subject, school, date } = {}) {
     .font(FONTS.heading)
     .fontSize(9)
     .fillColor(COLORS.white)
-    .text(school || 'SA Teacher Assistant', margin, 14, { width: pageWidth - margin * 2, lineBreak: false });
+    .text(school || 'SA Teacher Assistant', margin, 14, { width: pageWidth - margin * 2 - 90, lineBreak: false });
+
+  // "CAPS Aligned" badge (top right, green pill) — small brand mark repeated
+  // on every page so any single printed/shared page is recognisable.
+  const badgeLabel = 'CAPS ALIGNED';
+  const badgeW = 88;
+  const badgeH = 16;
+  const badgeX = pageWidth - margin - badgeW;
+  const badgeY = 10;
+  doc.roundedRect(badgeX, badgeY, badgeW, badgeH, 8).fill(COLORS.accent);
+  doc
+    .font(FONTS.heading)
+    .fontSize(7)
+    .fillColor(COLORS.white)
+    .text(badgeLabel, badgeX, badgeY + 5, { width: badgeW, align: 'center', lineBreak: false });
 
   // Document title (bold, centered)
   doc
@@ -162,8 +197,10 @@ function drawHeader(doc, { title, grade, subject, school, date } = {}) {
     .fillColor(COLORS.white)
     .text(title || '', margin, 28, { width: pageWidth - margin * 2, align: 'center', lineBreak: false });
 
-  // Subtitle row: Subject | Grade | Date
-  const subtitle = [subject, grade, date || new Date().toLocaleDateString('en-ZA')].filter(Boolean).join('  |  ');
+  // Subtitle row: Subject | Grade | Date | Total Marks
+  const subtitleParts = [subject, grade, date || new Date().toLocaleDateString('en-ZA')];
+  if (marks) subtitleParts.push(`Total: ${marks} Marks`);
+  const subtitle = subtitleParts.filter(Boolean).join('   |   ');
   doc
     .font(FONTS.body)
     .fontSize(9)
@@ -182,36 +219,96 @@ function drawHeader(doc, { title, grade, subject, school, date } = {}) {
 }
 
 /**
- * Draws the student info row (Name / Class / Date / Total).
+ * Draws the learner/teacher info box (Learner Name / Class / Teacher / Date / Total).
+ * Rendered inside a light bordered box, two rows of fields, for a more
+ * professional "official document" feel than a bare underline row.
  *
  * @param {PDFDocument} doc
  * @param {number} totalMarks
  */
 function drawStudentInfoRow(doc, totalMarks) {
   const margin = 50;
-  const y      = doc.y + 8;
-  const w      = (doc.page.width - margin * 2) / 4;
+  const boxW   = doc.page.width - margin * 2;
+  const boxTop = doc.y + 6;
+  const rowH   = 26;
+  const boxH   = rowH * 2 + 8;
 
-  doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText);
+  doc.rect(margin, boxTop, boxW, boxH).lineWidth(0.75).stroke(COLORS.border);
 
-  const fields = [
-    { label: 'Name:', underlineWidth: w - 40 },
-    { label: 'Class:', underlineWidth: w - 40 },
-    { label: 'Date:', underlineWidth: w - 40 },
-    { label: `Total: ___/${totalMarks || ''}`, underlineWidth: 0 },
-  ];
+  const drawField = (label, x, y, underlineWidth) => {
+    doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText).text(label, x, y, { lineBreak: false });
+    const labelWidth = doc.font(FONTS.body).fontSize(10).widthOfString(label);
+    doc.moveTo(x + labelWidth + 6, y + 12).lineTo(x + labelWidth + 6 + underlineWidth, y + 12).stroke(COLORS.midGray);
+  };
 
-  fields.forEach((field, i) => {
-    const x = margin + i * w;
-    doc.text(field.label, x, y);
-    if (field.underlineWidth > 0) {
-      doc.moveTo(x + 40, y + 12).lineTo(x + 40 + field.underlineWidth, y + 12).stroke(COLORS.midGray);
-    }
+  // Row 1: Learner Name (wide) | Class | Date
+  const row1Y = boxTop + 8;
+  const nameW = boxW * 0.46;
+  const classW = boxW * 0.24;
+  const dateW = boxW * 0.24;
+  drawField('Learner Name:', margin + 10, row1Y, nameW - 100);
+  drawField('Class:', margin + 10 + nameW, row1Y, classW - 55);
+  drawField('Date:', margin + 10 + nameW + classW, row1Y, dateW - 50);
+
+  // Row 2: Teacher (wide) | Total marks (bold, accent, right-aligned)
+  const row2Y = row1Y + rowH;
+  const teacherW = boxW * 0.6;
+  drawField('Teacher:', margin + 10, row2Y, teacherW - 65);
+  doc
+    .font(FONTS.heading)
+    .fontSize(11)
+    .fillColor(COLORS.accent)
+    .text(`Total: ___ / ${totalMarks || '___'} marks`, margin + 10 + teacherW, row2Y - 1, {
+      width: boxW - teacherW - 20,
+      align: 'right',
+    });
+
+  doc.y = boxTop + boxH + 10;
+}
+
+/**
+ * Draws an instructions box near the top of assessment-style documents
+ * (worksheets, tests, exam papers, quizzes, SBA tasks). Wording adapts
+ * slightly to the document type and total marks.
+ *
+ * @param {PDFDocument} doc
+ * @param {{ type: string, marks?: number }} opts
+ */
+function drawInstructionsBox(doc, { type, marks } = {}) {
+  const margin = 50;
+  const boxW   = doc.page.width - margin * 2;
+  const assessmentTypes = ['worksheet', 'test', 'examPaper', 'sbaTask'];
+  if (!assessmentTypes.includes(type)) return;
+
+  const lines = ['Answer ALL questions.', 'Show ALL working where applicable.'];
+  if (marks) lines.push(`This paper is out of ${marks} marks.`);
+  if (type === 'test' || type === 'examPaper') lines.push('No calculators unless stated otherwise.');
+
+  ensureSpace(doc, 20 + lines.length * 13 + 12);
+
+  const boxTop = doc.y;
+  const lineH = 13;
+  const boxH = 20 + lines.length * lineH;
+
+  doc.rect(margin, boxTop, boxW, boxH).fill(COLORS.lightGray);
+  // Accent stripe on the left edge, matching the section-heading box treatment.
+  doc.rect(margin, boxTop, 3, boxH).fill(COLORS.accent);
+
+  doc
+    .font(FONTS.heading)
+    .fontSize(9)
+    .fillColor(COLORS.primary)
+    .text('INSTRUCTIONS', margin + 12, boxTop + 6, { lineBreak: false });
+
+  lines.forEach((line, i) => {
+    doc
+      .font(FONTS.body)
+      .fontSize(9)
+      .fillColor(COLORS.darkText)
+      .text(`•  ${line}`, margin + 12, boxTop + 20 + i * lineH, { width: boxW - 24, lineBreak: false });
   });
 
-  doc.y = y + 24;
-  doc.moveTo(margin, doc.y).lineTo(doc.page.width - margin, doc.y).stroke(COLORS.border);
-  doc.y += 10;
+  doc.y = boxTop + boxH + 10;
 }
 
 /**
@@ -275,11 +372,12 @@ function drawFooter(doc, schoolName) {
   const savedY = doc.y;
   doc.page.margins.bottom = 0;
 
+  const genDate = new Date().toLocaleDateString('en-ZA');
   doc
     .font(FONTS.body)
     .fontSize(8)
     .fillColor(COLORS.midGray)
-    .text('Generated by SA Teacher Assistant — CAPS Aligned', 50, y + 6, { align: 'left', lineBreak: false });
+    .text(`Generated by SA Teacher Assistant — CAPS Aligned — ${genDate}`, 50, y + 6, { align: 'left', lineBreak: false, width: pageWidth - 150 });
 
   doc.page.margins.bottom = savedBottom;
   doc.y = savedY; // Restore cursor — never let footer position bleed into content
@@ -336,6 +434,34 @@ function stampPageNumbers(doc) {
     doc.switchToPage(i);
     drawPageNumber(doc, i - range.start + 1, range.count);
   }
+}
+
+/**
+ * Draws a subtle right-aligned metadata line (Difficulty / Bloom Level /
+ * Est. time) below the student info / instructions block. Silent no-op if
+ * none of these values is actually supplied, so documents generated by call
+ * sites that don't pass this data yet are unaffected.
+ *
+ * @param {PDFDocument} doc
+ * @param {{ difficulty?: string, bloomLevel?: string, estimatedTime?: string }} meta
+ */
+function drawMetadataBox(doc, { difficulty, bloomLevel, estimatedTime } = {}) {
+  const parts = [];
+  if (difficulty)     parts.push(`Difficulty: ${difficulty}`);
+  if (bloomLevel)      parts.push(`Bloom Level: ${bloomLevel}`);
+  if (estimatedTime)   parts.push(`Est. time: ${estimatedTime}`);
+  if (parts.length === 0) return; // nothing to show — stay invisible
+
+  const margin = 50;
+  const label = parts.join('   •   ');
+
+  ensureSpace(doc, 16);
+  doc
+    .font(FONTS.italic)
+    .fontSize(7.5)
+    .fillColor(COLORS.midGray)
+    .text(label, margin, doc.y, { width: doc.page.width - margin * 2, align: 'right', lineBreak: false });
+  doc.y += 12;
 }
 
 // ── Table helper ───────────────────────────────────────────────────────────
@@ -830,7 +956,7 @@ function toTitleCase(str) {
  * @param {number} [params.marks]   - Total marks (for tests/worksheets)
  * @returns {Promise<{ filePath: string, filename: string, fileId: string }>}
  */
-async function generatePdf({ content, type, topic, grade, subject, school, marks }) {
+async function generatePdf({ content, type, topic, grade, subject, school, marks, difficulty, bloomLevel, estimatedTime }) {
   ensurePdfDir();
 
   // Normalize casing once here — content already comes back correctly
@@ -838,8 +964,16 @@ async function generatePdf({ content, type, topic, grade, subject, school, marks
   // input (e.g. "fractions", "mathematics") and are used separately to
   // build the header/title/filename below.
   topic   = toTitleCase(topic);
-  grade   = toTitleCase(grade);
   subject = toTitleCase(subject);
+
+  // Normalise grade once, up front, so every downstream use (title
+  // metadata, header, footer, filename) sees the same clean "Grade N"
+  // label regardless of what shape the caller passed grade in — a bare
+  // integer, "7", "7.0" (the better-sqlite3 TEXT-column coercion bug), or
+  // an already-prefixed "Grade 7"/"Grade 7.0". toTitleCase alone does NOT
+  // fix this (title-casing a decimal string is a no-op), so this must run
+  // as its own step.
+  grade = formatGradeLabel(grade);
 
   const fileId   = uuidv4();
   const filename = buildFilename(type, topic, grade);
@@ -864,6 +998,12 @@ async function generatePdf({ content, type, topic, grade, subject, school, marks
 
   const title = titles[type] || `SA TEACHER ASSISTANT: ${topic || subject || 'CAPS'}`;
 
+  // Document types where a learner fills in the PDF by hand (name/class/teacher
+  // fields + an instructions box make sense). Teacher-facing planning docs
+  // (lesson plans, ATPs, intervention plans, etc.) skip these.
+  const ASSESSMENT_TYPES = new Set(['worksheet', 'test', 'examPaper', 'quickQuiz', 'sbaTask']);
+  const isAssessment = ASSESSMENT_TYPES.has(type);
+
   return new Promise((resolve, reject) => {
     const doc = new PDFDocument({
       size: 'A4',
@@ -882,17 +1022,23 @@ async function generatePdf({ content, type, topic, grade, subject, school, marks
     const stream = fs.createWriteStream(filePath);
     doc.pipe(stream);
 
-    // Draw header on first page
-    drawHeader(doc, { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA') });
+    const headerMeta = { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA'), marks };
 
-    // Draw student info row for assessments
-    if (type === 'worksheet' || type === 'test') {
+    // Draw header on first page
+    drawHeader(doc, headerMeta);
+
+    // Draw learner/teacher info box + instructions for assessment-style docs
+    if (isAssessment) {
       drawStudentInfoRow(doc, marks);
+      drawInstructionsBox(doc, { type, marks });
     }
+
+    // Subtle teacher-reference box — only appears if metadata was supplied
+    drawMetadataBox(doc, { difficulty, bloomLevel, estimatedTime });
 
     // Add header + footer to each new page
     doc.on('pageAdded', () => {
-      drawHeader(doc, { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA') });
+      drawHeader(doc, headerMeta);
       drawFooter(doc, school);
     });
 
@@ -957,7 +1103,14 @@ function buildFilename(type, topic, grade) {
   // grade as either a bare number (7) or a full label ("Grade 7"), and
   // without this strip the literal "Grade_" prefix below gets duplicated
   // (e.g. "Grade_Grade_7_..." instead of "Grade_7_...").
-  const gradeStr = grade != null ? String(grade) : '';
+  // Run through formatGradeLabel first so a decimal ("7.0") or an
+  // already-prefixed label is reduced to a bare clean integer *before* the
+  // regex below strips non-word characters — otherwise "7.0" loses its "."
+  // silently and becomes "70" (a real bug that shipped filenames like
+  // "Grade_70_...pdf" for what should have been "Grade_7_...pdf"). generatePdf
+  // already normalises grade before calling this, but this is a second layer
+  // of defense for any other caller.
+  const gradeStr = formatGradeLabel(grade).replace(/^Grade\s*/i, '');
   const safeGrade = gradeStr
     ? gradeStr
         .replace(/grade/gi, '')
@@ -1023,7 +1176,8 @@ function cleanupOldPdfs() {
  * @returns {Promise<{ fileId: string, filename: string }>}
  */
 async function generateReportSummaryPdf(comments, metadata = {}) {
-  const { grade, subject, school } = metadata;
+  let { grade, subject, school } = metadata;
+  grade = formatGradeLabel(grade);
 
   ensurePdfDir();
 
@@ -1137,4 +1291,4 @@ async function generateReportSummaryPdf(comments, metadata = {}) {
   });
 }
 
-module.exports = { generatePdf, getPdfPath, cleanupOldPdfs, generateReportSummaryPdf, sanitiseForPdf, formatMarkStr };
+module.exports = { generatePdf, getPdfPath, cleanupOldPdfs, generateReportSummaryPdf, sanitiseForPdf, formatMarkStr, formatGradeLabel };
