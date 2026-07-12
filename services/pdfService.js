@@ -4,6 +4,7 @@ const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
+const { buildAtoms, layoutAtoms } = require('./mathTypeset/richtext');
 
 // PDFs are stored in /tmp and served via the /pdf/:id route
 // They are auto-cleaned after 1 hour via the cleanup scheduler
@@ -145,6 +146,12 @@ const LATEX_COMMAND_MAP = {
   '\\left(': '(', '\\right)': ')', '\\left[': '[', '\\right]': ']',
   '\\left|': '|', '\\right|': '|',
   '\\%': '%', '\\ ': ' ',
+  // \(...\) and \[...\] are the other common LaTeX inline/display math
+  // delimiter styles (besides $...$, already handled below) — same failure
+  // mode: the content between them gets converted above, but without this
+  // the bare delimiter markers themselves print literally in the PDF
+  // (e.g. "\( 5/8 \)" instead of just "5/8").
+  '\\(': '', '\\)': '', '\\[': '', '\\]': '',
 };
 
 /**
@@ -877,9 +884,8 @@ function renderFormattedText(doc, text, margin = 50) {
 
     // Bold inline: *text* mixed with normal text
     if (line.includes('*') && !line.startsWith('•') && !line.startsWith('-')) {
-      // Estimate height for pagination check (single line of 10pt body text)
       doc.font(FONTS.body).fontSize(10);
-      const estimatedH = doc.heightOfString(line.replace(/\*/g, ''), { width: bodyWidth }) + 8;
+      const estimatedH = measureInlineBoldHeight(doc, line, margin, bodyWidth) + 2;
       ensureSpace(doc, estimatedH);
       renderInlineBold(doc, line, margin, bodyWidth);
       doc.y += 2;
@@ -897,7 +903,7 @@ function renderFormattedText(doc, text, margin = 50) {
     if (line.startsWith('•') || (line.startsWith('-') && line.length > 2)) {
       const bulletText = line.replace(/^[•\-]\s*/, '');
       doc.font(FONTS.body).fontSize(10);
-      const estimatedH = doc.heightOfString(bulletText.replace(/\*/g, ''), { width: bodyWidth - 20 }) + 6;
+      const estimatedH = measureInlineBoldHeight(doc, bulletText, margin, bodyWidth, margin + 20) + 2;
       ensureSpace(doc, estimatedH);
       const startY = doc.y;
       doc
@@ -913,14 +919,14 @@ function renderFormattedText(doc, text, margin = 50) {
       const numMatch = line.match(/^(\d{1,2}[.)]\s)(.*)/);
       if (numMatch) {
         doc.font(FONTS.body).fontSize(10);
-        const estimatedH = doc.heightOfString(numMatch[2], { width: bodyWidth - 24 }) + 6;
+        const estimatedH = measureInlineBoldHeight(doc, numMatch[2], margin, bodyWidth, margin + 24) + 3;
         ensureSpace(doc, estimatedH);
+        const startY = doc.y;
         doc
           .font(FONTS.heading).fontSize(10).fillColor(COLORS.darkText)
-          .text(numMatch[1], margin + 4, doc.y, { continued: false, width: 20 });
-        doc
-          .font(FONTS.body).fontSize(10).fillColor(COLORS.darkText)
-          .text(numMatch[2], margin + 24, doc.y - doc.currentLineHeight(true), { width: bodyWidth - 24 });
+          .text(numMatch[1], margin + 4, startY, { continued: false, width: 20 });
+        doc.y = startY;
+        renderInlineBold(doc, numMatch[2], margin, bodyWidth, margin + 24);
         doc.y += 3;
         continue;
       }
@@ -931,14 +937,15 @@ function renderFormattedText(doc, text, margin = 50) {
       const marksMatch = line.match(/(.*?)\s*(\(\d+\))$/);
       if (marksMatch) {
         doc.font(FONTS.body).fontSize(10);
-        const estimatedH = doc.heightOfString(marksMatch[1], { width: bodyWidth - 40 }) + 6;
+        const gutterWidth = bodyWidth - 40;
+        const estimatedH = measureInlineBoldHeight(doc, marksMatch[1], margin, gutterWidth) + 2;
         ensureSpace(doc, estimatedH);
-        doc
-          .font(FONTS.body).fontSize(10).fillColor(COLORS.darkText)
-          .text(marksMatch[1], margin, doc.y, { continued: true, width: bodyWidth - 40 });
+        const lineHeight = doc.currentLineHeight(true) + 2;
+        renderInlineBold(doc, marksMatch[1], margin, gutterWidth);
+        const marksY = doc.y - lineHeight;
         doc
           .font(FONTS.heading).fontSize(10).fillColor(COLORS.accent)
-          .text(marksMatch[2], { align: 'right' });
+          .text(marksMatch[2], margin, marksY, { width: bodyWidth, align: 'right' });
         doc.y += 2;
         continue;
       }
@@ -947,10 +954,9 @@ function renderFormattedText(doc, text, margin = 50) {
     // Answer lines (blank lines for writing)
     if (line.startsWith('Answer:') || line.startsWith('Working:')) {
       ensureSpace(doc, 30);
-      doc
-        .font(FONTS.italic).fontSize(10).fillColor(COLORS.midGray)
-        .text(line, margin, doc.y, { width: bodyWidth });
-      doc.y += 16; // Extra space for student to write
+      doc.font(FONTS.italic).fontSize(10);
+      renderInlineBold(doc, line, margin, bodyWidth, margin, COLORS.midGray);
+      doc.y += 14; // Extra space for student to write
       continue;
     }
 
@@ -961,22 +967,27 @@ function renderFormattedText(doc, text, margin = 50) {
     }
 
     // Default: normal body text
-    // PDFKit's text() with no explicit height/ellipsis DOES auto-paginate on
-    // wrap, so for multi-line paragraphs we just need a minimal guard to
-    // ensure at least one line fits before we start (avoids orphan single-line
-    // draws right at the bottom margin boundary).
     doc.font(FONTS.body).fontSize(10);
-    const lineH = doc.currentLineHeight(true);
-    ensureSpace(doc, lineH + 2);
-    doc
-      .font(FONTS.body).fontSize(10).fillColor(COLORS.darkText)
-      .text(line, margin, doc.y, { width: bodyWidth });
+    const estimatedH = measureInlineBoldHeight(doc, line, margin, bodyWidth) + 2;
+    ensureSpace(doc, estimatedH);
+    renderInlineBold(doc, line, margin, bodyWidth);
     doc.y += 2;
   }
 }
 
 /**
- * Renders a line that contains mixed *bold* and normal text inline.
+ * Renders a line that contains mixed *bold* and normal text inline, AND
+ * any inline maths (fractions, exponents, roots — in LaTeX, Unicode-glyph,
+ * or plain-ASCII form) as real typeset visuals rather than plain-text
+ * approximations like "12/18" or "5^2".
+ *
+ * Delegates to services/mathTypeset: buildAtoms() tokenizes the line into
+ * an ordered list of word/space/frac/exp/sqrt atoms (each tagged with
+ * whether it's inside a *bold* span), and layoutAtoms() greedily word-wraps
+ * them within [startX, startX+availWidth], drawing stacked fractions and
+ * radical signs as small vector graphics inline with the text — something
+ * PDFKit's own continued-text chaining has no way to do on its own, since
+ * it only handles text runs, not inline non-text objects.
  *
  * @param {PDFDocument} doc
  * @param {string} line
@@ -986,36 +997,31 @@ function renderFormattedText(doc, text, margin = 50) {
  *   margin + 20 for bullet text that's indented past a bullet glyph). The
  *   available width is reduced by (startX - margin) to keep wrapping correct.
  */
-function renderInlineBold(doc, line, margin, width, startX = margin) {
-  const parts = line.split(/(\*[^*]+\*)/).filter((p) => p !== '');
+function renderInlineBold(doc, line, margin, width, startX = margin, color = COLORS.darkText) {
   const availWidth = width - (startX - margin);
-
-  parts.forEach((part, i) => {
-    const isLast = i === parts.length - 1;
-    const isBold = /^\*[^*]+\*$/.test(part);
-    const text = isBold ? part.replace(/\*/g, '') : part;
-    const font = isBold ? FONTS.heading : FONTS.body;
-
-    if (i === 0) {
-      // Only the FIRST segment gets explicit position + width — this establishes
-      // the wrap box for the whole continued-text chain.
-      doc.font(font).fontSize(10).fillColor(COLORS.darkText)
-         .text(text, startX, doc.y, { continued: !isLast, width: availWidth });
-    } else {
-      // Every subsequent segment must NOT repass x/y/width. Doing so (as the
-      // old code did, pinning y to the line's original start and resetting
-      // width on every call) fights PDFKit's own continued-text cursor —
-      // once any one segment was long enough to wrap onto a second line by
-      // itself, the next segment got drawn back at the stale (x=null, y=old)
-      // position instead of after the wrap, scrambling word order in the
-      // rendered PDF (e.g. a long *bold* CAPS reference span followed by
-      // trailing text landing before it instead of after).
-      doc.font(font).fontSize(10).fillColor(COLORS.darkText)
-         .text(text, { continued: !isLast });
-    }
+  const atoms = buildAtoms(line);
+  const endY = layoutAtoms(doc, atoms, {
+    x: startX, y: doc.y, width: availWidth, fontSize: 10, color, dryRun: false,
   });
+  doc.y = endY;
+}
 
-  doc.y += 4;
+/**
+ * Measures the height a line will take when rendered via renderInlineBold
+ * WITHOUT drawing anything — used for the ensureSpace() pagination check
+ * that must run before drawing, so a paragraph never gets cut off mid-page.
+ * This replaces the old doc.heightOfString() estimate, which assumed plain
+ * text and didn't know that a line containing a fraction might wrap at a
+ * different point (fractions/roots have their own width, not the width of
+ * their plain-text spelling).
+ */
+function measureInlineBoldHeight(doc, line, margin, width, startX = margin) {
+  const availWidth = width - (startX - margin);
+  const atoms = buildAtoms(line);
+  const endY = layoutAtoms(doc, atoms, {
+    x: startX, y: 0, width: availWidth, fontSize: 10, color: COLORS.darkText, dryRun: true,
+  });
+  return endY;
 }
 
 /**
