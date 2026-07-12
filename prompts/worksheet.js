@@ -53,6 +53,19 @@ function worksheetPrompt({ grade, subject, topic, language, differentiation }) {
     differentiationInstruction = '\n\nDIFFERENTIATION: Generate an ORAL ASSESSMENT version: convert all questions to spoken-word format, include discussion prompts, think-pair-share activities, and questions that assess verbal reasoning. Format as a teacher script.';
   }
 
+  // CRITICAL: applies to every differentiation type, not just 'easier' — a
+  // teacher requesting a differentiated version wants ONE ready-to-print
+  // document, not the original plus the differentiated version stapled
+  // together, and never wants the AI's own commentary about the document
+  // appearing inside the document itself (e.g. "Both worksheets are now
+  // ready to print... Let me know if you'd like any adjustments!" — this
+  // is a real production example of the failure this guards against).
+  const singleVersionGuard = differentiation
+    ? '\n\nCRITICAL OUTPUT RULE: Produce EXACTLY ONE worksheet — the differentiated version described above — and nothing else. ' +
+      'Do NOT include the original/standard-difficulty version before or after it. Do NOT generate both versions. ' +
+      'Do NOT add any conversational text, summary, sign-off, or note addressed to the teacher (e.g. "Let me know if you would like any adjustments") anywhere in the output — the ENTIRE response must be the worksheet content itself, starting with the title line and ending with the marking grid, with nothing before or after it.'
+    : '';
+
   return `You are a qualified South African teacher producing classroom-ready material strictly aligned to the CAPS curriculum.
 
 TASK: Generate a complete, print-ready worksheet.
@@ -138,7 +151,7 @@ Class: ________________ Date: __________
 *MARKING GRID (Teacher use only)*
 A: ___/${sectionAMarks}  B: ___/${sectionBMarks}  C: ___/${sectionCMarks}  TOTAL: ___/${totalMarks}
 
-Generate all questions with complete text. Do not use placeholders. All questions must be answerable based on the topic. Mark allocation must add up to exactly ${totalMarks}.${languageInstruction}${differentiationInstruction}
+Generate all questions with complete text. Do not use placeholders. All questions must be answerable based on the topic. Mark allocation must add up to exactly ${totalMarks}.${languageInstruction}${differentiationInstruction}${singleVersionGuard}
 
 IMPORTANT: Never output placeholder text in square brackets. Replace every bracketed instruction with actual content. All questions must be fully written out.`;
 }
