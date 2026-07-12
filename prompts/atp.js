@@ -27,6 +27,7 @@ CAPS ALIGNMENT REQUIREMENTS:
 - Cover all 4 terms of ${currentYear} with correct CAPS topic sequencing and weighting
 - Include formal assessment tasks per CAPS assessment guidelines (tests, assignments, projects, exams)
 - Show approximate week numbers per topic (40 school weeks per year, ~10 per term)
+- CRITICAL: Week ranges must be strictly sequential and non-overlapping within each term. Each week number (e.g. Week 5) may appear in ONE topic row only — never repeat a week number across two different topic rows, even by one week. Before finalizing, check that each term's row-by-row week ranges are strictly increasing (e.g. 1–2, 3–4, 4–5 is INVALID because week 4 repeats; use 1–2, 3–4, 5–6 instead) and that the final row in each term ends exactly on that term's last week (10, 20, 30, or 40)
 - Use correct CAPS terminology throughout
 - Reference CAPS document page numbers or unit names where commonly known
 - Include South African public holidays/school terms context for ${currentYear} (Term 1: ~Jan–Mar, Term 2: ~Apr–Jun, Term 3: ~Jul–Sep, Term 4: ~Oct–Nov)

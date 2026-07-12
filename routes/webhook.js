@@ -24,6 +24,7 @@ const {
 const { isDuplicate }            = require('../utils/deduplication');
 const { handleOnboarding, needsOnboarding } = require('../services/onboardingService');
 const { generatePdf, generateReportSummaryPdf } = require('../services/pdfService');
+const { validateAtpWeeks } = require('../utils/atpWeekValidator');
 const { buildPaymentUrl }        = require('../services/yocoService');
 const { encryptPhone }           = require('../utils/encryption');
 const { SessionStore, clearAllSessionsForHash } = require('../utils/sessionStore');
@@ -3198,8 +3199,46 @@ async function processGeneration(from, intent, originalText = null) {
 
   if (!content) return; // Error already sent to teacher
 
+  // ── ATP-only safety net: verify week ranges are sequential and
+  // non-overlapping. The prompt (prompts/atp.js) instructs the AI not to
+  // repeat week numbers across rows, but that's a probabilistic
+  // instruction, not a guarantee — this is the deterministic backstop.
+  // On failure we retry generation ONCE with an explicit correction
+  // appended; if the retry also fails validation, we ship the content
+  // anyway (better than blocking the teacher entirely) but prepend a
+  // visible warning so it's never silently wrong.
+  let finalContent = content;
+  if (intent.type === 'atp') {
+    let check = validateAtpWeeks(finalContent);
+    if (!check.valid) {
+      console.warn(`[WEBHOOK] ATP week-range validation failed on first attempt for ...${String(from).slice(-4)}:`, check.issues);
+
+      const correctionPrompt = prompt +
+        `\n\nIMPORTANT CORRECTION: Your previous attempt at this ATP had overlapping/repeated week numbers across rows within a term (e.g. one row ending "4-5" followed by another starting "5-6", which illegally repeats week 5). ` +
+        `Regenerate the FULL Annual Teaching Plan from scratch, making absolutely sure that within each term, week numbers are strictly sequential and each week number appears in exactly one row — no row's start week may be less than or equal to the previous row's end week.`;
+
+      const retryContent = await generateContent(correctionPrompt, intent.type).catch((err) => {
+        console.error('[WEBHOOK] ATP correction retry failed:', err.message);
+        return null;
+      });
+
+      if (retryContent) {
+        const retryCheck = validateAtpWeeks(retryContent);
+        if (retryCheck.valid) {
+          console.log(`[WEBHOOK] ATP week-range corrected successfully on retry for ...${String(from).slice(-4)}`);
+          finalContent = retryContent;
+        } else {
+          console.warn(`[WEBHOOK] ATP week-range validation still failing after retry for ...${String(from).slice(-4)}:`, retryCheck.issues);
+          finalContent = `⚠️ *Note: please double-check the week numbers in this ATP* — our automatic check found possible overlapping weeks between topics. Everything else should be accurate, but review the week ranges before submitting this as your official plan.\n\n${retryContent}`;
+        }
+      } else {
+        finalContent = `⚠️ *Note: please double-check the week numbers in this ATP* — our automatic check found possible overlapping weeks between topics. Everything else should be accurate, but review the week ranges before submitting this as your official plan.\n\n${finalContent}`;
+      }
+    }
+  }
+
   // ── Send text response ────────────────────────────────────────
-  await safeSendMessage(from, content);
+  await safeSendMessage(from, finalContent);
 
   // ── Offer PDF for worksheets, tests, lesson plans, and other printable documents ─
   // (sbaTask, examPaper, rubric, moderationPack added — these are physical/printable
@@ -3213,7 +3252,7 @@ async function processGeneration(from, intent, originalText = null) {
   if (pdfEligible && stillPro) {
     try {
       const { fileId, filename } = await generatePdf({
-        content,
+        content: finalContent,
         type:    intent.type,
         topic:   intent.topic,
         grade:   intent.grade ? `Grade ${intent.grade}` : (teacher?.grade || 'Grade 7'),
