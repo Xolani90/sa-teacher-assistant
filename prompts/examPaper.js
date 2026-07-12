@@ -57,9 +57,10 @@ EXAM REQUIREMENTS:
 
 NUMBER LINES: If any question needs a number line (integers, inequalities, rounding, ordering, etc.), do NOT draw one with dashes/pipes/spaced characters — that never renders aligned. Instead output a single line using this exact bracket syntax, which is rendered as a real number-line graphic:
 [NUMBERLINE from=<start> to=<end> step=<interval> mark=<comma-separated values, solid dots> open=<comma-separated values, open circles> ray=<value>,<left|right> label="<optional caption>"]
-from, to, and step are required; mark, open, ray, and label are optional — include only the ones the question needs. The line must contain nothing else. Examples:
+from, to, and step are required; mark, open, ray, and label are optional — include only the ones the question needs. Never write the number line as plain numbers separated by spaces either (e.g. "-2 -1 0 1 2 3 4 5") — that has no line, ticks, or marked point and is exactly the mistake this format exists to prevent. The line must contain nothing but the bracket syntax. Examples:
 [NUMBERLINE from=-10 to=10 step=1 mark=-3,4]
 [NUMBERLINE from=0 to=10 step=1 open=3 ray=3,right label="x > 3"]
+[NUMBERLINE from=-2 to=8 step=1 open=4 ray=4,left label="x < 4"]
 
 ═══════════════════════════════════════════════
 ${subjectStr.toUpperCase()}

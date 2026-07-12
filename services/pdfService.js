@@ -576,6 +576,34 @@ function drawMetadataBox(doc, { difficulty, bloomLevel, estimatedTime } = {}) {
 // is possible, and the whole thing is one self-contained line to parse.
 const NUMBERLINE_RE = /^\[NUMBERLINE\s+([^\]]+)\]$/i;
 
+// Fallback for when the AI ignores the NUMBERLINE instruction and writes
+// the scale out as plain space-separated numbers instead (observed in
+// production despite the prompt instruction — e.g. "-2 -1 0 1 2 3 4 5 6 7 8"
+// printed as bare text with no line, ticks, or marked point). A line that
+// is ENTIRELY 3+ whitespace-separated numbers in a strictly ascending,
+// evenly-spaced (arithmetic) run is specific enough not to collide with
+// normal prose or other structural lines — mark-allocation lines end in
+// "(N)", pipe-table rows contain "|", and ordinary sentences mix words
+// with numbers. CAPS worksheets have no other reason to print a bare
+// arithmetic sequence alone on its own line.
+const BARE_NUMBER_TOKEN_RE = /^-?\d+(?:\.\d+)?$/;
+function detectBareNumberLine(line) {
+  const tokens = line.split(/\s+/).filter(Boolean);
+  if (tokens.length < 3) return null;
+  if (!tokens.every((t) => BARE_NUMBER_TOKEN_RE.test(t))) return null;
+  const nums = tokens.map(Number);
+  const step = nums[1] - nums[0];
+  if (step <= 0) return null; // must be strictly ascending
+  for (let i = 2; i < nums.length; i++) {
+    if (Math.abs((nums[i] - nums[i - 1]) - step) > 1e-9) return null; // must be evenly spaced
+  }
+  // No mark/open/ray info can be recovered from bare numbers — this draws
+  // an unmarked ruler, which is still a real vector line with ticks and
+  // labels instead of naked text. A strict improvement even without the
+  // specific answer annotation the question intended.
+  return { from: String(nums[0]), to: String(nums[nums.length - 1]), step: String(step) };
+}
+
 // Parses "key=value key2="quoted value" ..." into a plain object. Quoted
 // values may contain spaces (used by label="..."); unquoted values may not.
 function parseNumberLineSpec(str) {
@@ -884,6 +912,14 @@ function renderFormattedText(doc, text, margin = 50) {
     if (numberLineMatch) {
       const spec = parseNumberLineSpec(numberLineMatch[1]);
       drawNumberLine(doc, margin, bodyWidth, spec);
+      continue;
+    }
+
+    // Fallback: AI wrote the number line as bare numbers instead of the
+    // spec above (see detectBareNumberLine's doc comment).
+    const bareNumberLineSpec = detectBareNumberLine(line);
+    if (bareNumberLineSpec) {
+      drawNumberLine(doc, margin, bodyWidth, bareNumberLineSpec);
       continue;
     }
 

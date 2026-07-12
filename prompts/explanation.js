@@ -71,8 +71,9 @@ _(${subjectStr})_
 
 NUMBER LINES: If the worked example or step-by-step breakdown needs a number line (integers, inequalities, rounding, ordering, etc.), do NOT draw one with dashes/pipes/spaced characters — that never renders aligned. Instead output a single line using this exact bracket syntax, which is rendered as a real number-line graphic:
 [NUMBERLINE from=<start> to=<end> step=<interval> mark=<comma-separated values, solid dots> open=<comma-separated values, open circles> ray=<value>,<left|right> label="<optional caption>"]
-from, to, and step are required; mark, open, ray, and label are optional — include only the ones the example needs. The line must contain nothing else. Example:
+from, to, and step are required; mark, open, ray, and label are optional — include only the ones the example needs. Never write the number line as plain numbers separated by spaces either (e.g. "-2 -1 0 1 2 3 4 5") — that has no line, ticks, or marked point and is exactly the mistake this format exists to prevent. The line must contain nothing but the bracket syntax. Examples:
 [NUMBERLINE from=-10 to=10 step=1 mark=-3,4]
+[NUMBERLINE from=-2 to=8 step=1 open=4 ray=4,left label="x < 4"]
 
 *Worked example:*
 [A complete, solved example using South African context where possible. Show all working for maths/science. Explain each step.]
