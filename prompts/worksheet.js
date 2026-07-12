@@ -60,10 +60,18 @@ function worksheetPrompt({ grade, subject, topic, language, differentiation }) {
   // appearing inside the document itself (e.g. "Both worksheets are now
   // ready to print... Let me know if you'd like any adjustments!" — this
   // is a real production example of the failure this guards against).
+  // ORAL's own format (teacher script) legitimately continues past the marking
+  // grid into differentiation notes / accessibility notes — that's real
+  // document content, not AI commentary, so the "ends with the marking grid"
+  // anchor is loosened for oral only. EASIER/HARDER/VISUAL keep the stricter
+  // marking-grid boundary, which matched their actual output in testing.
+  const guardEndAnchor = differentiation === 'oral'
+    ? 'ending with the final teacher note, accessibility note, or differentiation note included in the script (if the format includes one), or the marking grid if it does not'
+    : 'ending with the marking grid';
   const singleVersionGuard = differentiation
     ? '\n\nCRITICAL OUTPUT RULE: Produce EXACTLY ONE worksheet — the differentiated version described above — and nothing else. ' +
       'Do NOT include the original/standard-difficulty version before or after it. Do NOT generate both versions. ' +
-      'Do NOT add any conversational text, summary, sign-off, or note addressed to the teacher (e.g. "Let me know if you would like any adjustments") anywhere in the output — the ENTIRE response must be the worksheet content itself, starting with the title line and ending with the marking grid, with nothing before or after it.'
+      `Do NOT add any conversational text, summary, sign-off, or note addressed to the teacher (e.g. "Let me know if you would like any adjustments") anywhere in the output — the ENTIRE response must be the worksheet content itself, starting with the title line and ${guardEndAnchor}, with nothing before or after it.`
     : '';
 
   return `You are a qualified South African teacher producing classroom-ready material strictly aligned to the CAPS curriculum.
