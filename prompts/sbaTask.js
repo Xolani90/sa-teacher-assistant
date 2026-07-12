@@ -47,6 +47,8 @@ from, to, and step are required; mark, open, ray, and label are optional — inc
 [NUMBERLINE from=-10 to=10 step=1 mark=-3,4]
 [NUMBERLINE from=0 to=10 step=1 open=3 ray=3,right label="x > 3"]
 [NUMBERLINE from=-2 to=8 step=1 open=4 ray=4,left label="x < 4"]
+This format is required in BOTH directions: when a question asks the learner to draw/represent a solution on a number line, AND when a question shows the learner an already-marked number line and asks them to read off the inequality it represents (e.g. "Write down the inequality shown on this number line"). In the second case you are the one choosing what point and direction to mark — pick a specific inequality yourself (e.g. x >= 2) and emit the marked spec for it, exactly as if it were the answer. Never emit a bare, unmarked NUMBERLINE (no mark/open/ray) for this question type — an unmarked line gives the learner nothing to read off and makes the question unanswerable.
+[NUMBERLINE from=-3 to=5 step=1 mark=2 ray=2,right label="Given number line for 2.3"]
 
 ═══════════════════════════════
 *SCHOOL-BASED ASSESSMENT TASK*
