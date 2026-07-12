@@ -587,8 +587,17 @@ const NUMBERLINE_RE = /^\[NUMBERLINE\s+([^\]]+)\]$/i;
 // with numbers. CAPS worksheets have no other reason to print a bare
 // arithmetic sequence alone on its own line.
 const BARE_NUMBER_TOKEN_RE = /^-?\d+(?:\.\d+)?$/;
+// Mark-allocation suffix, e.g. "(2)" or "(2 marks)", optionally with a space
+// before it. Stripped off before tokenising so a bare number line that has
+// its mark allocation on the SAME source line (e.g.
+// "-2 -1 0 1 2 3 4 5 6 7 8 (2)") still gets recognised — previously the
+// "(2)" token failed BARE_NUMBER_TOKEN_RE, tokens.every() returned false,
+// and the whole line silently fell through to plain text.
+const TRAILING_MARK_RE = /\s*\((\d+)(?:\s*marks?)?\)\s*$/i;
 function detectBareNumberLine(line) {
-  const tokens = line.split(/\s+/).filter(Boolean);
+  const markMatch = line.match(TRAILING_MARK_RE);
+  const core = markMatch ? line.slice(0, markMatch.index) : line;
+  const tokens = core.split(/\s+/).filter(Boolean);
   if (tokens.length < 3) return null;
   if (!tokens.every((t) => BARE_NUMBER_TOKEN_RE.test(t))) return null;
   const nums = tokens.map(Number);
@@ -601,7 +610,12 @@ function detectBareNumberLine(line) {
   // an unmarked ruler, which is still a real vector line with ticks and
   // labels instead of naked text. A strict improvement even without the
   // specific answer annotation the question intended.
-  return { from: String(nums[0]), to: String(nums[nums.length - 1]), step: String(step) };
+  return {
+    from: String(nums[0]),
+    to: String(nums[nums.length - 1]),
+    step: String(step),
+    trailingMark: markMatch ? markMatch[0].trim() : null,
+  };
 }
 
 // Parses "key=value key2="quoted value" ..." into a plain object. Quoted
@@ -916,9 +930,20 @@ function renderFormattedText(doc, text, margin = 50) {
     }
 
     // Fallback: AI wrote the number line as bare numbers instead of the
-    // spec above (see detectBareNumberLine's doc comment).
+    // spec above (see detectBareNumberLine's doc comment). If a mark
+    // allocation like "(2)" was on the same source line, it's stripped out
+    // by detectBareNumberLine and re-attached here, right-aligned — same
+    // visual treatment as the marksMatch branch below for ordinary lines —
+    // instead of being silently dropped along with the rest of the line.
     const bareNumberLineSpec = detectBareNumberLine(line);
     if (bareNumberLineSpec) {
+      if (bareNumberLineSpec.trailingMark) {
+        const marksY = doc.y;
+        doc
+          .font(FONTS.heading).fontSize(10).fillColor(COLORS.accent)
+          .text(bareNumberLineSpec.trailingMark, margin, marksY, { width: bodyWidth, align: 'right' });
+        doc.y = marksY;
+      }
       drawNumberLine(doc, margin, bodyWidth, bareNumberLineSpec);
       continue;
     }
