@@ -46,6 +46,12 @@ TEST DETAILS:
 - Subject: ${subjectStr}
 - Total Marks: ${totalMarks}
 
+NUMBER LINES: If any question needs a number line (integers, inequalities, rounding, ordering, etc.), do NOT draw one with dashes/pipes/spaced characters — that never renders aligned. Instead output a single line using this exact bracket syntax, which is rendered as a real number-line graphic:
+[NUMBERLINE from=<start> to=<end> step=<interval> mark=<comma-separated values, solid dots> open=<comma-separated values, open circles> ray=<value>,<left|right> label="<optional caption>"]
+from, to, and step are required; mark, open, ray, and label are optional — include only the ones the question needs. The line must contain nothing else. Examples:
+[NUMBERLINE from=-10 to=10 step=1 mark=-3,4]
+[NUMBERLINE from=0 to=10 step=1 open=3 ray=3,right label="x > 3"]
+
 OUTPUT — produce BOTH sections in full:
 
 ═══════════════════════════════

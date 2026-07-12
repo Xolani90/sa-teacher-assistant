@@ -30,6 +30,11 @@ QUIZ DETAILS:
 - Grade: ${gradeStr}
 - Subject: ${subjectStr}
 
+NUMBER LINES: If a question needs a number line (integers, inequalities, rounding, ordering, etc.), do NOT draw one with dashes/pipes/spaced characters — that never renders aligned. Instead output a single line using this exact bracket syntax, which is rendered as a real number-line graphic:
+[NUMBERLINE from=<start> to=<end> step=<interval> mark=<comma-separated values, solid dots> open=<comma-separated values, open circles> ray=<value>,<left|right> label="<optional caption>"]
+from, to, and step are required; mark, open, ray, and label are optional — include only the ones the question needs. The line must contain nothing else. Example:
+[NUMBERLINE from=-10 to=10 step=1 mark=-3,4]
+
 OUTPUT — use this EXACT format for WhatsApp:
 
 *Quick Quiz: ${topic}*

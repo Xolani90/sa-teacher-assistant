@@ -564,6 +564,135 @@ function drawMetadataBox(doc, { difficulty, bloomLevel, estimatedTime } = {}) {
   doc.y += 12;
 }
 
+// ── Number line ──────────────────────────────────────────────────────────
+//
+// The AI emits a single-line structured spec (see NUMBER LINES section of
+// prompts/worksheet.js) instead of improvised ASCII art. ASCII art built
+// from dashes/pipes/spaced digits only aligns in a monospace font, and even
+// then two separate lines (ruler + labels) require multi-line lookahead
+// that renderFormattedText's single-pass, line-at-a-time loop doesn't have.
+// Drawing real vector graphics sidesteps both problems: tick positions are
+// actual x-coordinates, not character columns, so no font/alignment issue
+// is possible, and the whole thing is one self-contained line to parse.
+const NUMBERLINE_RE = /^\[NUMBERLINE\s+([^\]]+)\]$/i;
+
+// Parses "key=value key2="quoted value" ..." into a plain object. Quoted
+// values may contain spaces (used by label="..."); unquoted values may not.
+function parseNumberLineSpec(str) {
+  const spec = {};
+  const re = /(\w+)=("[^"]*"|[^\s]+)/g;
+  let m;
+  while ((m = re.exec(str))) {
+    let val = m[2];
+    if (val.length >= 2 && val[0] === '"' && val[val.length - 1] === '"') {
+      val = val.slice(1, -1);
+    }
+    spec[m[1]] = val;
+  }
+  return spec;
+}
+
+// Splits a comma-separated list of numbers (e.g. "mark=-3,4") into floats,
+// silently dropping anything that doesn't parse — malformed AI output
+// shouldn't crash PDF generation, it should just render a plainer number line.
+function parseNumberList(str) {
+  if (!str) return [];
+  return str.split(',').map((s) => parseFloat(s.trim())).filter((n) => !Number.isNaN(n));
+}
+
+/**
+ * Draws a CAPS-style number line as real vector graphics: a horizontal
+ * line with arrowheads, evenly-spaced tick marks with numeric labels,
+ * optional solid dots (mark=), open circles (open=, for strict
+ * inequalities), a shaded directional ray (ray=value,left|right), and an
+ * optional caption below.
+ *
+ * @param {PDFDocument} doc
+ * @param {number} margin
+ * @param {number} bodyWidth
+ * @param {{from:string, to:string, step?:string, mark?:string, open?:string, ray?:string, label?:string}} spec
+ */
+function drawNumberLine(doc, margin, bodyWidth, spec) {
+  const from = parseFloat(spec.from);
+  const to = parseFloat(spec.to);
+  let step = spec.step ? parseFloat(spec.step) : 1;
+
+  // Malformed spec (non-numeric range, zero/negative step, or an
+  // absurdly dense line that would just smear into unreadable ink) —
+  // skip drawing rather than throw and abort the whole PDF.
+  if (Number.isNaN(from) || Number.isNaN(to) || to <= from || Number.isNaN(step) || step <= 0) return;
+  const tickCount = Math.round((to - from) / step) + 1;
+  if (tickCount < 2 || tickCount > 41) return;
+
+  const hasLabel = !!spec.label;
+  const lineH = 46 + (hasLabel ? 16 : 0);
+  ensureSpace(doc, lineH);
+
+  const padX = 24; // room for arrowheads at each end
+  const top = doc.y + (hasLabel ? 16 : 6);
+  const x0 = margin + padX;
+  const x1 = margin + bodyWidth - padX;
+  const usableW = x1 - x0;
+  const valueToX = (v) => x0 + ((v - from) / (to - from)) * usableW;
+
+  if (hasLabel) {
+    doc.font(FONTS.heading).fontSize(9).fillColor(COLORS.primary)
+      .text(spec.label, margin, doc.y, { width: bodyWidth, align: 'center', lineBreak: false });
+  }
+
+  // Directional shaded ray (drawn under the main line so the main line's
+  // arrowheads and ticks stay crisp on top of it), e.g. "ray=3,right" for
+  // the solution set of x > 3.
+  if (spec.ray) {
+    const [rawVal, dir] = spec.ray.split(',').map((s) => s.trim());
+    const rv = parseFloat(rawVal);
+    if (!Number.isNaN(rv) && (dir === 'left' || dir === 'right')) {
+      const rx = valueToX(Math.max(from, Math.min(to, rv)));
+      const rayEndX = dir === 'right' ? x1 : x0;
+      doc.moveTo(rx, top).lineTo(rayEndX, top).lineWidth(3).strokeColor(COLORS.accent).stroke();
+    }
+  }
+
+  // Main line with arrowheads at both ends
+  doc.lineWidth(1.25).strokeColor(COLORS.darkText);
+  doc.moveTo(x0 - 8, top).lineTo(x1 + 8, top).stroke();
+  const arrow = (tipX, dir) => {
+    doc.moveTo(tipX, top)
+      .lineTo(tipX - dir * 6, top - 4)
+      .moveTo(tipX, top)
+      .lineTo(tipX - dir * 6, top + 4)
+      .stroke();
+  };
+  arrow(x1 + 8, 1);
+  arrow(x0 - 8, -1);
+
+  // Ticks + numeric labels
+  doc.font(FONTS.body).fontSize(8).fillColor(COLORS.darkText);
+  for (let i = 0; i < tickCount; i++) {
+    const v = from + i * step;
+    const x = valueToX(v);
+    doc.moveTo(x, top - 5).lineTo(x, top + 5).lineWidth(1).strokeColor(COLORS.darkText).stroke();
+    const label = Number.isInteger(v) ? String(v) : String(Math.round(v * 100) / 100);
+    doc.text(label, x - 12, top + 8, { width: 24, align: 'center', lineBreak: false });
+  }
+
+  // Solid dots (closed points — e.g. x >= 3)
+  parseNumberList(spec.mark).forEach((v) => {
+    if (v < from || v > to) return;
+    const x = valueToX(v);
+    doc.circle(x, top, 4).fill(COLORS.primary);
+  });
+
+  // Open circles (strict points — e.g. x > 3)
+  parseNumberList(spec.open).forEach((v) => {
+    if (v < from || v > to) return;
+    const x = valueToX(v);
+    doc.circle(x, top, 4).lineWidth(1.25).fillColor(COLORS.white).fill().strokeColor(COLORS.primary).stroke();
+  });
+
+  doc.y = top + 22;
+}
+
 // ── Table helper ───────────────────────────────────────────────────────────
 
 /**
@@ -744,6 +873,17 @@ function renderFormattedText(doc, text, margin = 50) {
     // Skip Name:/Class:/Date: field lines from the AI text — drawStudentInfoRow
     // already renders these as fillable underlines directly under the header.
     if (/^\*?Name:\*?/i.test(line) || /^\*?Class:\*?/i.test(line)) {
+      continue;
+    }
+
+    // Number line spec: [NUMBERLINE from=-10 to=10 step=1 mark=-3,4 ...]
+    // See prompts/worksheet.js "NUMBER LINES" instructions — the AI emits
+    // this instead of improvised ASCII art (see drawNumberLine's doc
+    // comment for why ASCII art doesn't work with this parser).
+    const numberLineMatch = line.match(NUMBERLINE_RE);
+    if (numberLineMatch) {
+      const spec = parseNumberLineSpec(numberLineMatch[1]);
+      drawNumberLine(doc, margin, bodyWidth, spec);
       continue;
     }
 

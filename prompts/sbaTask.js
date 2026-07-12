@@ -41,6 +41,12 @@ SBA REQUIREMENTS:
 - References South African context where appropriate
 - Meets DBE SBA formatting standards
 
+NUMBER LINES: If any activity needs a number line (integers, inequalities, rounding, ordering, etc.), do NOT draw one with dashes/pipes/spaced characters — that never renders aligned. Instead output a single line using this exact bracket syntax, which is rendered as a real number-line graphic:
+[NUMBERLINE from=<start> to=<end> step=<interval> mark=<comma-separated values, solid dots> open=<comma-separated values, open circles> ray=<value>,<left|right> label="<optional caption>"]
+from, to, and step are required; mark, open, ray, and label are optional — include only the ones the activity needs. The line must contain nothing else. Examples:
+[NUMBERLINE from=-10 to=10 step=1 mark=-3,4]
+[NUMBERLINE from=0 to=10 step=1 open=3 ray=3,right label="x > 3"]
+
 ═══════════════════════════════
 *SCHOOL-BASED ASSESSMENT TASK*
 *${subjectStr} | ${gradeStr}*
