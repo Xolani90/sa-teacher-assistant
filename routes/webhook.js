@@ -222,10 +222,22 @@ async function handleReportCommentFlow(from, text, preClassifiedIntent = null) {
 
   if (state.step === 'ask_behaviour_batch') {
     const currentLearner = state.batch[state.batchIndex];
-    const behaviourNotes = trimmed.toLowerCase() === 'skip' ? null : trimmed;
+    // Normalise before comparing: WhatsApp renders *text* as bold
+    // client-side, so a teacher replying to a bolded "Reply *skip all*"
+    // prompt only ever sees and types the plain words "skip all" — never
+    // the literal asterisk characters. The previous exact-match check
+    // ('*skip all*') could essentially never be triggered by a real reply,
+    // so "skip all" fell through to being stored as literal behaviourNotes
+    // text instead of skipping — it showed up in the generated PDF as
+    // "Behaviour: skip all" for every learner it was typed for, rather than
+    // skipping behaviour notes as the teacher intended.
+    const normalised = trimmed.toLowerCase().replace(/\*/g, '').trim();
+    const isSkipAll = normalised === 'skip all';
+    const isSkipOne = normalised === 'skip';
+    const behaviourNotes = (isSkipOne || isSkipAll) ? null : trimmed;
 
     // Check for skip all
-    if (trimmed.toLowerCase() === '*skip all*') {
+    if (isSkipAll) {
       const remaining = state.batch.length - state.batchIndex;
       await safeSendMessage(from, `⏳ Generating comments for remaining ${remaining} learners...`);
       

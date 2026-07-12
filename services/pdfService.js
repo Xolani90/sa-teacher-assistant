@@ -1338,7 +1338,18 @@ async function generateReportSummaryPdf(comments, metadata = {}) {
   // nothing but also didn't grow, so any 2-line cell bled into the row below).
   comments.forEach((c, i) => {
     const markStr = formatMarkStr(c);
-    const excerpt = (c.comment || '').substring(0, 80) + (c.comment && c.comment.length > 80 ? '…' : '');
+    // The AI always prefixes comments with a "*REPORT COMMENT*" label (see
+    // prompts/reportComment.js) meant to render bold in the full-comment
+    // view further down this document. Table cells, unlike that view, are
+    // drawn with a single plain doc.text() call each — so without this
+    // strip, the raw label's asterisks print literally in the PDF (e.g.
+    // "*REPORT COMMENT* Thabo has..."), and the excerpt wastes most of its
+    // 80-character budget on boilerplate instead of the actual comment.
+    const cleanedComment = (c.comment || '')
+      .replace(/^\s*\*+\s*report comment\s*\*+\s*/i, '')
+      .replace(/\*/g, '')
+      .trim();
+    const excerpt = cleanedComment.substring(0, 80) + (cleanedComment.length > 80 ? '…' : '');
     const cells = [c.learnerName || '—', markStr, excerpt];
 
     const rowHeight = computeRowHeight(doc, cells, colWidths, MIN_ROW_HEIGHT);
