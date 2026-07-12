@@ -3197,6 +3197,12 @@ async function processGeneration(from, intent, originalText = null) {
     return null;
   });
 
+  // ── TEMP DEBUG: log raw AI output for 'test' content to diagnose the
+  // "1/4 of the learners" -> "14" fraction-loss bug. Remove once resolved.
+  if (content && intent.type === 'test') {
+    console.log('[DEBUG RAW AI OUTPUT]', JSON.stringify(content));
+  }
+
   if (!content) return; // Error already sent to teacher
 
   // ── ATP-only safety net: verify week ranges are sequential and
