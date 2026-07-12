@@ -17,7 +17,6 @@ function measureFraction(doc, fontSize, whole, num, den, font) {
 
 function drawFraction(doc, x, y, fontSize, whole, num, den, color, font) {
   font = font || FONTS.body;
-  console.log('[DEBUG drawFraction]', { x, y, fontSize, num, den, whole });
   const m = measureFraction(doc, fontSize, whole, num, den, font);
   let cx = x;
 
