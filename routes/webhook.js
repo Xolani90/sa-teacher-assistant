@@ -30,6 +30,41 @@ const { SessionStore, clearAllSessionsForHash } = require('../utils/sessionStore
 const { isCeilingReached } = require('../utils/aiCostMonitor');
 const { handleCurriculumQuery } = require('../services/curriculumIntelligenceService');
 const { buildFullInterventionPlanPrompt } = require('../prompts/fullInterventionPlan');
+
+/**
+ * Rolls back a usage_events row created by checkAndIncrementUsage() when
+ * the generation that consumed it subsequently fails. Deletes the EXACT
+ * row this request created (quota.insertedRowId), never a MAX(id)-based
+ * guess — a second, unrelated request for the same teacher/month can
+ * insert its own row in the meantime, since no per-teacher serialization
+ * exists across separate webhook deliveries (see
+ * tests/phase-e-usage-rollback.test.js).
+ *
+ * No-ops for Pro-tier teachers (checkAndIncrementUsage never sets
+ * insertedRowId for Pro-tier calls) and for any quota result missing
+ * insertedRowId.
+ *
+ * @param {{isPro?: boolean, insertedRowId?: number}} quota
+ * @param {string} from - teacher's WhatsApp number, for logging only
+ */
+function rollbackUsage(quota, from) {
+  if (quota && quota.isPro) return;
+  if (!quota || typeof quota.insertedRowId !== 'number') {
+    console.warn(`[WEBHOOK] Usage rollback skipped — no insertedRowId on quota result for ...${String(from).slice(-4)}`);
+    return;
+  }
+  try {
+    const db = require('../utils/database').getDb();
+    const result = db.prepare(`DELETE FROM usage_events WHERE id = ?`).run(quota.insertedRowId);
+    if (result.changes === 1) {
+      console.log(`[WEBHOOK] Rolled back usage increment (row id=${quota.insertedRowId}) for free-tier teacher ...${String(from).slice(-4)}`);
+    } else {
+      console.warn(`[WEBHOOK] Usage rollback found no row to delete (id=${quota.insertedRowId}, already removed?) for ...${String(from).slice(-4)}`);
+    }
+  } catch (rollbackErr) {
+    console.error('[WEBHOOK] Failed to roll back usage increment:', rollbackErr.message);
+  }
+}
 const {
   saveReport,
   getSavedReport,
@@ -279,6 +314,7 @@ async function handleReportCommentFlow(from, text, preClassifiedIntent = null) {
           });
         } catch (err) {
           console.error(`[WEBHOOK] Failed to generate comment for ${learner.name}:`, err.message);
+          rollbackUsage(batchQuota, from);
           state.comments.push({
             learnerName: learner.name,
             mark: learner.mark,
@@ -329,6 +365,7 @@ async function handleReportCommentFlow(from, text, preClassifiedIntent = null) {
       });
     } catch (err) {
       console.error(`[WEBHOOK] Failed to generate comment for ${currentLearner.name}:`, err.message);
+      rollbackUsage(learnerQuota, from);
       state.comments.push({
         learnerName: currentLearner.name,
         mark: currentLearner.mark,
@@ -465,24 +502,7 @@ async function handleReportCommentFlow(from, text, preClassifiedIntent = null) {
     } catch (err) {
       console.error('[WEBHOOK] Report comment generation failed:', err.message);
       // Roll back usage increment for free-tier teachers
-      if (!quota.isPro) {
-        try {
-          const db = require('../utils/database').getDb();
-          if (typeof quota.insertedRowId === 'number') {
-            // Delete the EXACT row this request created, not "whichever row
-            // is currently newest" — see routes/webhook.js's main generation
-            // rollback (line ~3160) and tests/phase-e-usage-rollback.test.js
-            // for the full rationale: a second, unrelated request for the
-            // same teacher/month can insert its own row in the meantime,
-            // since no per-teacher serialization exists across separate
-            // webhook deliveries.
-            db.prepare(`DELETE FROM usage_events WHERE id = ?`).run(quota.insertedRowId);
-          }
-          console.log(`[WEBHOOK] Rolled back usage increment for free-tier teacher ...${String(from).slice(-4)}`);
-        } catch (rollbackErr) {
-          console.error('[WEBHOOK] Failed to roll back usage increment:', rollbackErr.message);
-        }
-      }
+      rollbackUsage(quota, from);
       await safeSendMessage(from, `❌ *Generation failed*\n\nSomething went wrong. Please try again.`);
       reportCommentState.delete(phoneHash);
     }
@@ -572,32 +592,38 @@ async function handleParentMessageFlow(from, text, preClassifiedIntent = null) {
           return true;
         }
         // Generate immediately
-        const prompt = buildPrompt({
-          type: 'parentMessage',
-          situation,
-          learnerName,
-          grade: teacher?.grade || null,
-          subject: teacher?.subject || 'general',
-          language: teacher?.language || 'english',
-          teacherName: teacher?.name || null,
-          school: teacher?.school || null,
-        }, {});
-        const content = await generateContent(prompt, 'parentMessage');
-        await safeSendMessage(from, content);
-        await safeSendMessage(from, `\n\n↩️ Reply FORMAL for a more formal letter version\n\n🌍 Reply TRANSLATE to get it in another language`);
-        // Store for FORMAL/TRANSLATE commands
-        parentMessageState.set(phoneHash, {
-          step: 'post_generation',
-          situation,
-          learnerName,
-          grade: teacher?.grade || null,
-          subject: teacher?.subject || 'general',
-          language: teacher?.language || 'english',
-          teacherName: teacher?.name || null,
-          school: teacher?.school || null,
-          lastContent: content,
-          lastActivity: Date.now(),
-        });
+        try {
+          const prompt = buildPrompt({
+            type: 'parentMessage',
+            situation,
+            learnerName,
+            grade: teacher?.grade || null,
+            subject: teacher?.subject || 'general',
+            language: teacher?.language || 'english',
+            teacherName: teacher?.name || null,
+            school: teacher?.school || null,
+          }, {});
+          const content = await generateContent(prompt, 'parentMessage');
+          await safeSendMessage(from, content);
+          await safeSendMessage(from, `\n\n↩️ Reply FORMAL for a more formal letter version\n\n🌍 Reply TRANSLATE to get it in another language`);
+          // Store for FORMAL/TRANSLATE commands
+          parentMessageState.set(phoneHash, {
+            step: 'post_generation',
+            situation,
+            learnerName,
+            grade: teacher?.grade || null,
+            subject: teacher?.subject || 'general',
+            language: teacher?.language || 'english',
+            teacherName: teacher?.name || null,
+            school: teacher?.school || null,
+            lastContent: content,
+            lastActivity: Date.now(),
+          });
+        } catch (err) {
+          console.error('[WEBHOOK] Quick parent message generation failed:', err.message);
+          rollbackUsage(quota, from);
+          await safeSendMessage(from, `❌ *Generation failed*\n\nSomething went wrong. Please try again.`);
+        }
       } else {
         // Ask for learner name
         parentMessageState.set(phoneHash, {
@@ -663,17 +689,7 @@ async function handleParentMessageFlow(from, text, preClassifiedIntent = null) {
       parentMessageState.set(phoneHash, state);
     } catch (err) {
       console.error('[WEBHOOK] Parent message generation failed:', err.message);
-      if (!quota.isPro) {
-        try {
-          const db = require('../utils/database').getDb();
-          if (typeof quota.insertedRowId === 'number') {
-            db.prepare(`DELETE FROM usage_events WHERE id = ?`).run(quota.insertedRowId);
-          }
-          console.log(`[WEBHOOK] Rolled back usage increment for free-tier teacher ...${String(from).slice(-4)}`);
-        } catch (rollbackErr) {
-          console.error('[WEBHOOK] Failed to roll back usage increment:', rollbackErr.message);
-        }
-      }
+      rollbackUsage(quota, from);
       await safeSendMessage(from, `❌ *Generation failed*\n\nSomething went wrong. Please try again.`);
       parentMessageState.delete(phoneHash);
     }
@@ -721,6 +737,7 @@ async function handleParentMessageFlow(from, text, preClassifiedIntent = null) {
       parentMessageState.delete(phoneHash);
     } catch (err) {
       console.error('[WEBHOOK] Translation failed:', err.message);
+      rollbackUsage(translateQuota, from);
       await safeSendMessage(from, `❌ *Translation failed*\n\nSomething went wrong. Please try again.`);
       parentMessageState.delete(phoneHash);
     }
@@ -1419,22 +1436,7 @@ async function handleAssessmentAnalysisFlow(from, text, preClassifiedIntent = nu
       await safeSendMessage(from, `💡 Want me to turn this into an intervention plan for the learners who need the most help? Just say "intervention plan" or reply *HELP* for everything else I can do.`);
     } catch (err) {
       console.error('[WEBHOOK] Assessment analysis generation failed:', err.message);
-      try {
-        const db = require('../utils/database').getDb();
-        if (typeof quota.insertedRowId === 'number') {
-          // Delete the EXACT row this request created (see
-          // tests/phase-e-usage-rollback.test.js for full rationale).
-          // typeof check also correctly skips Pro-tier teachers: the
-          // Pro-tier branch of checkAndIncrementUsage never sets
-          // insertedRowId, so this never touches their usage-log rows —
-          // previously this site had no isPro gate at all and would have
-          // (incorrectly) attempted to delete a Pro teacher's logging row
-          // via MAX(id) too.
-          db.prepare(`DELETE FROM usage_events WHERE id = ?`).run(quota.insertedRowId);
-        }
-      } catch (rollbackErr) {
-        console.error('[WEBHOOK] Failed to roll back usage increment:', rollbackErr.message);
-      }
+      rollbackUsage(quota, from);
       await safeSendMessage(from, `❌ Something went wrong generating that analysis. Please try again.`);
     }
     assessmentAnalysisState.delete(phoneHash);
@@ -1645,14 +1647,7 @@ async function generateInterventionOutput(from, state, phoneHash) {
     }
   } catch (err) {
     console.error('[WEBHOOK] Intervention plan generation failed:', err.message);
-    try {
-      const db = require('../utils/database').getDb();
-      if (typeof quota.insertedRowId === 'number') {
-        db.prepare(`DELETE FROM usage_events WHERE id = ?`).run(quota.insertedRowId);
-      }
-    } catch (rollbackErr) {
-      console.error('[WEBHOOK] Failed to roll back usage increment:', rollbackErr.message);
-    }
+    rollbackUsage(quota, from);
     await safeSendMessage(from, `❌ Something went wrong generating that. Please try again.`);
   }
   interventionPlanState.delete(phoneHash);
@@ -2704,6 +2699,7 @@ async function handleCommand(from, text) {
       parentMessageState.delete(phoneHash);
     } catch (err) {
       console.error('[WEBHOOK] Formal letter generation failed:', err.message);
+      rollbackUsage(formalQuota, from);
       await safeSendMessage(from, `❌ *Generation failed*\n\nSomething went wrong. Please try again.`);
     }
     return true;
@@ -3166,29 +3162,7 @@ async function processGeneration(from, intent, originalText = null) {
   const content = await generateContent(prompt, intent.type).catch(async (err) => {
     console.error('[WEBHOOK] AI generation failed:', err.message);
     // Roll back usage increment for free-tier teachers
-    if (!quota.isPro) {
-      try {
-        const db = require('../utils/database').getDb();
-        if (typeof quota.insertedRowId === 'number') {
-          // Delete the EXACT row this request created, not "whichever row
-          // is currently newest" — a second, unrelated request for the
-          // same teacher/month may have inserted its own row in the
-          // meantime (no per-teacher serialization exists across separate
-          // webhook deliveries), which a MAX(id)-based delete would
-          // wrongly remove instead of this request's own failed row.
-          const result = db.prepare(`DELETE FROM usage_events WHERE id = ?`).run(quota.insertedRowId);
-          if (result.changes === 1) {
-            console.log(`[WEBHOOK] Rolled back usage increment (row id=${quota.insertedRowId}) for free-tier teacher ...${String(from).slice(-4)}`);
-          } else {
-            console.warn(`[WEBHOOK] Usage rollback found no row to delete (id=${quota.insertedRowId}, already removed?) for ...${String(from).slice(-4)}`);
-          }
-        } else {
-          console.warn(`[WEBHOOK] Usage rollback skipped — no insertedRowId on quota result for ...${String(from).slice(-4)}`);
-        }
-      } catch (rollbackErr) {
-        console.error('[WEBHOOK] Failed to roll back usage increment:', rollbackErr.message);
-      }
-    }
+    rollbackUsage(quota, from);
     await safeSendMessage(from,
       `Something went wrong on my end — please try again in a moment. If it keeps happening, reply *HELP*.`
     ).catch(() => {}); // best-effort — don't double-throw
