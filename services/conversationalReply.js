@@ -15,7 +15,6 @@
  */
 
 const { generateContent } = require('./aiService');
-const { INTENT_TYPES } = require('../utils/intentParser');
 const {
   generateConversationalResponse: templatedResponse,
 } = require('./conversationService');

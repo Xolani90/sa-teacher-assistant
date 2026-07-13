@@ -9,7 +9,6 @@ const { buildPrompt }            = require('../services/promptService');
 const { generateContent }        = require('../services/aiService');
 const { sendMessage, sendDocument, downloadMedia } = require('../services/whatsappService');
 const { parseMarks, extractMarksFromImage, getFormatHelpText } = require('../utils/marksParser');
-const { generateWithVision } = require('../services/aiService');
 const { processAssessmentData } = require('../services/diagnosticWorkflowService');
 const { generateConversationalResponse, isConversationalIntent } = require('../services/conversationService');
 const { generateConversationalReplyAI } = require('../services/conversationalReply');
@@ -28,8 +27,8 @@ const { validateAtpWeeks } = require('../utils/atpWeekValidator');
 const { buildPaymentUrl }        = require('../services/yocoService');
 const { encryptPhone }           = require('../utils/encryption');
 const { SessionStore, clearAllSessionsForHash } = require('../utils/sessionStore');
-const { isCeilingReached, getStats: getAiStats } = require('../utils/aiCostMonitor');
-const { handleCurriculumQuery, getCurrentATPWeek } = require('../services/curriculumIntelligenceService');
+const { isCeilingReached } = require('../utils/aiCostMonitor');
+const { handleCurriculumQuery } = require('../services/curriculumIntelligenceService');
 const { buildFullInterventionPlanPrompt } = require('../prompts/fullInterventionPlan');
 const {
   saveReport,
@@ -2009,7 +2008,6 @@ async function handleCommand(from, text) {
       getTeacherClasses,
       createClass,
       getAssessmentHistory,
-      getWorkspaceSummary,
       validateNewClassInput,
       saveResource,
       getSavedResources,
