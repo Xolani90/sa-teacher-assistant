@@ -249,23 +249,40 @@ function runMigrations() {
     // column whitelist — this migration plus the whitelist fix close that gap.
     `ALTER TABLE teachers ADD COLUMN last_assessment_id INTEGER`,
 
-    // Migration 019: Convert 'Grade N' strings to integers
-    // parseGradeInput now returns integer (1-12) instead of "Grade N" string.
-    // This migration converts existing data to match the new format.
-    // Idempotent: only affects rows matching the 'Grade N' pattern.
-    `UPDATE teachers SET grade = CAST(SUBSTR(grade, 7) AS INTEGER) WHERE grade LIKE 'Grade %'`,
-
-    // Migration 021: Fix "N.0" grade values.
-    // better-sqlite3 binds a raw JS integer to the TEXT `grade` column via
-    // its float string form (e.g. 7 -> "7.0"), not "7". This has been
-    // silently corrupting the column since parseGradeInput started
-    // returning an integer (see migration 019). updateTeacherProfile now
-    // stringifies grade before binding, so this migration is a one-time
-    // cleanup of rows already written with the "N.0" pattern. Idempotent.
-    // (Numbered 021, not 020 — 020 is already used by the learner-analytics
-    // index migration below.)
-    `UPDATE teachers SET grade = CAST(CAST(grade AS REAL) AS INTEGER) WHERE grade LIKE '%.0'`,
+    // Migration 019 and Migration 021 (grade data-repair) were moved out of
+    // this array — see dataRepairMigrations below. They are UPDATE
+    // statements, not ALTER TABLEs, so they don't belong under this loop's
+    // blanket catch, which assumes "column already exists" and would
+    // silently swallow a genuine data-repair failure.
   ];
+
+  // Migrations 019 and 021 are one-time data-repair UPDATEs, not additive
+  // ALTER TABLEs. Both are idempotent (re-running is a safe no-op once data
+  // is already in the target format), so they run on every startup, but a
+  // genuine failure (locked table, malformed data) is now logged instead of
+  // being silently swallowed by the alterations loop's blanket catch.
+  const dataRepairMigrations = [
+    {
+      name: "Migration 019: Convert 'Grade N' strings to integers",
+      // parseGradeInput now returns integer (1-12) instead of "Grade N" string.
+      // Idempotent: only affects rows matching the 'Grade N' pattern.
+      sql: `UPDATE teachers SET grade = CAST(SUBSTR(grade, 7) AS INTEGER) WHERE grade LIKE 'Grade %'`,
+    },
+    {
+      name: 'Migration 021: Fix "N.0" grade values',
+      // better-sqlite3 binds a raw JS integer to the TEXT `grade` column via
+      // its float string form (e.g. 7 -> "7.0"), not "7". One-time cleanup
+      // of rows already written with the "N.0" pattern. Idempotent.
+      sql: `UPDATE teachers SET grade = CAST(CAST(grade AS REAL) AS INTEGER) WHERE grade LIKE '%.0'`,
+    },
+  ];
+  for (const { name, sql } of dataRepairMigrations) {
+    try {
+      db.exec(sql);
+    } catch (err) {
+      console.error(`[DB] ${name} FAILED:`, err.message);
+    }
+  }
 
   // Migration 008: persistent multi-turn session store
   // Replaces in-memory Maps so sessions survive process restarts and deploys.
