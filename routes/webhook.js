@@ -65,6 +65,24 @@ function rollbackUsage(quota, from) {
     console.error('[WEBHOOK] Failed to roll back usage increment:', rollbackErr.message);
   }
 }
+
+/**
+ * Builds the signed, time-limited download URL for a generated PDF.
+ * Consolidates what was previously 5 independent copies of the same
+ * HMAC-token logic scattered across the file — a change to the signing
+ * scheme (e.g. rotating to a longer token, changing the digest algorithm)
+ * previously required editing all 5 in lockstep, with no compiler or test
+ * to catch a missed one.
+ *
+ * @param {string} fileId - the PDF's file identifier, as returned by
+ *   generatePdf() / generateReportSummaryPdf()
+ * @returns {string} full URL, e.g. `${APP_URL}/pdf/${fileId}?t=${token}`
+ */
+function buildPdfUrl(fileId) {
+  const crypto = require('crypto');
+  const token = crypto.createHmac('sha256', process.env.PDF_SECRET).update(fileId).digest('hex').slice(0, 16);
+  return `${process.env.APP_URL}/pdf/${fileId}?t=${token}`;
+}
 const {
   saveReport,
   getSavedReport,
@@ -1424,9 +1442,7 @@ async function handleAssessmentAnalysisFlow(from, text, preClassifiedIntent = nu
             subject: state.subject,
             school: (getTeacherByPhone(from) || {}).school || '',
           });
-          const crypto = require('crypto');
-          const token = crypto.createHmac('sha256', process.env.PDF_SECRET).update(fileId).digest('hex').slice(0, 16);
-          const pdfUrl = `${process.env.APP_URL}/pdf/${fileId}?t=${token}`;
+          const pdfUrl = buildPdfUrl(fileId);
           await sendDocument(from, pdfUrl, filename, `📎 *PDF Download* (available for 2 hours)`);
         } catch (pdfErr) {
           console.error('[WEBHOOK] Assessment analysis PDF generation failed:', pdfErr.message);
@@ -1637,9 +1653,7 @@ async function generateInterventionOutput(from, state, phoneHash) {
           subject: state.subject,
           school: (getTeacherByPhone(from) || {}).school || '',
         });
-        const crypto = require('crypto');
-        const token = crypto.createHmac('sha256', process.env.PDF_SECRET).update(fileId).digest('hex').slice(0, 16);
-        const pdfUrl = `${process.env.APP_URL}/pdf/${fileId}?t=${token}`;
+        const pdfUrl = buildPdfUrl(fileId);
         await sendDocument(from, pdfUrl, filename, `📎 *PDF Download* (available for 2 hours)`);
       } catch (pdfErr) {
         console.error('[WEBHOOK] Intervention plan PDF generation failed:', pdfErr.message);
@@ -2523,9 +2537,7 @@ async function handleCommand(from, text) {
           subject: assessmentLabel.subject,
           school: teacher.school || '',
         });
-        const crypto = require('crypto');
-        const token = crypto.createHmac('sha256', process.env.PDF_SECRET).update(fileId).digest('hex').slice(0, 16);
-        const pdfUrl = `${process.env.APP_URL}/pdf/${fileId}?t=${token}`;
+        const pdfUrl = buildPdfUrl(fileId);
         await sendDocument(from, pdfUrl, filename, `📎 *Diagnostic Report PDF* (available for 2 hours)`);
       } catch (pdfErr) {
         console.error('[WEBHOOK] Diagnostic report PDF generation failed:', pdfErr.message);
@@ -3232,9 +3244,7 @@ async function processGeneration(from, intent, originalText = null) {
         school:  teacher?.school || '',
         marks:   intent.marks,
       });
-      const crypto = require('crypto');
-      const token = crypto.createHmac('sha256', process.env.PDF_SECRET).update(fileId).digest('hex').slice(0, 16);
-      const pdfUrl = `${process.env.APP_URL}/pdf/${fileId}?t=${token}`;
+      const pdfUrl = buildPdfUrl(fileId);
       await sendDocument(from, pdfUrl, filename, `📎 *PDF Download* (available for 2 hours)\n\n_Open in your browser to download and print._`);
     } catch (pdfErr) {
       console.error('[WEBHOOK] PDF generation failed:', pdfErr.message);
@@ -3379,9 +3389,7 @@ async function generateAndSendBatchPdf(from, state) {
       subject: state.subject,
       school: teacher?.school || '',
     });
-    const crypto = require('crypto');
-    const token = crypto.createHmac('sha256', process.env.PDF_SECRET).update(fileId).digest('hex').slice(0, 16);
-    const pdfUrl = `${process.env.APP_URL}/pdf/${fileId}?t=${token}`;
+    const pdfUrl = buildPdfUrl(fileId);
     await sendDocument(from, pdfUrl, filename, `📄 *Your report comments are ready!*\n\nAll ${state.batch.length} comments have been compiled into the PDF above.`);
   } catch (pdfErr) {
     console.error('[WEBHOOK] Batch PDF generation failed:', pdfErr.message);
