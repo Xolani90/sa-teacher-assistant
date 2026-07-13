@@ -1485,120 +1485,141 @@ async function generateReportSummaryPdf(comments, metadata = {}) {
   const filename = `Report_Comments_${grade || 'All'}_${subject || 'All'}.pdf`;
   const filePath = path.join(PDF_DIR, `${fileId}.pdf`); // FIX: was missing .pdf extension
 
-  const doc = new PDFDocument({
-    size: 'A4',
-    margins: { top: 110, bottom: 60, left: 50, right: 50 },
-    bufferPages: true, // Required so bufferedPageRange().count is accurate for "Page X of Y" (see stampPageNumbers)
-  });
-  makePdfTextSafe(doc);
-
-  const stream = fs.createWriteStream(filePath);
-  doc.pipe(stream);
-
-  const title = 'REPORT COMMENTS SUMMARY';
-
-  // FIX: drawHeader requires a single meta object — was incorrectly called
-  // with positional args (drawHeader(doc, 'title', school, grade, subject))
-  // which caused title/grade/subject/school to all be undefined.
-  drawHeader(doc, { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA') });
-
-  // Add footer to each new page
-  doc.on('pageAdded', () => {
-    drawHeader(doc, { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA') });
-    drawFooter(doc, school);
-  });
-
-  drawFooter(doc, school);
-
-  // Summary table
-  doc.moveDown(0.5);
-  doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text('Summary Table', { underline: true });
-  doc.moveDown(0.5);
-
-  const tableLeft = 50;
-  const bodyWidth = doc.page.width - tableLeft * 2; // 495.28pt on A4 — the
-  // old fixed widths [120, 60, 335] summed to 515pt, 20pt WIDER than this,
-  // so the Comment column ran past the right margin. Widths below are
-  // proportional to the old ratio (~24% / 12% / 64%) but scaled to fit
-  // exactly within the printable body width.
-  const colWidths = [
-    Math.round(bodyWidth * 0.24),
-    Math.round(bodyWidth * 0.12),
-    0, // filled in below — absorbs rounding so the row is pixel-exact
-  ];
-  colWidths[2] = bodyWidth - colWidths[0] - colWidths[1];
-
-  const HEADER_ROW_HEIGHT = 20;
-  const MIN_ROW_HEIGHT = 20;
-
-  ensureSpace(doc, HEADER_ROW_HEIGHT + MIN_ROW_HEIGHT);
-  drawTableHeaderRow(doc, ['Learner', 'Mark', 'Comment (excerpt)'], tableLeft, colWidths, HEADER_ROW_HEIGHT);
-
-  // Table rows — dynamic height so wrapped learner names / excerpts never
-  // overlap the next row (previously a fixed 22pt row height truncated
-  // nothing but also didn't grow, so any 2-line cell bled into the row below).
-  comments.forEach((c, i) => {
-    const markStr = formatMarkStr(c);
-    // The AI always prefixes comments with a "*REPORT COMMENT*" label (see
-    // prompts/reportComment.js) meant to render bold in the full-comment
-    // view further down this document. Table cells, unlike that view, are
-    // drawn with a single plain doc.text() call each — so without this
-    // strip, the raw label's asterisks print literally in the PDF (e.g.
-    // "*REPORT COMMENT* Thabo has..."), and the excerpt wastes most of its
-    // 80-character budget on boilerplate instead of the actual comment.
-    const cleanedComment = (c.comment || '')
-      .replace(/^\s*\*+\s*report comment\s*\*+\s*/i, '')
-      .replace(/\*/g, '')
-      .trim();
-    const excerpt = cleanedComment.substring(0, 80) + (cleanedComment.length > 80 ? '…' : '');
-    const cells = [c.learnerName || '—', markStr, excerpt];
-
-    const rowHeight = computeRowHeight(doc, cells, colWidths, MIN_ROW_HEIGHT);
-    const yBefore = doc.y;
-    ensureSpace(doc, rowHeight);
-    if (doc.y !== yBefore) {
-      // ensureSpace triggered a page break (doc.y reset to top margin) —
-      // repeat the header row so the continuation isn't headerless.
-      drawTableHeaderRow(doc, ['Learner', 'Mark', 'Comment (excerpt)'], tableLeft, colWidths, HEADER_ROW_HEIGHT);
-    }
-    drawTableDataRow(doc, cells, tableLeft, colWidths, rowHeight, { striped: i % 2 === 1 });
-  });
-
-  doc.moveDown(2);
-
-  // Full comments — one per page after the first
-  doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text('Full Comments', { underline: true });
-  doc.moveDown(0.5);
-
-  comments.forEach((c, i) => {
-    if (i > 0) {
-      doc.addPage();
-    }
-
-    const markStr = formatMarkStr(c);
-
-    doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text(`Learner: ${c.learnerName || ''}`);
-    doc.font(FONTS.body).fontSize(11).fillColor(COLORS.darkText).text(`Mark: ${markStr}`);
-    if (c.behaviourNotes) {
-      doc.font(FONTS.body).fontSize(11).fillColor(COLORS.darkText).text(`Behaviour: ${c.behaviourNotes}`);
-    }
-    doc.moveDown(0.5);
-
-    doc.font(FONTS.body).fontSize(11);
-    renderFormattedText(doc, c.comment || '');
-
-    doc.moveDown(1);
-  });
-
-  // Total page count is only known now that all content has been rendered —
-  // stamp "Page X of Y" on every buffered page before finalizing the doc.
-  stampPageNumbers(doc);
-
-  doc.end();
-
+  // Rendering is wrapped in the Promise executor (matching generatePdf's
+  // pattern) rather than running as plain synchronous code before the
+  // eventual `return new Promise(...)`. Previously, if anything thrown
+  // during table/comment rendering — a malformed `comments` entry, a
+  // PDFKit layout error — the function still rejected correctly (it's
+  // `async`, so a synchronous throw auto-rejects the returned promise),
+  // but doc.end() was never reached: the write stream was left open and a
+  // partial .pdf file sat on disk until the next cleanupOldPdfs() sweep
+  // (up to 2 hours later) instead of being cleaned up immediately. Wrapping
+  // here lets the catch block destroy the stream and unlink the partial
+  // file synchronously, right when the failure happens.
   return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: 'A4',
+      margins: { top: 110, bottom: 60, left: 50, right: 50 },
+      bufferPages: true, // Required so bufferedPageRange().count is accurate for "Page X of Y" (see stampPageNumbers)
+    });
+    makePdfTextSafe(doc);
+
+    const stream = fs.createWriteStream(filePath);
+    doc.pipe(stream);
+
     stream.on('finish', () => resolve({ fileId, filename }));
     stream.on('error', reject);
+
+    try {
+      const title = 'REPORT COMMENTS SUMMARY';
+
+      // FIX: drawHeader requires a single meta object — was incorrectly called
+      // with positional args (drawHeader(doc, 'title', school, grade, subject))
+      // which caused title/grade/subject/school to all be undefined.
+      drawHeader(doc, { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA') });
+
+      // Add footer to each new page
+      doc.on('pageAdded', () => {
+        drawHeader(doc, { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA') });
+        drawFooter(doc, school);
+      });
+
+      drawFooter(doc, school);
+
+      // Summary table
+      doc.moveDown(0.5);
+      doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text('Summary Table', { underline: true });
+      doc.moveDown(0.5);
+
+      const tableLeft = 50;
+      const bodyWidth = doc.page.width - tableLeft * 2; // 495.28pt on A4 — the
+      // old fixed widths [120, 60, 335] summed to 515pt, 20pt WIDER than this,
+      // so the Comment column ran past the right margin. Widths below are
+      // proportional to the old ratio (~24% / 12% / 64%) but scaled to fit
+      // exactly within the printable body width.
+      const colWidths = [
+        Math.round(bodyWidth * 0.24),
+        Math.round(bodyWidth * 0.12),
+        0, // filled in below — absorbs rounding so the row is pixel-exact
+      ];
+      colWidths[2] = bodyWidth - colWidths[0] - colWidths[1];
+
+      const HEADER_ROW_HEIGHT = 20;
+      const MIN_ROW_HEIGHT = 20;
+
+      ensureSpace(doc, HEADER_ROW_HEIGHT + MIN_ROW_HEIGHT);
+      drawTableHeaderRow(doc, ['Learner', 'Mark', 'Comment (excerpt)'], tableLeft, colWidths, HEADER_ROW_HEIGHT);
+
+      // Table rows — dynamic height so wrapped learner names / excerpts never
+      // overlap the next row (previously a fixed 22pt row height truncated
+      // nothing but also didn't grow, so any 2-line cell bled into the row below).
+      comments.forEach((c, i) => {
+        const markStr = formatMarkStr(c);
+        // The AI always prefixes comments with a "*REPORT COMMENT*" label (see
+        // prompts/reportComment.js) meant to render bold in the full-comment
+        // view further down this document. Table cells, unlike that view, are
+        // drawn with a single plain doc.text() call each — so without this
+        // strip, the raw label's asterisks print literally in the PDF (e.g.
+        // "*REPORT COMMENT* Thabo has..."), and the excerpt wastes most of its
+        // 80-character budget on boilerplate instead of the actual comment.
+        const cleanedComment = (c.comment || '')
+          .replace(/^\s*\*+\s*report comment\s*\*+\s*/i, '')
+          .replace(/\*/g, '')
+          .trim();
+        const excerpt = cleanedComment.substring(0, 80) + (cleanedComment.length > 80 ? '…' : '');
+        const cells = [c.learnerName || '—', markStr, excerpt];
+
+        const rowHeight = computeRowHeight(doc, cells, colWidths, MIN_ROW_HEIGHT);
+        const yBefore = doc.y;
+        ensureSpace(doc, rowHeight);
+        if (doc.y !== yBefore) {
+          // ensureSpace triggered a page break (doc.y reset to top margin) —
+          // repeat the header row so the continuation isn't headerless.
+          drawTableHeaderRow(doc, ['Learner', 'Mark', 'Comment (excerpt)'], tableLeft, colWidths, HEADER_ROW_HEIGHT);
+        }
+        drawTableDataRow(doc, cells, tableLeft, colWidths, rowHeight, { striped: i % 2 === 1 });
+      });
+
+      doc.moveDown(2);
+
+      // Full comments — one per page after the first
+      doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text('Full Comments', { underline: true });
+      doc.moveDown(0.5);
+
+      comments.forEach((c, i) => {
+        if (i > 0) {
+          doc.addPage();
+        }
+
+        const markStr = formatMarkStr(c);
+
+        doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text(`Learner: ${c.learnerName || ''}`);
+        doc.font(FONTS.body).fontSize(11).fillColor(COLORS.darkText).text(`Mark: ${markStr}`);
+        if (c.behaviourNotes) {
+          doc.font(FONTS.body).fontSize(11).fillColor(COLORS.darkText).text(`Behaviour: ${c.behaviourNotes}`);
+        }
+        doc.moveDown(0.5);
+
+        doc.font(FONTS.body).fontSize(11);
+        renderFormattedText(doc, c.comment || '');
+
+        doc.moveDown(1);
+      });
+
+      // Total page count is only known now that all content has been rendered —
+      // stamp "Page X of Y" on every buffered page before finalizing the doc.
+      stampPageNumbers(doc);
+
+      doc.end();
+    } catch (renderErr) {
+      // Rendering failed mid-document — destroy the stream so the file
+      // handle is released immediately, delete the partial file rather
+      // than waiting for the next cleanupOldPdfs() sweep, and reject with
+      // the original error (not a stream-teardown error, if any).
+      stream.destroy();
+      fs.unlink(filePath, () => {}); // best-effort — file may not have flushed anything yet
+      reject(renderErr);
+    }
   });
 }
 
