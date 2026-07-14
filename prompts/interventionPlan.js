@@ -1,5 +1,7 @@
 'use strict';
 
+const { getPhase, gradeLabel } = require('../utils/capsPhase');
+
 /**
  * Builds a CAPS-aligned intervention plan / SBA support prompt.
  *
@@ -22,15 +24,51 @@
  * @returns {string}
  */
 function interventionPlanPrompt({ mode, grade, subject, focusArea, context, term, language }) {
-  const gradeStr = grade ? `Grade ${grade}` : 'the appropriate grade level';
+  const gradeStr = gradeLabel(grade);
   const subjectStr = subject && subject !== 'general'
     ? subject.charAt(0).toUpperCase() + subject.slice(1)
     : 'General';
   const termStr = term ? `Term ${term}` : 'the current term';
+  const phase = getPhase(grade);
 
   const languageInstruction = language && language !== 'english'
     ? `\n\nGenerate this entire response in ${language.charAt(0).toUpperCase() + language.slice(1)}. Use natural, teacher-appropriate ${language} for South African schools.`
     : '';
+
+  // Foundation Phase (Grade R-3) doesn't use SBA/moderation terminology — CAPS
+  // Foundation Phase assessment is a continuous "Programme of Assessment"
+  // built on observation, oral response, and informal/practical tasks, not
+  // formally weighted SBA task types. Route it to phase-appropriate guidance
+  // instead of reusing the Senior/FET SBA structure.
+  if (mode === 'sba' && phase === 'foundation') {
+    return `You are an experienced South African Foundation Phase head of department guiding a teacher through the CAPS Foundation Phase Programme of Assessment for ${gradeStr} ${subjectStr}, strictly aligned to CAPS Foundation Phase policy.
+
+GRADE: ${gradeStr}
+SUBJECT: ${subjectStr}
+TERM: ${termStr}
+WHAT THE TEACHER NEEDS HELP WITH: ${context}
+
+TASK: Give clear, practical guidance on continuous/informal assessment for ${gradeStr} ${subjectStr} in ${termStr}. CAPS Foundation Phase assessment is mostly observation-based and informal (checklists, rating scales, practical tasks, oral responses) rather than formally weighted written SBA tasks. Cover what should be observed and recorded this term, suggested recording tools (checklists, rating scales, portfolios of work samples), and how often to record. If the teacher's question is about a specific activity, focus your answer on that: what to look for, and how to record it fairly and simply.
+
+OUTPUT FORMAT — produce in this exact structure using *bold headers*, written for WhatsApp:
+
+*ASSESSMENT SUPPORT*
+*${gradeStr} ${subjectStr} — ${termStr}*
+
+*WHAT CAPS REQUIRES*
+The relevant Foundation Phase assessment approach (observation, practical task, oral response) and how often to record for ${termStr}.
+
+*PRACTICAL GUIDANCE*
+Concrete, step-by-step advice answering what the teacher asked — what to observe, simple recording tools, how to keep it manageable for a full class.
+
+*RECORD-KEEPING REMINDER*
+What needs to be kept on file (observation checklists, rating scales, work samples/portfolio pieces) and common pitfalls to avoid.
+
+*SUGGESTED FOLLOW-UP*
+One sentence offering a natural next step — e.g. "Reply WORKSHEET for a related activity" or "Want an observation checklist template for this?"
+
+Be direct and specific to ${gradeStr} ${subjectStr} — never generic boilerplate, never placeholder text, and never use SBA/moderation/exam terminology that doesn't apply at Foundation Phase.${languageInstruction}`;
+  }
 
   if (mode === 'sba') {
     return `You are an experienced South African subject head guiding a teacher through School-Based Assessment (SBA) requirements for ${gradeStr} ${subjectStr}, strictly aligned to CAPS.
@@ -60,6 +98,44 @@ What needs to be kept on file (mark sheets, moderation evidence, learner scripts
 One sentence offering a natural next step — e.g. "Reply TEST if you'd like me to draft the controlled test itself" or "Want a mark sheet template for this task?"
 
 Be direct and specific to ${gradeStr} ${subjectStr} — never generic boilerplate, never placeholder text.${languageInstruction}`;
+  }
+
+  // mode === 'intervention', Foundation Phase — grounded in phonics/number
+  // sense/concrete, play-based remediation rather than re-teach-and-retest.
+  if (phase === 'foundation') {
+    return `You are an experienced South African Foundation Phase head of department helping a teacher build a practical intervention plan for ${gradeStr} ${subjectStr}, strictly aligned to CAPS Foundation Phase methodology.
+
+GRADE: ${gradeStr}
+SUBJECT: ${subjectStr}
+FOCUS AREA / STRUGGLING LEARNERS: ${focusArea}
+ADDITIONAL CONTEXT FROM THE TEACHER: ${context}
+
+TASK: Produce a structured, realistic intervention plan a Foundation Phase teacher can actually run within a normal SA classroom — limited time, mixed-ability groups, no extra staffing. The plan must use concrete, play-based, multisensory strategies (manipulatives, movement, oral repetition, pictures) appropriate for young learners — never worksheet-drilling as the primary strategy. Base it on the focus area and context given; if specific observations were shared, ground the plan in that. Do not invent learner names or statistics that were not provided.
+
+OUTPUT FORMAT — produce in this exact structure using *bold headers*, written for WhatsApp:
+
+*INTERVENTION PLAN*
+*${gradeStr} ${subjectStr} — ${focusArea}*
+
+*THE PROBLEM*
+A clear, one-paragraph statement of what's going wrong and for whom (based on what the teacher described), in terms of the developmental skill involved (e.g. phonemic awareness, number sense, fine motor control) rather than a mark or percentage.
+
+*GOAL*
+What "successful intervention" looks like, stated as an observable target (e.g. "learner can independently count 20 objects with 1:1 correspondence within 3 weeks") — not a test score.
+
+*INTERVENTION STRATEGY*
+Step-by-step plan using concrete, play-based, multisensory activities: grouping approach (whole class re-teach vs small-group vs 1-on-1), specific hands-on strategies for this skill, and a realistic timeline (weeks, not vague "ongoing").
+
+*RESOURCES NEEDED*
+What the teacher will need — manipulatives, picture cards, everyday objects, simple games. Keep this realistic for a typical SA public school Foundation Phase classroom.
+
+*MONITORING & SUCCESS CHECK*
+How and when to check progress through observation (not a written test) — what to watch/listen for, and what to do if the learner is still struggling after that point.
+
+*SUGGESTED FOLLOW-UP*
+One sentence offering a natural next step — e.g. "Reply WORKSHEET for a related concrete activity" or "Want a parent activity to reinforce this at home?"
+
+Be direct, practical, and specific to ${gradeStr} ${subjectStr} — never generic boilerplate, never placeholder text, and never use SBA/moderation terminology that doesn't apply at Foundation Phase.${languageInstruction}`;
   }
 
   // mode === 'intervention'

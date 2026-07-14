@@ -1,5 +1,7 @@
 'use strict';
 
+const { getPhase } = require('../utils/capsPhase');
+
 /**
  * Builds a CAPS-aligned moderation pack prompt.
  *
@@ -27,7 +29,10 @@
  * @returns {string}
  */
 function moderationPackPrompt({ grade, subject, topic, marks, language, existingAssessment = null }) {
-  const gradeStr = grade ? `Grade ${grade}` : 'Grade 8';
+  // Grade R (0) is a genuine grade, not an unset one — must not fall through
+  // to the null/undefined fallback below. Grades 1-12 and unset grade (null/
+  // undefined) keep their exact prior behaviour.
+  const gradeStr = grade === 0 ? 'Grade R' : (grade ? `Grade ${grade}` : 'Grade 8');
   const subjectStr = subject && subject !== 'general'
     ? subject.charAt(0).toUpperCase() + subject.slice(1)
     : 'General';
@@ -35,6 +40,53 @@ function moderationPackPrompt({ grade, subject, topic, marks, language, existing
   const languageInstruction = language && language !== 'english'
     ? `\n\nGenerate this entire moderation pack in ${language.charAt(0).toUpperCase() + language.slice(1)}.`
     : '';
+
+  // ── Foundation Phase (Grade R-3): CAPS has no formal SBA/moderation/
+  // Bloom's-taxonomy concept at this phase. Both wrap and full-build modes
+  // would otherwise hand a Grade R-3 teacher formal exam/moderation
+  // paperwork that doesn't apply, so both route here instead.
+  if (getPhase(grade) === 'foundation') {
+    const topicStr = topic || (existingAssessment && (existingAssessment.title || existingAssessment.assessmentType)) || 'this focus area';
+
+    return `You are an experienced South African Foundation Phase teacher producing a CAPS Foundation Phase Support & Observation Pack for ${gradeStr} ${subjectStr}.
+
+TASK: Foundation Phase (Grade R-3) assessment under CAPS is observation-based and developmental, not formally moderated exam paperwork. Do NOT produce a question paper, memorandum, marks, cognitive-level/Bloom's taxonomy table, or moderator/HOD sign-off — none of that applies at this phase. Instead, produce a practical support and observation document for ${topicStr}.
+
+DETAILS:
+- Grade: ${gradeStr}
+- Subject: ${subjectStr}
+- Focus: ${topicStr}
+
+Generate the following sections in full, ready to print:
+
+═══════════════════════════════
+*FOUNDATION PHASE SUPPORT & OBSERVATION PACK*
+═══════════════════════════════
+
+*School:* ______________________________________
+*Subject:* ${subjectStr}    *Grade:* ${gradeStr}
+*Focus Area:* ${topicStr}
+*Teacher:* ___________________________________    *Date:* ___________
+
+---
+
+*1. WHAT TO LOOK FOR*
+[Generate a short observation-based checklist of developmental descriptors for ${topicStr} appropriate to ${gradeStr} — what a teacher should watch for in learners during normal classroom activities, not a formal marking rubric.]
+
+---
+
+*2. TEACHER GUIDANCE NOTES*
+[Generate practical, concrete notes on supporting learners developmentally with ${topicStr} — play-based, oral, and hands-on strategies suited to a typical SA Foundation Phase classroom.]
+
+---
+
+*3. REFLECTION SPACE*
+_________________________________________________
+_________________________________________________
+_________________________________________________
+
+Generate every section completely — no placeholders left as literal text like "[Generate...]" in the final output. Never use SBA, moderation, exam, marks, percentage, or Bloom's-taxonomy terminology anywhere in this document, since none of it applies at Foundation Phase.${languageInstruction}`;
+  }
 
   // ── Wrap mode: moderation paperwork only, around an assessment that already exists ──
   if (existingAssessment) {

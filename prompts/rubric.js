@@ -1,5 +1,7 @@
 'use strict';
 
+const { getPhase } = require('../utils/capsPhase');
+
 /**
  * Builds a CAPS-aligned analytical rubric prompt.
  *
@@ -7,7 +9,10 @@
  * @returns {string}
  */
 function rubricPrompt({ grade, subject, topic, marks, language }) {
-  const gradeStr = grade ? `Grade ${grade}` : 'Grade 8';
+  // Grade R (0) is a genuine grade, not an unset one — must not fall through
+  // to the null/undefined fallback below. Grades 1-12 and unset grade (null/
+  // undefined) keep their exact prior behaviour.
+  const gradeStr = grade === 0 ? 'Grade R' : (grade ? `Grade ${grade}` : 'Grade 8');
   const subjectStr = subject && subject !== 'general'
     ? subject.charAt(0).toUpperCase() + subject.slice(1)
     : 'General';
@@ -16,6 +21,67 @@ function rubricPrompt({ grade, subject, topic, marks, language }) {
   const languageInstruction = language && language !== 'english'
     ? `\n\nGenerate this entire rubric in ${language.charAt(0).toUpperCase() + language.slice(1)}.`
     : '';
+
+  // ── Foundation Phase (Grade R-3): CAPS has no marks-per-criterion rubric,
+  // 7-level rating-code scale, or moderation sign-off at this phase —
+  // assessment is observation-based and developmental instead.
+  if (getPhase(grade) === 'foundation') {
+    return `You are an experienced South African Foundation Phase teacher producing a classroom-ready observation checklist aligned to the CAPS curriculum.
+
+TASK: Generate a developmental observation checklist for assessing: ${topic}
+
+DETAILS:
+- Grade: ${gradeStr}
+- Subject: ${subjectStr}
+- Focus: ${topic}
+
+CHECKLIST REQUIREMENTS:
+- Align to CAPS ${gradeStr} ${subjectStr} developmental expectations
+- Use 3 observable levels: Achieved, Emerging, Not Yet Achieved — no marks, scores, or percentages
+- Include 3–6 observable skills/behaviours appropriate for the focus area and CAPS content
+- Each skill must have a clear, concrete, observable description — what the teacher would actually see a learner do
+- Use South African school context throughout
+- Do NOT use marks, mark totals, percentages, a CAPS rating-code table, or a "moderated by" sign-off — none of that applies at Foundation Phase
+
+OUTPUT FORMAT:
+
+═══════════════════════════════
+*DEVELOPMENTAL OBSERVATION CHECKLIST*
+*${topic}*
+*${subjectStr} | ${gradeStr}*
+═══════════════════════════════
+
+*Learner Name:* ___________________________
+*Class:* ________________ *Date:* ___________
+
+---
+
+*SKILLS OBSERVED*
+
+For each skill, use this format:
+
+*Skill [N]: [Skill Name]*
+
+| Level | What to Look For |
+|-------|-------------------|
+| Achieved | [Clear, specific, observable description of the skill being achieved] |
+| Emerging | [Clear description of partial/developing performance] |
+| Not Yet Achieved | [Clear description of what is not yet showing] |
+
+*Observed level: ___________*
+
+---
+
+[Repeat for all skills]
+
+---
+
+*Teacher Notes / Next Steps:*
+______________________________________________
+______________________________________________
+
+Generate ALL skills fully. No placeholders. Every description must be specific, observable, and directly aligned to ${gradeStr} ${subjectStr} CAPS developmental content. Never use marks, percentages, CAPS rating codes, or moderation terminology anywhere in this document.${languageInstruction}`;
+  }
 
   return `You are a qualified South African teacher producing classroom-ready assessment tools aligned to the CAPS curriculum.
 
