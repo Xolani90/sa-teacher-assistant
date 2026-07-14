@@ -209,6 +209,12 @@ function makePdfTextSafe(doc) {
 function formatGradeLabel(grade) {
   if (grade === null || grade === undefined || grade === '') return '';
   const str = String(grade).trim();
+  // Grade R must be checked before the numeric regex, since it has no digits
+  // of its own — and a bare "0" (Grade R stored as an integer) must be
+  // special-cased too, since it would otherwise fail the `num < 1` floor
+  // below and get silently blanked out everywhere this label is used
+  // (PDF headers, titles, filenames).
+  if (/^(?:grade\s*)?r$/i.test(str) || str === '0') return 'Grade R';
   const match = str.match(/(\d+(?:\.\d+)?)/);
   if (!match) return '';
   const num = parseInt(match[1], 10); // truncates any ".0" etc.

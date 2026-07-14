@@ -261,7 +261,7 @@ function saveResource(phoneHash, resourceType, title, content, metadata = {}, ge
         resourceType,
         title,
         content,
-        metadata.grade || null,
+        metadata.grade ?? null,
         metadata.subject || null,
         metadata.topic || null,
         JSON.stringify(metadata),

@@ -248,7 +248,7 @@ function getUsageInfo(phoneNumber) {
     limit:     isPro ? null : getFreeLimit(),
     remaining: isPro ? null : Math.max(0, getFreeLimit() - count),
     name:      teacher?.name    || null,
-    grade:     teacher?.grade   || null,
+    grade:     teacher?.grade   ?? null,
     subject:   teacher?.subject || null,
   };
 }

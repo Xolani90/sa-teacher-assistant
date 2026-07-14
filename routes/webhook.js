@@ -29,6 +29,7 @@ const { encryptPhone }           = require('../utils/encryption');
 const { SessionStore, clearAllSessionsForHash } = require('../utils/sessionStore');
 const { isCeilingReached } = require('../utils/aiCostMonitor');
 const { handleCurriculumQuery } = require('../services/curriculumIntelligenceService');
+const { gradeLabel, parseGrade } = require('../utils/capsPhase');
 const { buildFullInterventionPlanPrompt } = require('../prompts/fullInterventionPlan');
 
 /**
@@ -202,7 +203,7 @@ async function handleReportCommentFlow(from, text, preClassifiedIntent = null) {
       const teacher = getTeacherByPhone(from);
       reportCommentState.set(phoneHash, {
         step: 'ask_mode',
-        grade: teacher?.grade || null,
+        grade: teacher?.grade ?? null,
         subject: teacher?.subject || null,
         language: teacher?.language || 'english',
         lastActivity: Date.now(),
@@ -615,7 +616,7 @@ async function handleParentMessageFlow(from, text, preClassifiedIntent = null) {
             type: 'parentMessage',
             situation,
             learnerName,
-            grade: teacher?.grade || null,
+            grade: teacher?.grade ?? null,
             subject: teacher?.subject || 'general',
             language: teacher?.language || 'english',
             teacherName: teacher?.name || null,
@@ -629,7 +630,7 @@ async function handleParentMessageFlow(from, text, preClassifiedIntent = null) {
             step: 'post_generation',
             situation,
             learnerName,
-            grade: teacher?.grade || null,
+            grade: teacher?.grade ?? null,
             subject: teacher?.subject || 'general',
             language: teacher?.language || 'english',
             teacherName: teacher?.name || null,
@@ -647,7 +648,7 @@ async function handleParentMessageFlow(from, text, preClassifiedIntent = null) {
         parentMessageState.set(phoneHash, {
           step: 'ask_learner_name',
           situation,
-          grade: teacher?.grade || null,
+          grade: teacher?.grade ?? null,
           subject: teacher?.subject || 'general',
           language: teacher?.language || 'english',
           teacherName: teacher?.name || null,
@@ -809,7 +810,7 @@ async function handleDataAssessmentFlow(from, text, message = null, preClassifie
     // Start the flow — collect metadata first
     dataAssessmentState.set(phoneHash, {
       step: 'awaitingTitle',
-      grade: intent.grade || null,
+      grade: intent.grade ?? null,
       subject: intent.subject || null,
       title: null,
       term: null,
@@ -1044,7 +1045,7 @@ async function handleDataAssessmentFlow(from, text, message = null, preClassifie
     const lg = analyses.learnerGrouping;
 
     let summary = `📊 *Diagnostic Report — ${state.title}*\n`;
-    summary += `Grade ${state.grade} ${state.subject} | Term ${state.term}\n`;
+    summary += `${gradeLabel(state.grade)} ${state.subject} | Term ${state.term}\n`;
     summary += `${parseResult.learners.length} learners analysed\n\n`;
 
     // Step 1–2: Item analysis summary
@@ -1309,7 +1310,7 @@ async function handleAssessmentAnalysisFlow(from, text, preClassifiedIntent = nu
 
     assessmentAnalysisState.set(phoneHash, {
       step: 'ask_grade_subject',
-      grade: teacher?.grade || null,
+      grade: teacher?.grade ?? null,
       subject: teacher?.subject || null,
       language: teacher?.language || 'english',
       lastActivity: Date.now(),
@@ -1343,14 +1344,14 @@ async function handleAssessmentAnalysisFlow(from, text, preClassifiedIntent = nu
   }
 
   if (state.step === 'ask_grade_subject') {
-    const gradeMatch = trimmed.match(/\b(?:grade|gr|g)[.\s]?(\d{1,2})\b/i);
-    const grade = gradeMatch ? Math.min(12, Math.max(1, parseInt(gradeMatch[1], 10))) : state.grade;
+    const parsedGrade = parseGrade(trimmed);
+    const grade = parsedGrade !== null ? parsedGrade : state.grade;
     // Reuse the subject patterns already proven in intentParser for consistency
     const { parseIntent: parseForSubject } = require('../utils/intentParser');
     const subjectGuess = parseForSubject(trimmed).subject;
     const subject = subjectGuess !== 'general' ? subjectGuess : state.subject;
 
-    if (!grade || !subject) {
+    if (grade == null || !subject) {
       await safeSendMessage(from, `I still need both a grade and a subject — e.g. "Grade 8 Mathematics". What grade and subject is this for?`);
       return true;
     }
@@ -1360,7 +1361,7 @@ async function handleAssessmentAnalysisFlow(from, text, preClassifiedIntent = nu
     state.step = 'ask_assessment_name';
     state.lastActivity = Date.now();
     assessmentAnalysisState.set(phoneHash, state);
-    await safeSendMessage(from, `Got it — Grade ${grade} ${subject}. What was the assessment? (e.g. "Term 2 test", "fractions quiz")`);
+    await safeSendMessage(from, `Got it — ${gradeLabel(grade)} ${subject}. What was the assessment? (e.g. "Term 2 test", "fractions quiz")`);
     return true;
   }
 
@@ -1438,7 +1439,7 @@ async function handleAssessmentAnalysisFlow(from, text, preClassifiedIntent = nu
             content,
             type: 'assessmentAnalysis',
             topic: state.assessmentName,
-            grade: `Grade ${state.grade}`,
+            grade: gradeLabel(state.grade),
             subject: state.subject,
             school: (getTeacherByPhone(from) || {}).school || '',
           });
@@ -1503,7 +1504,7 @@ async function handleInterventionPlanFlow(from, text, preClassifiedIntent = null
     interventionPlanState.set(phoneHash, {
       mode: isSba ? 'sba' : 'intervention',
       step: 'ask_grade_subject',
-      grade: teacher?.grade || null,
+      grade: teacher?.grade ?? null,
       subject: teacher?.subject || null,
       language: teacher?.language || 'english',
       lastActivity: Date.now(),
@@ -1544,13 +1545,13 @@ async function handleInterventionPlanFlow(from, text, preClassifiedIntent = null
   }
 
   if (state.step === 'ask_grade_subject') {
-    const gradeMatch = trimmed.match(/\b(?:grade|gr|g)[.\s]?(\d{1,2})\b/i);
-    const grade = gradeMatch ? Math.min(12, Math.max(1, parseInt(gradeMatch[1], 10))) : state.grade;
+    const parsedGrade = parseGrade(trimmed);
+    const grade = parsedGrade !== null ? parsedGrade : state.grade;
     const { parseIntent: parseForSubject } = require('../utils/intentParser');
     const subjectGuess = parseForSubject(trimmed).subject;
     const subject = subjectGuess !== 'general' ? subjectGuess : state.subject;
 
-    if (!grade || !subject) {
+    if (grade == null || !subject) {
       await safeSendMessage(from, `I still need both a grade and a subject — e.g. "Grade 8 Mathematics". What grade and subject is this for?`);
       return true;
     }
@@ -1562,9 +1563,9 @@ async function handleInterventionPlanFlow(from, text, preClassifiedIntent = null
     interventionPlanState.set(phoneHash, state);
 
     if (state.mode === 'sba') {
-      await safeSendMessage(from, `Got it — Grade ${grade} ${subject}. What do you need help with — a specific task, the term's schedule, weighting, or record-keeping?`);
+      await safeSendMessage(from, `Got it — ${gradeLabel(grade)} ${subject}. What do you need help with — a specific task, the term's schedule, weighting, or record-keeping?`);
     } else {
-      await safeSendMessage(from, `Got it — Grade ${grade} ${subject}. What's the focus — a topic the class is struggling with, or specific learners falling behind?`);
+      await safeSendMessage(from, `Got it — ${gradeLabel(grade)} ${subject}. What's the focus — a topic the class is struggling with, or specific learners falling behind?`);
     }
     return true;
   }
@@ -1649,7 +1650,7 @@ async function generateInterventionOutput(from, state, phoneHash) {
           content,
           type: 'interventionPlan',
           topic: state.focusArea || (state.mode === 'sba' ? 'SBA Support' : 'Intervention Plan'),
-          grade: `Grade ${state.grade}`,
+          grade: gradeLabel(state.grade),
           subject: state.subject,
           school: (getTeacherByPhone(from) || {}).school || '',
         });
@@ -1730,13 +1731,13 @@ async function handleProfileUpdateFlow(from, text) {
       return true;
     }
     const grade = parseGradeInput(trimmed);
-    if (!grade) {
-      await safeSendMessage(from, `I didn't catch that. Let me have a grade number, e.g.:\n\n*7* or *Grade 10* or *Gr 4*\n\nOr reply *CANCEL* to skip.`);
+    if (grade === null) {
+      await safeSendMessage(from, `I didn't catch that. Let me have a grade number, e.g.:\n\n*7* or *Grade 10* or *Gr 4* or *Grade R*\n\nOr reply *CANCEL* to skip.`);
       return true;
     }
     updateTeacherProfile(from, { grade });
     profileUpdateState.delete(phoneHash);
-    await safeSendMessage(from, `✅ Updated! Your grade is now set to Grade ${grade}.`);
+    await safeSendMessage(from, `✅ Updated! Your grade is now set to ${gradeLabel(grade)}.`);
     return true;
   }
 
@@ -1944,7 +1945,7 @@ async function handleCommand(from, text) {
     await safeSendMessage(from,
       `👤 *Your Profile*\n\n` +
       `Name: ${teacher?.name || 'Not set'}\n` +
-      `Grade: ${teacher?.grade || 'Not set'}\n` +
+      `Grade: ${teacher?.grade != null ? gradeLabel(teacher.grade) : 'Not set'}\n` +
       `Subject: ${teacher?.subject || 'Not set'}\n` +
       `Language: ${teacher?.language || 'Not set'}\n` +
       `School: ${teacher?.school || 'Not set'}\n` +
@@ -2084,13 +2085,13 @@ async function handleCommand(from, text) {
 
       // Validation passed — extract grade from name (or fall back to teacher profile)
       const gradeMatch = validation.name.match(/\bgrade\s*(\d+)/i);
-      const grade = gradeMatch ? parseInt(gradeMatch[1], 10) : (teacher.grade || null);
+      const grade = gradeMatch ? parseInt(gradeMatch[1], 10) : (teacher.grade ?? null);
       const subject = teacher.subject || 'General';
 
       try {
         const newClass = createClass(hash, validation.name, grade, subject, validation.count);
         await safeSendMessage(from,
-          `✅ *Class created!*\n\n📚 *${newClass.name}*\nGrade: ${newClass.grade || 'Not set'} | Subject: ${newClass.subject}\nLearners: ${newClass.learner_count}\n\n_Reply *MY CLASSES* to see all your classes._`
+          `✅ *Class created!*\n\n📚 *${newClass.name}*\nGrade: ${newClass.grade != null ? gradeLabel(newClass.grade) : 'Not set'} | Subject: ${newClass.subject}\nLearners: ${newClass.learner_count}\n\n_Reply *MY CLASSES* to see all your classes._`
         );
       } catch (err) {
         console.error('[Workspace] createClass error:', err.message);
@@ -2111,7 +2112,7 @@ async function handleCommand(from, text) {
           let msg = `📚 *Your Classes* (${classes.length})\n\n`;
           for (const cls of classes) {
             msg += `*${cls.name}*\n`;
-            msg += `Grade ${cls.grade || '?'} | ${cls.subject || '?'} | ${cls.learner_count || 0} learners\n\n`;
+            msg += `${cls.grade != null ? gradeLabel(cls.grade) : 'Grade ?'} | ${cls.subject || '?'} | ${cls.learner_count || 0} learners\n\n`;
           }
           msg += `_Reply *NEW CLASS [name] | [count]* to add another class._`;
           await safeSendMessage(from, msg);
@@ -2138,7 +2139,7 @@ async function handleCommand(from, text) {
             const avg = a.class_average != null ? `${Math.round(a.class_average)}%` : 'N/A';
             const date = a.created_at ? a.created_at.split(' ')[0] : '';
             msg += `*${a.title || 'Untitled'}*\n`;
-            msg += `Grade ${a.grade || '?'} | ${a.subject || '?'} | Term ${a.term || '?'}\n`;
+            msg += `${a.grade != null ? gradeLabel(a.grade) : 'Grade ?'} | ${a.subject || '?'} | Term ${a.term || '?'}\n`;
             msg += `Class avg: ${avg} | Learners: ${a.learner_count || 0} | ${date}\n\n`;
           }
           if (assessments.length > 8) {
@@ -2161,8 +2162,8 @@ async function handleCommand(from, text) {
 
         if (progress && progress.error) {
           // Profile incomplete — fall back to calendar estimate if possible
-          if (teacher.grade && teacher.subject) {
-            const calResult = await calendarQuery(`${teacher.subject} Grade ${teacher.grade} coverage`, teacher);
+          if (teacher.grade != null && teacher.subject) {
+            const calResult = await calendarQuery(`${teacher.subject} ${gradeLabel(teacher.grade)} coverage`, teacher);
             await safeSendMessage(from, calResult || `⚠️ Complete your profile with grade and subject to see curriculum progress.\n\nReply *PROFILE* to update.`);
           } else {
             await safeSendMessage(from,
@@ -2174,12 +2175,12 @@ async function handleCommand(from, text) {
 
         if (!progress || !progress.dataAvailable) {
           // Real data exists but subject not in CAPS reference table — use calendar estimate
-          const grade = teacher.grade || progress?.grade;
+          const grade = teacher.grade ?? progress?.grade;
           const subject = teacher.subject || progress?.subject;
-          if (grade && subject) {
-            const calResult = await calendarQuery(`${subject} Grade ${grade} coverage`, teacher);
+          if (grade != null && subject) {
+            const calResult = await calendarQuery(`${subject} ${gradeLabel(grade)} coverage`, teacher);
             await safeSendMessage(from,
-              `📈 *Curriculum Progress — ${subject} Grade ${grade}*\n\n` +
+              `📈 *Curriculum Progress — ${subject} ${gradeLabel(grade)}*\n\n` +
               `_Note: Detailed per-topic tracking isn't available for this subject yet. Showing calendar-based estimate:_\n\n` +
               (calResult || `No calendar data available either.`)
             );
@@ -2190,7 +2191,7 @@ async function handleCommand(from, text) {
         }
 
         // Real persisted data available — use it
-        let msg = `📈 *Curriculum Progress — ${progress.subject} Grade ${progress.grade}*\n`;
+        let msg = `📈 *Curriculum Progress — ${progress.subject} ${gradeLabel(progress.grade)}*\n`;
         msg += `_Based on ${progress.totalCovered} topic(s) recorded from your assessments_\n\n`;
         msg += progress.summary;
         if (progress.catchUpPlan && !progress.catchUpPlan.startsWith('✅')) {
@@ -2233,7 +2234,7 @@ async function handleCommand(from, text) {
         // Curriculum progress
         if (progress && !progress.error && progress.dataAvailable) {
           msg += `\n📈 *Curriculum coverage:* ${progress.overallCoverage}% (${progress.totalCovered}/${progress.totalExpected} topics)\n`;
-        } else if (teacher.grade && teacher.subject) {
+        } else if (teacher.grade != null && teacher.subject) {
           msg += `\n📈 *Curriculum coverage:* _Use data-driven assessments to build your progress record_\n`;
         }
 
@@ -2279,7 +2280,7 @@ async function handleCommand(from, text) {
       // the confirmation from session state without issuing a second INSERT.
       if (last.saveState === 'RECOVERABLE') {
         saveLock.add(phoneHash);
-        const gradeStr2   = last.intent.grade                                          ? ` · Grade ${last.intent.grade}`   : '';
+        const gradeStr2   = last.intent.grade != null                                  ? ` · ${gradeLabel(last.intent.grade)}`   : '';
         const subjectStr2 = last.intent.subject && last.intent.subject !== 'general'   ? ` · ${last.intent.subject}`       : '';
         const topicPart2  = last.intent.topic ? last.intent.topic : 'Untitled';
         const typeLabel2  = intentLabel(last.intent.type);
@@ -2330,7 +2331,7 @@ async function handleCommand(from, text) {
 
       // Build rich metadata
       const meta = {
-        grade:           last.intent.grade    || null,
+        grade:           last.intent.grade ?? null,
         subject:         last.intent.subject  !== 'general' ? last.intent.subject : null,
         topic:           last.intent.topic    || null,
         intent:          last.intent.type,
@@ -2372,7 +2373,7 @@ async function handleCommand(from, text) {
         lastGeneratedState.set(phoneHash, Object.assign({}, last, { saveState: 'RECOVERABLE', lastSavedId: saved.id }));
         console.log(`[Workspace] State -> RECOVERABLE (resourceId: ${saved.id}, generationId: ${last.generationId})`);
 
-        const gradeStr   = meta.grade   ? ` · Grade ${meta.grade}`  : '';
+        const gradeStr   = meta.grade != null ? ` · ${gradeLabel(meta.grade)}`  : '';
         const subjectStr = meta.subject ? ` · ${meta.subject}`      : '';
         await safeSendMessage(from,
           `Saved!\n\n${title}${gradeStr}${subjectStr}\n\nReply *MY RESOURCES* to see all your saved resources.\n_Resource #${saved.id}_`
@@ -2389,7 +2390,7 @@ async function handleCommand(from, text) {
           if (committed) {
             lastGeneratedState.set(phoneHash, Object.assign({}, last, { saveState: 'RECOVERABLE', lastSavedId: committed.id }));
             try {
-              const gradeStr   = meta.grade   ? ` · Grade ${meta.grade}`  : '';
+              const gradeStr   = meta.grade != null ? ` · ${gradeLabel(meta.grade)}`  : '';
               const subjectStr = meta.subject ? ` · ${meta.subject}`      : '';
               await safeSendMessage(from,
                 `Saved!\n\n${title}${gradeStr}${subjectStr}\n\nReply *MY RESOURCES* to see all your saved resources.\n_Resource #${committed.id}_`
@@ -2453,7 +2454,7 @@ async function handleCommand(from, text) {
             msg += `*${intentLabel(type).charAt(0).toUpperCase() + intentLabel(type).slice(1)}s*\n`;
             for (const r of items) {
               // grade/subject are stored as top-level columns — no JSON parse needed.
-              const gradeStr   = r.grade   ? ` · Gr ${r.grade}` : '';
+              const gradeStr   = r.grade != null ? ` · Gr ${r.grade === 0 ? 'R' : r.grade}` : '';
               const subjectStr = r.subject ? ` · ${r.subject}`  : '';
               const date = r.created_at ? r.created_at.slice(0, 10) : '';
               // ID shown so a future OPEN N command can reference it
@@ -2463,7 +2464,7 @@ async function handleCommand(from, text) {
           }
         } else {
           for (const r of recent) {
-            const gradeStr   = r.grade   ? ` · Gr ${r.grade}` : '';
+            const gradeStr   = r.grade != null ? ` · Gr ${r.grade === 0 ? 'R' : r.grade}` : '';
             const subjectStr = r.subject ? ` · ${r.subject}`  : '';
             const date = r.created_at ? r.created_at.slice(0, 10) : '';
             msg += `[${r.id}] ${r.title}${gradeStr}${subjectStr} · ${date}\n`;
@@ -2533,7 +2534,7 @@ async function handleCommand(from, text) {
           content,
           type: 'diagnosticReport',
           topic: assessmentLabel.title,
-          grade: assessmentLabel.grade ? `Grade ${assessmentLabel.grade}` : '',
+          grade: assessmentLabel.grade != null ? gradeLabel(assessmentLabel.grade) : '',
           subject: assessmentLabel.subject,
           school: teacher.school || '',
         });
@@ -2984,7 +2985,7 @@ async function processMessage(message) {
   const intent = skipClassifier
     ? { ...parseIntent(text), _source: isCeilingReached() ? 'fallback-ceiling' : 'fallback-rate-limited' }
     : await classifyIntent(text, {
-        grade: teacherForClassification?.grade || null,
+        grade: teacherForClassification?.grade ?? null,
         subject: teacherForClassification?.subject || null,
         lastIntentType,
       });
@@ -3151,7 +3152,7 @@ async function processGeneration(from, intent, originalText = null) {
 
   // ── Acknowledgment ────────────────────────────────────────────
   const teacher = getTeacherByPhone(from);
-  const gradeDisplay = intent.grade ? ` for Grade ${intent.grade}` : (teacher?.grade ? ` for your grade (${teacher.grade})` : '');
+  const gradeDisplay = intent.grade != null ? ` for ${gradeLabel(intent.grade)}` : (teacher?.grade != null ? ` for your grade (${gradeLabel(teacher.grade)})` : '');
   const subjectDisplay = intent.subject !== 'general' ? ` in ${intent.subject.charAt(0).toUpperCase() + intent.subject.slice(1)}` : '';
   await safeSendMessage(from, `⏳ Generating your CAPS-aligned ${intentLabel(intent.type)}${gradeDisplay}${subjectDisplay}... Please wait.`);
 
@@ -3166,7 +3167,7 @@ async function processGeneration(from, intent, originalText = null) {
 
   // ── Generate content ──────────────────────────────────────────
   const profile = {
-    grade:   teacher?.grade   || null,
+    grade:   teacher?.grade   ?? null,
     subject: teacher?.subject || null,
     name:    teacher?.name    || null,
   };
@@ -3239,7 +3240,7 @@ async function processGeneration(from, intent, originalText = null) {
         content: finalContent,
         type:    intent.type,
         topic:   intent.topic,
-        grade:   intent.grade ? `Grade ${intent.grade}` : (teacher?.grade || 'Grade 7'),
+        grade:   intent.grade != null ? gradeLabel(intent.grade) : (teacher?.grade != null ? gradeLabel(teacher.grade) : 'Grade 7'),
         subject: intent.subject !== 'general' ? intent.subject : (teacher?.subject || 'General'),
         school:  teacher?.school || '',
         marks:   intent.marks,
@@ -3340,7 +3341,7 @@ async function processGeneration(from, intent, originalText = null) {
       intent: {
         type:           intent.type,
         topic:          intent.topic          || null,
-        grade:          intent.grade          || null,
+        grade:          intent.grade          ?? null,
         subject:        intent.subject        || null,
         term:           intent.term           || null,
         atpTopic:       intent.atpTopic       || null,

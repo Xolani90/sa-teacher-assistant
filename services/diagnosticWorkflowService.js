@@ -279,7 +279,7 @@ function validateAssessmentData(assessmentData) {
   const errors = [];
 
   if (!assessmentData.title) errors.push('Missing assessment title');
-  if (!assessmentData.grade) errors.push('Missing grade');
+  if (assessmentData.grade === undefined || assessmentData.grade === null) errors.push('Missing grade');
   if (!assessmentData.subject) errors.push('Missing subject');
   if (!assessmentData.term) errors.push('Missing term');
   if (!assessmentData.type) errors.push('Missing assessment type');

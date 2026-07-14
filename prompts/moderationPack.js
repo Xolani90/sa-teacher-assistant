@@ -112,7 +112,7 @@ Generate the following sections in full, CAPS/DBE-aligned, ready to print and at
 ═══════════════════════════════
 
 *School:* ______________________________________
-*Subject:* ${subjectStr}    *Grade:* ${grade || '____'}
+*Subject:* ${subjectStr}    *Grade:* ${grade === 0 ? 'R' : (grade || '____')}
 *Assessment:* ${title}
 *Type:* ${assessmentTypeLabel}    *Total Marks:* ${totalMarks}
 *Teacher:* ___________________________________
