@@ -5,10 +5,23 @@
  * SBA tasks include projects, investigations, practical tasks, oral tasks,
  * assignments, and tests that form part of the formal programme of assessment.
  *
+ * CAPS has no formal SBA/Programme-of-Assessment instrument at Foundation
+ * Phase (Grade R-3). For those grades this builds a developmentally
+ * appropriate learning-activity prompt instead (see foundationPhaseLearningActivity).
+ *
  * @param {{ grade: number|null, subject: string, topic: string, marks: number, language: string }} intent
  * @returns {string}
  */
 function sbaTaskPrompt({ grade, subject, topic, marks, language }) {
+  // grade is 0 for Grade R, 1-12 otherwise, null/undefined if unset.
+  // NOTE: grade === 0 is not currently reachable via the intent/profile
+  // pipeline (see audit report), but is handled defensively since it is a
+  // valid value per this function's own documented type contract.
+  const isFoundationPhase = grade === 0 || (typeof grade === 'number' && grade >= 1 && grade <= 3);
+  if (isFoundationPhase) {
+    return foundationPhaseLearningActivity({ grade, subject, topic, language });
+  }
+
   const gradeStr = grade ? `Grade ${grade}` : 'Grade 8';
   const subjectStr = subject && subject !== 'general'
     ? subject.charAt(0).toUpperCase() + subject.slice(1)
@@ -133,6 +146,66 @@ All marks must total exactly ${totalMarks}.]
 [State which term and week in the ATP this task should be administered, based on CAPS ${gradeStr} ${subjectStr}]
 
 Generate the ENTIRE document. No placeholders. All activities must be fully written, all marks must total exactly ${totalMarks}. Rubric/memorandum must be complete and teacher-ready.${languageInstruction}`;
+}
+
+/**
+ * Builds a Foundation Phase (Grade R-3) learning-activity prompt.
+ * CAPS has no formal SBA task at this phase, so this replaces the formal
+ * SBA structure with play-based, oral, and hands-on activities plus an
+ * observation checklist — no marks, memorandum, or cognitive-level language.
+ *
+ * @param {{ grade: number|null, subject: string, topic: string, language: string }} params
+ * @returns {string}
+ */
+function foundationPhaseLearningActivity({ grade, subject, topic, language }) {
+  const gradeStr = grade === 0 ? 'Grade R' : `Grade ${grade}`;
+  const subjectStr = subject && subject !== 'general'
+    ? subject.charAt(0).toUpperCase() + subject.slice(1)
+    : 'General';
+
+  const languageInstruction = language && language !== 'english'
+    ? `\n\nGenerate this entire learning activity in ${language.charAt(0).toUpperCase() + language.slice(1)}.`
+    : '';
+
+  return `You are a qualified South African Foundation Phase teacher producing a CAPS-aligned learning activity for young learners.
+
+TASK: Generate a complete, developmentally appropriate learning activity — NOT a formal written assessment. Foundation Phase learners are assessed through observation of play-based, oral, and hands-on activities, not through formal SBA tasks, memoranda, or marked papers.
+
+DETAILS:
+- Grade: ${gradeStr}
+- Subject: ${subjectStr}
+- Topic/Focus: ${topic}
+
+REQUIREMENTS:
+- Age-appropriate for ${gradeStr} learners, aligned to CAPS ${gradeStr} ${subjectStr}
+- Concrete, playful, and hands-on rather than abstract or written
+- References South African context where appropriate
+- No marks, no memorandum, no cognitive-level percentages, no formal examination or SBA wording
+
+${gradeStr} LEARNING ACTIVITY: ${topic}
+
+*TEACHER GUIDANCE:*
+[Explain in 3-5 sentences what this activity teaches, how to introduce it to the class, and what to watch for while learners take part]
+
+*MATERIALS NEEDED:*
+[List simple, easily available materials — everyday objects, drawn pictures, counters, etc.]
+
+*PLAY-BASED ACTIVITY:*
+[Describe a game or play-based activity that lets learners explore ${topic} through movement, manipulation of objects, or role play]
+
+*ORAL ACTIVITY:*
+[Describe a activity built around discussion, storytelling, singing, or questions and answers that lets learners demonstrate understanding of ${topic} out loud]
+
+*HANDS-ON ACTIVITY:*
+[Describe a hands-on activity — drawing, sorting, building, matching, or similar — that lets learners show what they understand about ${topic} by doing]
+
+*OBSERVATION CHECKLIST:*
+[Generate 3-5 simple, observable indicators for ${topic} that a teacher can tick off per learner, each rated: Not Yet / Developing / Achieved]
+
+*EXTENSION ACTIVITY (OPTIONAL):*
+[Describe one simple way to extend or vary the activity for learners who grasp ${topic} quickly]
+
+Generate the ENTIRE activity. No placeholders. Keep language simple and instructions concrete, as this will be read and used directly by the teacher.${languageInstruction}`;
 }
 
 module.exports = sbaTaskPrompt;

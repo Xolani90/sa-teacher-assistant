@@ -7,6 +7,15 @@
  * @returns {string}
  */
 function testPrompt({ grade, subject, topic, marks, language }) {
+  // grade is 0 for Grade R, 1-12 otherwise, null/undefined if unset.
+  // NOTE: grade === 0 is not currently reachable via the intent/profile
+  // pipeline (see audit report), but is handled defensively since it is a
+  // valid value per this function's own documented type contract.
+  const isFoundationPhase = grade === 0 || (typeof grade === 'number' && grade >= 1 && grade <= 3);
+  if (isFoundationPhase) {
+    return foundationPhaseLearningAssessment({ grade, subject, topic, language });
+  }
+
   const gradeStr = grade ? `Grade ${grade}` : 'Grade 8';
   const subjectStr = subject && subject !== 'general' ? subject.charAt(0).toUpperCase() + subject.slice(1) : 'General';
   const totalMarks = marks || 20;
@@ -148,6 +157,68 @@ TOTAL: ___/${totalMarks}
 Generate ALL questions and ALL answers completely. No placeholders. Every question must be answerable. Marks must total exactly ${totalMarks}. The Bloom's table above must have the actual topic from each generated question filled in — not placeholder text.${languageInstruction}
 
 IMPORTANT: Never output placeholder text in square brackets. Replace every bracketed instruction with actual content. All questions must be fully written out.`;
+}
+
+/**
+ * Builds a Foundation Phase (Grade R-3) learning assessment prompt.
+ * CAPS has no formal written test or memorandum at this phase, so this
+ * replaces the formal test with play-based, oral, and hands-on activities
+ * plus an observation checklist — no marks, memorandum, or Bloom's table.
+ *
+ * @param {{ grade: number|null, subject: string, topic: string, language: string }} params
+ * @returns {string}
+ */
+function foundationPhaseLearningAssessment({ grade, subject, topic, language }) {
+  const gradeStr = grade === 0 ? 'Grade R' : `Grade ${grade}`;
+  const subjectStr = subject && subject !== 'general'
+    ? subject.charAt(0).toUpperCase() + subject.slice(1)
+    : 'General';
+
+  const languageInstruction = language && language !== 'english'
+    ? `\n\nGenerate this entire response in ${language.charAt(0).toUpperCase() + language.slice(1)}. Use natural, teacher-appropriate ${language} for South African school documents.`
+    : '';
+
+  return `You are a qualified South African Foundation Phase teacher producing a CAPS-aligned learning assessment for young learners.
+
+TASK: Generate a complete, developmentally appropriate learning assessment — NOT a formal written test. Foundation Phase learners are assessed through observation of play-based, oral, and hands-on activities, not through formal tests, memoranda, or marked papers.
+
+CAPS ALIGNMENT REQUIREMENTS:
+- Align to ${gradeStr} ${subjectStr} CAPS curriculum
+- Concrete, playful, and hands-on rather than abstract or written
+- Age-appropriate language and pacing for ${gradeStr} learners
+- Use South African context throughout
+
+ASSESSMENT DETAILS:
+- Topic: ${topic}
+- Grade: ${gradeStr}
+- Subject: ${subjectStr}
+
+${gradeStr} LEARNING ASSESSMENT: ${topic}
+
+*TEACHER GUIDANCE:*
+[Explain in 3-5 sentences what this assessment observes, how to introduce it to the class, and what to watch for while learners take part]
+
+*MATERIALS NEEDED:*
+[List simple, easily available materials — everyday objects, drawn pictures, counters, etc.]
+
+*PLAY-BASED ACTIVITY:*
+[Describe a game or play-based activity that lets learners demonstrate understanding of ${topic} through movement, manipulation of objects, or role play]
+
+*ORAL ACTIVITY:*
+[Describe an activity built around discussion, storytelling, singing, or questions and answers that lets learners demonstrate understanding of ${topic} out loud]
+
+*HANDS-ON ACTIVITY:*
+[Describe a hands-on activity — drawing, sorting, building, matching, or similar — that lets learners show what they understand about ${topic} by doing]
+
+*OBSERVATION CHECKLIST:*
+[Generate 3-5 simple, observable indicators for ${topic} that a teacher can tick off per learner, each rated: Not Yet / Developing / Achieved]
+
+*EXTENSION ACTIVITY (OPTIONAL):*
+[Describe one simple way to extend or vary the activity for learners who grasp ${topic} quickly]
+
+Generate the ENTIRE assessment. No placeholders. Keep language simple and instructions concrete, as this will be read and used directly by the teacher.${languageInstruction}
+
+IMPORTANT: Never output placeholder text in square brackets. Replace every bracketed instruction with actual content.`;
 }
 
 module.exports = testPrompt;
