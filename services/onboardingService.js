@@ -2,6 +2,7 @@
 
 const { getDb } = require('../utils/database');
 const { hashPhone, updateTeacherProfile, getTeacherByPhone } = require('../utils/usageTracker');
+const { parseGrade } = require('../utils/capsPhase');
 
 // ── Onboarding steps ───────────────────────────────────────────────────────
 // welcome → ask_name → ask_grade → ask_subject → done
@@ -118,7 +119,7 @@ function handleOnboarding(phoneNumber, messageText) {
   // ── Collecting grade ───────────────────────────────────────────────────
   if (step === STEPS.ASK_GRADE) {
     const grade = parseGradeInput(text);
-    if (!grade) {
+    if (grade === null) {
       return {
         handled: true,
         message: "I didn't catch that — try just the number, like *7* or *Grade 10*. Or reply *SKIP* to skip.",
@@ -268,11 +269,16 @@ function sanitiseName(text) {
 
 function parseGradeInput(text) {
   if (/^skip$/i.test(text.trim())) return 'SKIP';
-  const match = text.match(/\b(?:grade|gr|g)?\.?\s*(\d{1,2})\b/i);
-  if (!match) return null;
-  const num = parseInt(match[1], 10);
-  if (num < 1 || num > 12) return null;
-  return num; // Return integer, not formatted string
+  const trimmed = text.trim();
+  // Bare "R" during onboarding means Grade R.
+  if (/^r$/i.test(trimmed)) return 0;
+  // Bare number during onboarding (e.g. just "7"), no "grade"/"gr" prefix required.
+  const bareNum = trimmed.match(/^(\d{1,2})$/);
+  if (bareNum) {
+    const num = parseInt(bareNum[1], 10);
+    return (num >= 1 && num <= 12) ? num : null;
+  }
+  return parseGrade(trimmed); // handles "Grade 7", "Grade R", "Gr R", etc.
 }
 
 const VALID_SUBJECTS = [

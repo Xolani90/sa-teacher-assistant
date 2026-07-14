@@ -1,5 +1,7 @@
 'use strict';
 
+const { gradeLabel } = require('../utils/capsPhase');
+
 /**
  * Builds a formal CAPS-aligned exam paper prompt.
  * More structured than a test — includes cover page, multiple sections,
@@ -18,7 +20,7 @@ function examPaperPrompt({ grade, subject, topic, marks, language }) {
     return foundationPhaseAssessment({ grade, subject, topic, language });
   }
 
-  const gradeStr = grade ? `Grade ${grade}` : 'Grade 8';
+  const gradeStr = grade != null ? gradeLabel(grade) : 'Grade 8';
   const subjectStr = subject && subject !== 'general'
     ? subject.charAt(0).toUpperCase() + subject.slice(1)
     : 'General';

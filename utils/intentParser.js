@@ -119,7 +119,7 @@ const NOISE_WORDS = [
 function cleanTopic(raw) {
   let topic = raw;
   // Remove grade references
-  topic = topic.replace(/\b(?:grade|gr|g|graad)[\s.]?\d{1,2}\b/gi, '');
+  topic = topic.replace(/\b(?:grade|gr|g|graad)[\s.]?(?:\d{1,2}|r)\b/gi, '');
   // Remove mark references
   topic = topic.replace(/\b\d{1,3}\s*(?:-|–)?\s*marks?\b/gi, '');
   // Remove noise words (whole word, case insensitive)
@@ -142,6 +142,8 @@ function cleanTopic(raw) {
   topic = topic.replace(/\s+/g, ' ').trim();
   return topic;
 }
+
+const { parseGrade } = require('./capsPhase');
 
 function parseIntent(text) {
   const lower = text.toLowerCase().trim();
@@ -220,8 +222,7 @@ function parseIntent(text) {
   }
 
   // --- Extract grade ---
-  const gradeMatch = lower.match(/\b(?:grade?|gr|g|graad)[.\s]?(\d{1,2})\b/i);
-  const grade = gradeMatch ? Math.min(12, Math.max(1, parseInt(gradeMatch[1], 10))) : null;
+  const grade = parseGrade(lower);
 
   // --- Extract marks ---
   const marksMatch = lower.match(/\b(\d{1,3})\s*(?:-|–)?\s*marks?\b/i);

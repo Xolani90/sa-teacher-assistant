@@ -1,5 +1,7 @@
 'use strict';
 
+const { gradeLabel } = require('../utils/capsPhase');
+
 /**
  * Builds a CAPS-aligned assessment analysis / diagnostic prompt.
  *
@@ -21,7 +23,7 @@
  * @returns {string}
  */
 function assessmentAnalysisPrompt({ grade, subject, assessmentName, topics, performanceData, language }) {
-  const gradeStr = grade ? `Grade ${grade}` : 'the appropriate grade level';
+  const gradeStr = gradeLabel(grade);
   const subjectStr = subject && subject !== 'general'
     ? subject.charAt(0).toUpperCase() + subject.slice(1)
     : 'General';

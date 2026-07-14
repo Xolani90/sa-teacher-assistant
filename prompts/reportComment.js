@@ -1,13 +1,15 @@
 'use strict';
 
+const { gradeLabel } = require('../utils/capsPhase');
+
 /**
  * Builds a CAPS-aligned report comment prompt.
  *
- * @param {{ learnerName: string, grade: string|null, subject: string, mark: number|null, outOf: number|null, behaviourNotes: string|null, language: string }} params
+ * @param {{ learnerName: string, grade: number|null, subject: string, mark: number|null, outOf: number|null, behaviourNotes: string|null, language: string }} params
  * @returns {string}
  */
 function reportCommentPrompt({ learnerName, grade, subject, mark, outOf, behaviourNotes, language }) {
-  const gradeStr = grade || 'the appropriate grade';
+  const gradeStr = gradeLabel(grade);
   const subjectStr = subject && subject !== 'general' ? subject.charAt(0).toUpperCase() + subject.slice(1) : 'General';
   const percentage = mark && outOf ? Math.round((mark / outOf) * 100) : null;
   const performanceLevel = percentage !== null
