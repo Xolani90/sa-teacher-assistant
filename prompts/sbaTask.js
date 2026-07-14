@@ -1,5 +1,7 @@
 'use strict';
 
+const { gradeLabel } = require('../utils/capsPhase');
+
 /**
  * Builds a CAPS-aligned School-Based Assessment (SBA) task prompt.
  * SBA tasks include projects, investigations, practical tasks, oral tasks,
@@ -22,7 +24,7 @@ function sbaTaskPrompt({ grade, subject, topic, marks, language }) {
     return foundationPhaseLearningActivity({ grade, subject, topic, language });
   }
 
-  const gradeStr = grade ? `Grade ${grade}` : 'Grade 8';
+  const gradeStr = grade != null ? gradeLabel(grade) : 'Grade 8';
   const subjectStr = subject && subject !== 'general'
     ? subject.charAt(0).toUpperCase() + subject.slice(1)
     : 'General';

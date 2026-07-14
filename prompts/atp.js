@@ -1,5 +1,7 @@
 'use strict';
 
+const { gradeLabel } = require('../utils/capsPhase');
+
 /**
  * Builds a CAPS-aligned Annual Teaching Plan prompt.
  *
@@ -7,7 +9,7 @@
  * @returns {string}
  */
 function atpPrompt({ grade, subject, language }) {
-  const gradeStr = grade ? `Grade ${grade}` : 'the appropriate grade level';
+  const gradeStr = gradeLabel(grade);
   const subjectStr = subject && subject !== 'general'
     ? subject.charAt(0).toUpperCase() + subject.slice(1)
     : 'General';

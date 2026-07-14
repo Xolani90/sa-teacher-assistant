@@ -52,7 +52,7 @@ Respond with ONLY a single JSON object, no other text, no markdown fences, no pr
 
 {
   "type": one of [${VALID_TYPES.map(t => `"${t}"`).join(', ')}],
-  "grade": integer 1-12, or null if not stated or impliable from profile,
+  "grade": integer 0-12 (0 means Grade R), or null if not stated or impliable from profile,
   "subject": one of [${VALID_SUBJECTS.map(s => `"${s}"`).join(', ')}] — use "general" if not stated or impliable,
   "topic": short string describing the specific topic, or null,
   "marks": integer (default 20 if a test/quiz but no number given; null for non-assessment types),
@@ -132,9 +132,9 @@ function normalize(raw) {
 
   let grade = null;
   if (typeof raw?.grade === 'number' && Number.isFinite(raw.grade)) {
-    grade = Math.min(12, Math.max(1, Math.round(raw.grade)));
+    grade = Math.min(12, Math.max(0, Math.round(raw.grade)));
   } else if (typeof raw?.grade === 'string' && /^\d{1,2}$/.test(raw.grade.trim())) {
-    grade = Math.min(12, Math.max(1, parseInt(raw.grade.trim(), 10)));
+    grade = Math.min(12, Math.max(0, parseInt(raw.grade.trim(), 10)));
   }
 
   const subject = VALID_SUBJECTS.includes(raw?.subject) ? raw.subject : 'general';
@@ -195,7 +195,7 @@ async function classifyIntent(text, profile = {}) {
   const aiPromise = (async () => {
     try {
       const profileContext = [
-        profile.grade   ? `Teacher's default grade (use only if message doesn't override it): ${profile.grade}` : null,
+        profile.grade != null ? `Teacher's default grade (use only if message doesn't override it): ${profile.grade}` : null,
         profile.subject ? `Teacher's default subject (use only if message doesn't override it): ${profile.subject}` : null,
         profile.lastIntentType ? `Teacher's last request type: ${profile.lastIntentType}` : null,
       ].filter(Boolean).join('\n');

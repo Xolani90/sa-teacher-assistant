@@ -1,5 +1,7 @@
 'use strict';
 
+const { gradeLabel } = require('../utils/capsPhase');
+
 /**
  * Builds a quick quiz prompt.
  *
@@ -7,7 +9,7 @@
  * @returns {string}
  */
 function quickQuizPrompt({ topic, grade, subject, language }) {
-  const gradeStr = grade ? `Grade ${grade}` : 'the appropriate grade level';
+  const gradeStr = gradeLabel(grade);
   const subjectStr = subject && subject !== 'general' ? subject.charAt(0).toUpperCase() + subject.slice(1) : 'General';
 
   const languageInstruction = language && language !== 'english'

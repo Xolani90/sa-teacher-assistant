@@ -1,5 +1,7 @@
 'use strict';
 
+const { gradeLabel } = require('../utils/capsPhase');
+
 /**
  * Builds a CAPS-aligned test + memorandum prompt.
  *
@@ -16,7 +18,7 @@ function testPrompt({ grade, subject, topic, marks, language }) {
     return foundationPhaseLearningAssessment({ grade, subject, topic, language });
   }
 
-  const gradeStr = grade ? `Grade ${grade}` : 'Grade 8';
+  const gradeStr = grade != null ? gradeLabel(grade) : 'Grade 8';
   const subjectStr = subject && subject !== 'general' ? subject.charAt(0).toUpperCase() + subject.slice(1) : 'General';
   const totalMarks = marks || 20;
 
