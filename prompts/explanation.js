@@ -1,5 +1,57 @@
 'use strict';
 
+const { getPhase, gradeLabel, PHASES } = require('../utils/capsPhase');
+
+/**
+ * Foundation Phase (Grade R-3) explanations must not be a dense, multi-section
+ * reading document — most learners at this phase cannot read one
+ * independently, and "explaining a topic" in real Foundation Phase practice
+ * means giving the TEACHER a short story/analogy/talking script to use
+ * out loud with the class, not a learner-facing handout.
+ */
+function foundationPhaseExplanation({ gradeStr, subjectStr, topic, languageInstruction }) {
+  return `You are an experienced South African Foundation Phase teacher preparing a short talking script for another teacher to use with young learners.
+
+TASK: Write a simple, spoken-style explanation of the topic below, for the TEACHER to read aloud or tell to the class — not for the learner to read alone.
+
+CAPS FOUNDATION PHASE REQUIREMENTS:
+- Content must align to ${gradeStr} ${subjectStr} CAPS curriculum
+- Use very short sentences and everyday words only — nothing a Grade R–3 learner wouldn't hear in normal conversation
+- Build the explanation around a short story, a familiar analogy (food, animals, family, play), or a simple real-life example — never start with a dictionary-style definition
+- Include a suggested simple action, gesture, song, or picture the teacher can use alongside the words to make it concrete
+- Use South African context — local animals, foods, places, everyday objects young children recognise
+- No technical/subject jargon at all unless it is one single simple word introduced through the story itself
+
+EXPLANATION DETAILS:
+- Topic: ${topic}
+- Grade: ${gradeStr}
+- Subject: ${subjectStr}
+
+OUTPUT — use these EXACT sections, formatted for WhatsApp:
+
+*${topic} — ${gradeStr} Explanation (for the teacher to use aloud)*
+_(${subjectStr})_
+
+---
+
+*Say this to start:*
+[1-2 simple spoken sentences that hook the learners' attention — a question, a sound, or "Have you ever seen...?"]
+
+*Tell this little story or example:*
+[A short, concrete story or everyday example a Foundation Phase learner would recognise, that naturally introduces the idea. 3-5 simple spoken sentences.]
+
+*Show or do this:*
+[One simple action, gesture, picture, object, or short song/rhyme the teacher can use alongside the story to make the idea concrete]
+
+*Ask the class:*
+[1-2 simple oral questions the teacher can ask to check understanding — things learners answer by pointing, saying a word, or showing with their hands, not writing]
+
+*If a learner doesn't understand, try this instead:*
+[One alternative, even more concrete way to show the same idea — e.g. using real objects instead of pictures]
+
+Keep the whole script short enough to say in 2-3 minutes. Write it exactly as the teacher would say it out loud, not as a textbook paragraph.${languageInstruction}`;
+}
+
 /**
  * Builds a CAPS-aligned learner explanation prompt.
  *
@@ -7,29 +59,31 @@
  * @returns {string}
  */
 function explanationPrompt({ grade, subject, topic, language }) {
-  const gradeStr = grade ? `Grade ${grade}` : 'the appropriate grade level';
+  const gradeStr = grade != null ? gradeLabel(grade) : 'the appropriate grade level';
   const subjectStr = subject && subject !== 'general' ? subject.charAt(0).toUpperCase() + subject.slice(1) : 'General';
 
-  // Determine reading level guidance
-  const isJunior = !grade || grade <= 3;
-  const isIntermediate = grade && grade >= 4 && grade <= 6;
-  const isSenior = grade && grade >= 7 && grade <= 9;
-  const isFET = grade && grade >= 10;
+  const languageInstruction = language && language !== 'english'
+    ? `\n\nGenerate this entire response in ${language.charAt(0).toUpperCase() + language.slice(1)}. Use natural, teacher-appropriate ${language} for South African schools.`
+    : '';
+
+  const phase = getPhase(grade);
+  if (phase === PHASES.FOUNDATION) {
+    return foundationPhaseExplanation({ gradeStr, subjectStr, topic, languageInstruction });
+  }
+
+  // Determine reading level guidance (Intermediate/Senior/FET only — Foundation
+  // Phase is handled above and never reaches this branch).
+  const isIntermediate = phase === PHASES.INTERMEDIATE;
+  const isSenior = phase === PHASES.SENIOR;
 
   let languageGuidance;
-  if (isJunior) {
-    languageGuidance = 'Use very simple words. Short sentences. No terminology without immediate explanation. Like talking to an 8-year-old.';
-  } else if (isIntermediate) {
+  if (isIntermediate) {
     languageGuidance = 'Use simple, everyday language. Introduce subject-specific terms with clear explanations. Sentences should be easy to follow for a 10–12 year old.';
   } else if (isSenior) {
     languageGuidance = 'Use clear, accessible language. Introduce and define CAPS terminology. Suitable for a 13–15 year old South African learner.';
   } else {
     languageGuidance = 'Use academic language appropriate for Grade 10–12. Include proper subject terminology. Explain concepts at FET level depth.';
   }
-
-  const languageInstruction = language && language !== 'english'
-    ? `\n\nGenerate this entire response in ${language.charAt(0).toUpperCase() + language.slice(1)}. Use natural, teacher-appropriate ${language} for South African schools.`
-    : '';
 
   return `You are a qualified South African teacher creating a clear, simple explanation for learners.
 

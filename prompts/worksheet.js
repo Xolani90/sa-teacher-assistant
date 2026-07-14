@@ -1,5 +1,78 @@
 'use strict';
 
+const { getPhase, gradeLabel, PHASES } = require('../utils/capsPhase');
+
+/**
+ * Foundation Phase (Grade R-3) worksheets must not be a shortened written
+ * exam. CAPS Foundation Phase practice for independent/guided seatwork is
+ * picture-based, tactile, and low-reading-load: matching, tracing, colouring,
+ * sorting, and simple drawing/counting tasks, with an oral component the
+ * teacher reads aloud or leads. There is no Section A/B/C, no marking grid
+ * in the Senior-Phase sense, and mark allocation is replaced with a simple
+ * completion/observation check.
+ */
+function foundationPhaseWorksheet({ gradeStr, subjectStr, topic, languageInstruction }) {
+  return `You are a qualified South African Foundation Phase teacher producing classroom-ready material strictly aligned to CAPS Foundation Phase methodology.
+
+TASK: Generate a complete, print-ready Foundation Phase worksheet.
+
+CAPS FOUNDATION PHASE WORKSHEET REQUIREMENTS:
+- Align to ${gradeStr} ${subjectStr} CAPS curriculum
+- This is NOT a written exam — it is picture-based, low-reading, hands-on seatwork a young learner completes with a pencil/crayon, mostly independent of reading ability
+- Use activity types such as: matching (draw a line), colouring, tracing (letters/numbers/shapes/patterns), circling the correct picture, sorting/grouping pictures, simple counting with pictures, drawing, and completing a pattern
+- Include at least one oral component the teacher reads aloud or leads verbally before or during the worksheet (the learner should never need to silently read multi-word instructions alone)
+- Instructions for each activity must be a single short, simple sentence a teacher would say aloud, e.g. "Draw a line to match each animal to its home" or "Colour the shapes that are triangles"
+- Do NOT use multiple-choice letter options (A/B/C/D), formal question numbering styled like a test, mark allocations in brackets like (2), or a marking grid
+- Do NOT include a "Working" / "Answer: ___" written-response format
+- Use real South African context — local animals, foods, places, everyday objects young children recognise
+- Describe visual/picture elements in words in square brackets (e.g. [3 simple pictures: a dog, a ball, a tree]) since this becomes a printed worksheet — be specific enough that whoever lays out the page knows exactly what to draw or place
+
+WORKSHEET DETAILS:
+- Topic: ${topic}
+- Grade: ${gradeStr}
+- Subject: ${subjectStr}
+
+OUTPUT — produce a complete worksheet in this EXACT format for WhatsApp:
+
+*WORKSHEET: ${topic.charAt(0).toUpperCase() + topic.slice(1)}*
+*${subjectStr} | ${gradeStr}*
+
+[School Logo]                    [SA Teacher Assistant Logo]
+
+Name: ________________________________
+Class: ________________ Date: __________
+
+---
+
+*BEFORE YOU START (teacher reads aloud)*
+[One short sentence the teacher says to introduce the topic/activity — simple, warm, spoken language]
+
+---
+
+*ACTIVITY 1*
+[Short spoken instruction, e.g. "Draw a line to match..."]
+[Describe the picture/tracing/matching/colouring content in square brackets, specific enough to lay out on the page]
+
+---
+
+*ACTIVITY 2*
+[Short spoken instruction for a second activity type — vary from Activity 1, e.g. tracing if Activity 1 was matching]
+[Describe the picture/tracing/matching/colouring content in square brackets]
+
+---
+
+*ACTIVITY 3*
+[Short spoken instruction for a third, different activity type]
+[Describe the picture/tracing/matching/colouring content in square brackets]
+
+---
+
+*TEACHER CHECK (not for the learner)*
+[2-3 simple things the teacher looks for while learners work — observable signs of understanding, not a mark count]
+
+Generate all activities with complete, specific content — no placeholder text left for the teacher to fill in themselves. Keep every spoken instruction to one short sentence.${languageInstruction}`;
+}
+
 /**
  * Builds a CAPS-aligned worksheet prompt.
  *
@@ -7,39 +80,34 @@
  * @returns {string}
  */
 function worksheetPrompt({ grade, subject, topic, language, differentiation }) {
-  const gradeStr = grade ? `Grade ${grade}` : 'the appropriate grade level';
+  const gradeStr = grade != null ? gradeLabel(grade) : 'the appropriate grade level';
   const subjectStr = subject && subject !== 'general' ? subject.charAt(0).toUpperCase() + subject.slice(1) : 'General';
-
-  // Calculate question distribution based on grade level
-  const isJuniorPhase = !grade || grade <= 3;
-  const isIntermediatePhase = grade && grade >= 4 && grade <= 6;
-  const isSeniorPhase = grade && grade >= 7 && grade <= 9;
-  const isFETPhase = grade && grade >= 10;
-
-  let totalMarks = 20;
-  if (isJuniorPhase) totalMarks = 10;
-  else if (isIntermediatePhase) totalMarks = 15;
-  else if (isSeniorPhase) totalMarks = 20;
-  else if (isFETPhase) totalMarks = 25;
-
-  // CAPS cognitive level distribution varies by phase
-  let cognitiveLevels;
-  let sectionAMarks, sectionBMarks, sectionCMarks;
-  if (isJuniorPhase) {
-    cognitiveLevels = 'Knowledge/Recall (50%), Routine Application (35%), Complex Application (15%), Problem Solving (0%)';
-    sectionAMarks = 3;
-    sectionBMarks = 4;
-    sectionCMarks = totalMarks - sectionAMarks - sectionBMarks;
-  } else {
-    cognitiveLevels = 'Knowledge/Recall (30%), Routine Application (35%), Complex Application (25%), Problem Solving (10%)';
-    sectionAMarks = 3;
-    sectionBMarks = 7;
-    sectionCMarks = totalMarks - sectionAMarks - sectionBMarks;
-  }
 
   const languageInstruction = language && language !== 'english'
     ? `\n\nGenerate this entire response in ${language.charAt(0).toUpperCase() + language.slice(1)}. Use natural, teacher-appropriate ${language} for South African school documents.`
     : '';
+
+  const phase = getPhase(grade);
+  if (phase === PHASES.FOUNDATION) {
+    return foundationPhaseWorksheet({ gradeStr, subjectStr, topic, languageInstruction });
+  }
+
+  // Calculate question distribution based on grade level (Intermediate/Senior/FET only —
+  // Foundation Phase is handled above and never reaches this branch).
+  const isIntermediatePhase = phase === PHASES.INTERMEDIATE;
+  const isSeniorPhase = phase === PHASES.SENIOR;
+  const isFETPhase = phase === PHASES.FET;
+
+  let totalMarks = 20;
+  if (isIntermediatePhase) totalMarks = 15;
+  else if (isSeniorPhase) totalMarks = 20;
+  else if (isFETPhase) totalMarks = 25;
+
+  // CAPS cognitive level distribution varies by phase
+  const cognitiveLevels = 'Knowledge/Recall (30%), Routine Application (35%), Complex Application (25%), Problem Solving (10%)';
+  const sectionAMarks = 3;
+  const sectionBMarks = 7;
+  const sectionCMarks = totalMarks - sectionAMarks - sectionBMarks;
 
   // Differentiation instructions
   let differentiationInstruction = '';
