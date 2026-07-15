@@ -377,6 +377,41 @@ function runMigrations() {
       ON reports(assessment_id);
   `);
 
+  // Migration 022: Foundation Phase observation storage.
+  // observation_assessments holds the per-submission header (grade/subject/
+  // assessment name), mirroring how `assessments` separates header data from
+  // `learner_results` in the numeric pipeline. observation_records holds one
+  // row per (learner, domain) pair, using developmental_status (not the
+  // generic "status") to match the developmentalStatus field name used
+  // throughout utils/observationParser.js and services/observationAnalysisService.js.
+  // No generation_id / idempotency key yet — that's deferred until the
+  // WhatsApp handler exists and duplicate submissions become possible.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS observation_assessments (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash        TEXT    NOT NULL,
+      grade             TEXT,
+      subject           TEXT,
+      assessment_name   TEXT,
+      created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
+    );
+    CREATE TABLE IF NOT EXISTS observation_records (
+      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+      assessment_id         INTEGER NOT NULL,
+      learner_name          TEXT    NOT NULL,
+      domain                TEXT    NOT NULL,
+      developmental_status  TEXT    NOT NULL,
+      notes                 TEXT,
+      created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (assessment_id) REFERENCES observation_assessments(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_observation_assessments_phone
+      ON observation_assessments(phone_hash);
+    CREATE INDEX IF NOT EXISTS idx_observation_records_assessment
+      ON observation_records(assessment_id);
+  `);
+
   // Migration 018: Payment ledger — single source of truth for idempotency
   // and audit trail on payment.succeeded webhooks. checkout_id UNIQUE is
   // the ONLY mechanism relied on for idempotency (enforced via INSERT OR
