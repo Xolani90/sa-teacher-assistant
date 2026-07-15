@@ -6,6 +6,8 @@
  * Powers Module 1 (Curriculum Intelligence Engine) of Part 3.
  */
 
+const { gradeLabel } = require('../utils/capsPhase');
+
 // ── SA School Calendar (approximated; adjust per WCED/DBE circulars each year) ──
 // Structure: { term: { start: [month-1, day], end: [month-1, day], weeks: N } }
 const SA_SCHOOL_CALENDAR = {
@@ -280,12 +282,12 @@ function getTermTopics(grade, subject, term) {
  * @returns {string} Formatted WhatsApp message
  */
 function handleCurriculumQuery(text, profile = {}) {
-  const grade   = parseInt(profile.grade) || null;
+  const grade   = profile.grade != null ? parseInt(profile.grade, 10) : null;
   const subject = profile.subject || 'your subject';
   const atpInfo = getCurrentATPWeek();
 
   // If we don't have the teacher's grade/subject, give general info
-  if (!grade) {
+  if (grade === null) {
     return buildGeneralATPStatus(atpInfo);
   }
 
@@ -353,7 +355,7 @@ function buildPacingReport({ grade, subject, term, atpInfo, coveragePct, complet
   const gap = expectedPct - coveragePct;
   const riskLabel = gap > 20 ? '🔴 Behind Schedule' : gap > 5 ? '🟡 Slightly Behind' : '🟢 On Track';
 
-  let msg = `📊 *Pacing Report — Grade ${grade} ${subject}*\n`;
+  let msg = `📊 *Pacing Report — ${gradeLabel(grade)} ${subject}*\n`;
   msg += `Term ${term} | Week ${atpInfo.isInTerm ? atpInfo.weekInTerm : atpInfo.totalWeeksInTerm} of ${atpInfo.totalWeeksInTerm}\n\n`;
   msg += `*Status:* ${riskLabel}\n`;
   msg += `Expected coverage: ${expectedPct}% | Actual: ${coveragePct}%\n\n`;
@@ -383,7 +385,7 @@ function buildPacingReport({ grade, subject, term, atpInfo, coveragePct, complet
 }
 
 function buildWeeklyTopics({ grade, subject, term, atpInfo, currentTopics, upcomingTopics, weeksElapsed, totalWeeks }) {
-  let msg = `📅 *This Week's ATP Topics — Grade ${grade} ${subject}*\n`;
+  let msg = `📅 *This Week's ATP Topics — ${gradeLabel(grade)} ${subject}*\n`;
   msg += `Term ${term} | Week ${atpInfo.isInTerm ? atpInfo.weekInTerm : weeksElapsed} of ${totalWeeks}\n\n`;
 
   if (currentTopics.length) {
@@ -404,7 +406,7 @@ function buildWeeklyTopics({ grade, subject, term, atpInfo, currentTopics, upcom
 }
 
 function buildCoverageDashboard({ grade, subject, term, atpInfo, coveragePct, completedTopics, upcomingTopics }) {
-  let msg = `📊 *Curriculum Coverage — Grade ${grade} ${subject}*\n`;
+  let msg = `📊 *Curriculum Coverage — ${gradeLabel(grade)} ${subject}*\n`;
   msg += `Term ${term} | ${atpInfo.isInTerm ? `Week ${atpInfo.weekInTerm}` : 'End of term'}\n\n`;
 
   const bar = buildProgressBar(coveragePct);
@@ -429,7 +431,7 @@ function buildCoverageDashboard({ grade, subject, term, atpInfo, coveragePct, co
 }
 
 function buildAssessmentReminder({ grade, subject, term, atpInfo, completedTopics }) {
-  let msg = `📝 *Assessment Planner — Grade ${grade} ${subject}*\n`;
+  let msg = `📝 *Assessment Planner — ${gradeLabel(grade)} ${subject}*\n`;
   msg += `Term ${term}\n\n`;
 
   if (completedTopics.length) {
