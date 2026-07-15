@@ -1,46 +1,130 @@
 'use strict';
 
 /**
- * Observation-based developmental grouping (Foundation Phase).
+ * Observation grouping service (Foundation Phase).
  *
- * Mirrors the role of learnerGroupingService.js for the numeric pipeline,
- * but groups learners by developmental status categories instead of
- * percentage thresholds (per architecture doc — no percentage bands).
+ * Pure data-layer service: reshapes parsed observation records
+ * (utils/observationParser.js) into two grouped views, without ever
+ * dropping fields. Presentation-layer callers (WhatsApp summaries, PDF
+ * reports, future dashboards) decide what to display; this service just
+ * regroups the same full records two different ways.
  *
- * STATUS: Phase 1 skeleton. No grouping logic implemented yet (Phase 4).
+ * Two exported functions, mirroring the two things a teacher actually
+ * asks after an observation round:
+ *
+ *   groupByDomainAndStatus(records)
+ *     "Who's Not Yet in Number Recognition?" — clusters learners by
+ *     (domain, status) so the teacher can pull a small group for a
+ *     focused activity. Mirrors how the numeric pipeline's intervention
+ *     report clusters learners by shared weak topic.
+ *
+ *   groupByLearner(records)
+ *     "How is Sipho doing overall?" — one profile per learner across all
+ *     domains. Mirrors a report-card view.
+ *
+ * Both functions return arrays of full original record objects
+ * (learnerName, domain, developmentalStatus, notes) inside each group —
+ * nothing is stripped or summarized. Grouping order follows first-seen
+ * order in the input, for stable, teacher-predictable output (same
+ * convention as observationAnalysisService.js).
+ *
+ * Learner names are grouped case-insensitively in groupByLearner(), same
+ * dedup rule as parseObservation()/analyzeObservations() — "Sipho" and
+ * "sipho" are the same learner. The canonical display name used is
+ * whichever casing appeared first in the input.
+ *
+ * See: docs/foundation-phase-observation-pipeline.md
  */
 
 /**
- * Groups learners for a given observation assessment into developmental
- * categories (e.g. 'Achieved', 'Developing', 'Not Yet') rather than the
- * percentage-based groups A/B/C used by groupLearners().
+ * Groups records by (domain, developmentalStatus) pair.
  *
- * @param {number} observationAssessmentId
- * @returns {{
- *   achieved: Array<{ learnerName: string }>,
- *   developing: Array<{ learnerName: string }>,
- *   notYet: Array<{ learnerName: string }>
- * }}
+ * @param {Array<{
+ *   learnerName: string,
+ *   domain: string,
+ *   developmentalStatus: string,
+ *   notes: string|null
+ * }>} records - Output of parseObservation().records
+ * @returns {Array<{
+ *   domain: string,
+ *   developmentalStatus: string,
+ *   learners: Array<{
+ *     learnerName: string,
+ *     domain: string,
+ *     developmentalStatus: string,
+ *     notes: string|null
+ *   }>
+ * }>}
  */
-function groupObservations(observationAssessmentId) {
-  // TODO (Phase 4): implement developmental-status grouping.
-  throw new Error('groupObservations() not yet implemented — Phase 4');
+function groupByDomainAndStatus(records) {
+  if (!Array.isArray(records)) {
+    throw new Error('groupByDomainAndStatus() requires an array of records.');
+  }
+
+  const groupOrder = [];
+  const groups = new Map(); // key: "domain::status" -> group object
+
+  for (const record of records) {
+    if (!record || typeof record !== 'object') continue;
+    const { domain, developmentalStatus } = record;
+    if (!domain || !developmentalStatus) continue;
+
+    const key = `${domain}::${developmentalStatus}`;
+    if (!groups.has(key)) {
+      groups.set(key, { domain, developmentalStatus, learners: [] });
+      groupOrder.push(key);
+    }
+    groups.get(key).learners.push({ ...record });
+  }
+
+  return groupOrder.map((key) => groups.get(key));
 }
 
 /**
- * Produces a teacher-facing summary of the developmental grouping
- * (mirrors generateGroupingSummary() in learnerGroupingService.js).
+ * Groups records by learner, case-insensitively.
  *
- * @param {object} groups - Output of groupObservations().
- * @param {number} totalLearners
- * @returns {string}
+ * @param {Array<{
+ *   learnerName: string,
+ *   domain: string,
+ *   developmentalStatus: string,
+ *   notes: string|null
+ * }>} records - Output of parseObservation().records
+ * @returns {Array<{
+ *   learnerName: string,
+ *   records: Array<{
+ *     learnerName: string,
+ *     domain: string,
+ *     developmentalStatus: string,
+ *     notes: string|null
+ *   }>
+ * }>}
  */
-function generateGroupingSummary(groups, totalLearners) {
-  // TODO (Phase 4): implement summary generation.
-  throw new Error('generateGroupingSummary() not yet implemented — Phase 4');
+function groupByLearner(records) {
+  if (!Array.isArray(records)) {
+    throw new Error('groupByLearner() requires an array of records.');
+  }
+
+  const nameOrder = [];
+  const groups = new Map(); // key: lowercased trimmed name -> group object
+
+  for (const record of records) {
+    if (!record || typeof record !== 'object') continue;
+    const { learnerName } = record;
+    if (!learnerName) continue;
+
+    const key = String(learnerName).trim().toLowerCase();
+    if (!groups.has(key)) {
+      // First-seen casing becomes the canonical display name.
+      groups.set(key, { learnerName, records: [] });
+      nameOrder.push(key);
+    }
+    groups.get(key).records.push({ ...record });
+  }
+
+  return nameOrder.map((key) => groups.get(key));
 }
 
 module.exports = {
-  groupObservations,
-  generateGroupingSummary,
+  groupByDomainAndStatus,
+  groupByLearner,
 };
