@@ -59,7 +59,7 @@ test('successful submission returns success:true with all pipeline outputs popul
   assertEqual(result.success, true, 'success is true');
   assert(result.records !== null, 'records is populated');
   assert(result.analysis !== null, 'analysis is populated');
-  assert(result.developmentalSummary !== null, 'developmentalSummary is populated');
+  assert(result.summary !== null, 'developmentalSummary is populated');
   assert(result.domainStatusGroups !== null, 'domainStatusGroups is populated');
   assert(result.learnerGroups !== null, 'learnerGroups is populated');
   assertEqual(result.helpText, null, 'helpText is null on success');
@@ -85,9 +85,9 @@ test('successful submission analysis reflects the parsed records (not recomputed
 test('successful submission developmentalSummary is generated FROM the same analysis object', () => {
   const result = processObservationSubmission(HAPPY_INPUT);
 
-  assert(result.developmentalSummary.includes('Sipho'), 'summary mentions Sipho');
-  assert(result.developmentalSummary.includes('Number Recognition'), 'summary mentions the domain');
-  assert(!result.developmentalSummary.includes('%'), 'summary has no percentage framing');
+  assert(result.summary.includes('Sipho'), 'summary mentions Sipho');
+  assert(result.summary.includes('Number Recognition'), 'summary mentions the domain');
+  assert(!result.summary.includes('%'), 'summary has no percentage framing');
 });
 
 test('successful submission domainStatusGroups clusters correctly', () => {
@@ -128,7 +128,7 @@ test('failed parse (empty input) returns success:false with no analysis/grouping
   assertEqual(result.success, false, 'success is false');
   assertEqual(result.records, null, 'records is null, not an empty array — analysis never ran');
   assertEqual(result.analysis, null, 'analysis is null');
-  assertEqual(result.developmentalSummary, null, 'developmentalSummary is null');
+  assertEqual(result.summary, null, 'developmentalSummary is null');
   assertEqual(result.domainStatusGroups, null, 'domainStatusGroups is null');
   assertEqual(result.learnerGroups, null, 'learnerGroups is null');
   assert(result.errors.length > 0, 'errors array is populated');
