@@ -295,6 +295,15 @@ function handleCurriculumQuery(text, profile = {}) {
   const week = atpInfo.weekInTerm || (atpInfo.isInTerm ? atpInfo.totalWeeksInTerm : null);
 
   const termTopics   = getTermTopics(grade, subject, term);
+
+  // No CAPS topic reference data exists for this grade/subject combination
+  // (true for every grade below 7 today). Say so honestly instead of
+  // dispatching to a report that would compute a fabricated "0% coverage".
+  // Same signal/reasoning as curriculumCoverageService.js's `dataAvailable` flag.
+  if (termTopics.length === 0) {
+    return buildNoReferenceDataMessage({ grade, subject });
+  }
+
   const weeksElapsed = atpInfo.isInTerm ? atpInfo.weekInTerm : atpInfo.totalWeeksInTerm;
   const totalWeeks   = atpInfo.totalWeeksInTerm || 10;
   const { currentTopics, completedTopics, upcomingTopics } = getTopicsForWeek(grade, subject, term, weeksElapsed);
@@ -327,6 +336,16 @@ function handleCurriculumQuery(text, profile = {}) {
 
   // Default: general dashboard
   return buildCoverageDashboard({ grade, subject, term, atpInfo, coveragePct, completedTopics, upcomingTopics });
+}
+
+function buildNoReferenceDataMessage({ grade, subject }) {
+  return (
+    `📚 *${gradeLabel(grade)} ${subject}*\n\n` +
+    `I don't have detailed CAPS topic reference data for this grade and subject yet, ` +
+    `so I can't show pacing, weekly topics, or coverage percentages for it.\n\n` +
+    `_I can still create worksheets, tests, lesson plans, and other CAPS-aligned materials for this grade — ` +
+    `just no automatic curriculum-tracking dashboard for it yet._`
+  );
 }
 
 function buildGeneralATPStatus(atpInfo) {
