@@ -16,6 +16,7 @@ const INTENT_TYPES = {
   DATA_ASSESSMENT: 'dataAssessment',
   INTERVENTION_PLAN: 'interventionPlan',
   MODERATION_PACK: 'moderationPack',
+  OBSERVATION: 'observation',
   CURRICULUM_QUERY: 'curriculumQuery',
   GREETING: 'greeting',
   SMALL_TALK: 'smallTalk',
@@ -195,6 +196,11 @@ function parseIntent(text) {
   // EXAM_PAPER detection (before INTERVENTION_PLAN and TEST)
   } else if (/\b(exam\s+paper|examination\s+paper|formal\s+exam|half[- ]year\s+exam|mid[- ]year\s+exam|end[- ]of[- ]year\s+exam|final\s+exam|june\s+exam|november\s+exam)\b/i.test(lower)) {
     type = INTENT_TYPES.EXAM_PAPER;
+  // OBSERVATION detection (before INTERVENTION_PLAN/EMOTIONAL_SUPPORT — developmental
+  // observation notes for Foundation Phase learners are distinct from marks-based
+  // assessment or "struggling learner" support-planning language)
+  } else if (/\b(record\s+(an\s+)?observation|log\s+(an\s+)?observation|capture\s+(an\s+)?observation|developmental\s+observation|foundation\s+phase\s+observation|observation\s+(notes?|record)|observe\s+(a\s+)?learner)\b/i.test(lower)) {
+    type = INTENT_TYPES.OBSERVATION;
   // Intervention planning / SBA support (sba\s+task removed — now handled by SBA_TASK above)
   } else if (/\b(intervention\s+plan|intervention\s+strategy|sba\s+support|sba\s+(schedule|plan)|reteach(ing)?\s+plan|catch[\s-]?up\s+plan|support\s+plan|remedial\s+plan|struggling\s+learners?|learners?\s+(are\s+)?(struggling|falling\s+behind)|school[\s-]based\s+assessment)\b/i.test(lower)) {
     type = INTENT_TYPES.INTERVENTION_PLAN;
@@ -274,7 +280,7 @@ function parseIntent(text) {
   // Assessment analysis and intervention planning collect their data via a
   // guided conversation (grade, subject, performance details) rather than a
   // free-text "topic" — clear it so the flow handler always asks properly.
-  if (type === INTENT_TYPES.ASSESSMENT_ANALYSIS || type === INTENT_TYPES.DATA_ASSESSMENT || type === INTENT_TYPES.INTERVENTION_PLAN) {
+  if (type === INTENT_TYPES.ASSESSMENT_ANALYSIS || type === INTENT_TYPES.DATA_ASSESSMENT || type === INTENT_TYPES.INTERVENTION_PLAN || type === INTENT_TYPES.OBSERVATION) {
     topic = null;
   }
 

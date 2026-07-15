@@ -31,6 +31,9 @@ const { isCeilingReached } = require('../utils/aiCostMonitor');
 const { handleCurriculumQuery } = require('../services/curriculumIntelligenceService');
 const { gradeLabel, parseGrade } = require('../utils/capsPhase');
 const { buildFullInterventionPlanPrompt } = require('../prompts/fullInterventionPlan');
+const { processObservationSubmission } = require('../utils/observationWorkflowService');
+const { getObservationFormatHelpText } = require('../utils/observationParser');
+const { saveObservationSubmission } = require('../services/observationRepository');
 
 /**
  * Rolls back a usage_events row created by checkAndIncrementUsage() when
@@ -159,6 +162,7 @@ const assessmentAnalysisState = new SessionStore('assessmentAnalysis', 30 * 60 *
 const interventionPlanState   = new SessionStore('interventionPlan',   30 * 60 * 1000);
 const dataAssessmentState     = new SessionStore('dataAssessment',     45 * 60 * 1000); // longer TTL — CSV upload may take time
 const lastGeneratedState      = new SessionStore('lastGenerated',      30 * 60 * 1000); // SAVE command reads this
+const observationState        = new SessionStore('observation',        30 * 60 * 1000);
 const saveLock = new Set(); // B5-F1: per-phone SAVE in-flight lock (try/finally in SAVE handler)
 
 // ── Clear all session states for a teacher ─────────────────────────────────
@@ -1677,6 +1681,88 @@ async function generateInterventionOutput(from, state, phoneHash) {
   interventionPlanState.delete(phoneHash);
 }
 
+// ── Observation flow handler ──────────────────────────────────────────────
+/**
+ * Handles the single-turn "record a Foundation Phase observation" conversation.
+ * Collects one raw text block (header + per-learner domain/status/notes),
+ * parses and persists it in one round-trip.
+ * Returns true if handled (skip normal processing), false otherwise.
+ *
+ * @param {string} from
+ * @param {string} text
+ * @param {object|null} preClassifiedIntent
+ * @returns {Promise<boolean>}
+ */
+async function handleObservationFlow(from, text, preClassifiedIntent = null) {
+  const phoneHash = hashPhone(from);
+  const state = observationState.get(phoneHash);
+
+  if (state && Date.now() - state.lastActivity > 30 * 60 * 1000) {
+    observationState.delete(phoneHash);
+    return false;
+  }
+
+  if (!state) {
+    const intent = preClassifiedIntent || parseIntent(text);
+    if (intent.type !== 'observation') return false;
+
+    observationState.set(phoneHash, {
+      step: 'awaitingObservationText',
+      lastActivity: Date.now(),
+    });
+    await safeSendMessage(from,
+      `👀 *Record an Observation*\n\n` + getObservationFormatHelpText()
+    );
+    return true;
+  }
+
+  const trimmed = text.trim();
+  if (trimmed.toUpperCase() === 'CANCEL') {
+    observationState.delete(phoneHash);
+    await safeSendMessage(from, `No problem — cancelled.`);
+    return true;
+  }
+
+  if (state.step === 'awaitingObservationText') {
+    const result = processObservationSubmission(text);
+
+    if (!result.success) {
+      // Stay in flow — let them fix and resend rather than losing the session
+      observationState.set(phoneHash, { ...state, lastActivity: Date.now() });
+      await safeSendMessage(from,
+        `⚠️ *Couldn't read that observation:*\n\n` +
+        result.errors.map(e => `• ${e}`).join('\n') +
+        `\n\n${result.helpText}`
+      );
+      return true;
+    }
+
+    let saveError = null;
+    try {
+      saveObservationSubmission(phoneHash, result.header, result.records);
+    } catch (err) {
+      saveError = err;
+      console.error('[WEBHOOK] saveObservationSubmission failed:', err.message);
+    }
+
+    observationState.delete(phoneHash);
+
+    if (saveError) {
+      await safeSendMessage(from,
+        `⚠️ *Couldn't save that observation right now.* Please try sending it again in a moment.`
+      );
+      return true;
+    }
+
+    await safeSendMessage(from,
+      `✅ *Observation saved successfully.*\n\n${result.summary}`
+    );
+    return true;
+  }
+
+  return false;
+}
+
 // ── Profile update flow handler ───────────────────────────────────────────
 /**
  * Handles the multi-turn profile update conversation.
@@ -2953,7 +3039,8 @@ async function processMessage(message) {
     assessmentAnalysisState.get(phoneHash) ||
     dataAssessmentState.get(phoneHash) ||
     interventionPlanState.get(phoneHash) ||
-    profileUpdateState.get(phoneHash)
+    profileUpdateState.get(phoneHash) ||
+    observationState.get(phoneHash)
   );
 
   if (alreadyMidFlow) {
@@ -2966,6 +3053,7 @@ async function processMessage(message) {
     if (await handleDataAssessmentFlow(from, text, message)) return;
     if (await handleAssessmentAnalysisFlow(from, text)) return;
     if (await handleInterventionPlanFlow(from, text)) return;
+    if (await handleObservationFlow(from, text)) return;
     // Defensive fallback: state existed a moment ago but no handler
     // claimed it (e.g. TTL expired between the check above and now) —
     // fall through to normal classification below.
@@ -3030,6 +3118,10 @@ async function processMessage(message) {
   const interventionPlanHandled = await handleInterventionPlanFlow(from, text, intent);
   if (interventionPlanHandled) return;
 
+  // ── Observation multi-turn flow ─────────────────────────────────────
+  const observationHandled = await handleObservationFlow(from, text, intent);
+  if (observationHandled) return;
+
   // ── Conversational intents (GREETING, SMALL_TALK, EMOTIONAL_SUPPORT, THANKS, UNKNOWN) ─
   // These should NEVER consume quota, generate PDFs, or invoke content-generation workflows.
   // Replies are generated by Claude directly (reading what the teacher actually said),
@@ -3056,7 +3148,7 @@ async function processMessage(message) {
   // moderationPack only needs a topic in full-build mode — if the teacher has
   // a recently analysed assessment (wrap mode), the assessment's own title
   // stands in for the topic, so skip the clarifier in that case.
-  const noTopicNeeded = ['atp', 'assessmentAnalysis', 'dataAssessment', 'interventionPlan', 'curriculumQuery'];
+  const noTopicNeeded = ['atp', 'assessmentAnalysis', 'dataAssessment', 'interventionPlan', 'curriculumQuery', 'observation'];
   const moderationPackHasExistingAssessment = intent.type === 'moderationPack' && !!(getTeacherByPhone(from)?.last_assessment_id);
   if (!noTopicNeeded.includes(intent.type) && !moderationPackHasExistingAssessment && (!intent.topic || intent.topic.length < 3)) {
     pendingIntentState.set(phoneHash, {
@@ -3067,10 +3159,10 @@ async function processMessage(message) {
     return;
   }
 
-  if (intent.type === 'assessmentAnalysis' || intent.type === 'interventionPlan') {
+  if (intent.type === 'assessmentAnalysis' || intent.type === 'interventionPlan' || intent.type === 'observation') {
     // Defensive fallback only — the dedicated flow handlers above should
     // always intercept these before we get here.
-    await safeSendMessage(from, `Let's set that up — could you say that again? (e.g. "assessment analysis for Grade 8 Maths" or "intervention plan for struggling readers")`);
+    await safeSendMessage(from, `Let's set that up — could you say that again? (e.g. "assessment analysis for Grade 8 Maths", "intervention plan for struggling readers", or "record an observation")`);
     return;
   }
 
