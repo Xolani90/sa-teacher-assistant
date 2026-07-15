@@ -1117,6 +1117,14 @@ async function handleDataAssessmentFlow(from, text, message = null, preClassifie
       '⏳ *Generating your intervention plan...* (Steps 6–10)\n_This takes 20–30 seconds._'
     );
 
+    // This flow is Pro-gated at entry, so quota is never actually blocking —
+    // but every other generateContent() call site records the attempt via
+    // checkAndIncrementUsage()/rollbackUsage() so usage_events (and the
+    // STATUS command's usage count) stay accurate. This call — the single
+    // most expensive prompt in the app (fullInterventionPlan, 8,192-token
+    // budget) — was the one path that skipped that logging entirely.
+    const quota = checkAndIncrementUsage(from, 'fullInterventionPlan');
+
     try {
       // Extract weak topics and error patterns for the AI prompt
       const weakTopics = (ia && !ia.error)
@@ -1194,6 +1202,7 @@ async function handleDataAssessmentFlow(from, text, message = null, preClassifie
       }
     } catch (aiErr) {
       console.error('[DataAssessment] Steps 6–10 AI error:', aiErr.message);
+      rollbackUsage(quota, from);
       // Non-fatal: Steps 1–5 already sent. Persist what we have so REPORT
       // still has real content to send, even without the AI intervention plan.
       try {
