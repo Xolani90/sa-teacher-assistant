@@ -54,7 +54,7 @@ const { groupByDomainAndStatus, groupByLearner } = require('../services/observat
  *   },
  *   records: Array<object>|null,
  *   analysis: object|null,
- *   developmentalSummary: string|null,
+ *   summary: string|null,
  *   domainStatusGroups: Array<object>|null,
  *   learnerGroups: Array<object>|null,
  *   errors: string[],
@@ -72,7 +72,7 @@ function processObservationSubmission(input) {
       metadata: parseResult.metadata,
       records: null,
       analysis: null,
-      developmentalSummary: null,
+      summary: null,
       domainStatusGroups: null,
       learnerGroups: null,
       errors: parseResult.errors,
@@ -82,7 +82,7 @@ function processObservationSubmission(input) {
   }
 
   const analysis = analyzeObservations(parseResult.records);
-  const developmentalSummary = generateDevelopmentalSummary(analysis);
+  const summary = generateDevelopmentalSummary(analysis);
   const domainStatusGroups = groupByDomainAndStatus(parseResult.records);
   const learnerGroups = groupByLearner(parseResult.records);
 
@@ -92,7 +92,7 @@ function processObservationSubmission(input) {
     metadata: parseResult.metadata,
     records: parseResult.records,
     analysis,
-    developmentalSummary,
+    summary,
     domainStatusGroups,
     learnerGroups,
     errors: parseResult.errors, // always [] here, since success === true
