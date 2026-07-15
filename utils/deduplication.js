@@ -49,6 +49,16 @@ function isDuplicate(messageId) {
     }
   }
 
+  // If the cache is still over capacity after purging expired entries (e.g. a
+  // sustained burst of unique messages within the TTL window), evict the
+  // oldest entries by insertion order until back under MAX_ENTRIES. Map
+  // iteration order is insertion order, so this is a correct oldest-first
+  // eviction with no extra bookkeeping.
+  while (cache.size > MAX_ENTRIES) {
+    const oldestKey = cache.keys().next().value;
+    cache.delete(oldestKey);
+  }
+
   if (cache.has(messageId)) {
     // Check if still within TTL
     if (cache.get(messageId) > now) {
