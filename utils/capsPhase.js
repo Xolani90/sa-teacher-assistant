@@ -62,4 +62,17 @@ function parseGrade(text) {
   return null;
 }
 
-module.exports = { PHASES, getPhase, gradeLabel, parseGrade };
+
+// Mirrors the phase-based totalMarks logic inside prompts/worksheet.js so
+// the PDF header (drawn separately in services/pdfService.js) always
+// agrees with the marking grid the AI actually generated inside the
+// document body. Foundation Phase worksheets have no mark allocation.
+function getWorksheetTotalMarks(grade) {
+  const phase = getPhase(grade);
+  if (phase === PHASES.FOUNDATION) return null;
+  if (phase === PHASES.INTERMEDIATE) return 15;
+  if (phase === PHASES.SENIOR) return 20;
+  if (phase === PHASES.FET) return 25;
+  return 20;
+}
+module.exports = { PHASES, getPhase, gradeLabel, parseGrade, getWorksheetTotalMarks };
