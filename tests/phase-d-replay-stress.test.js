@@ -22,6 +22,7 @@ process.env.APP_URL = 'https://example.test';
 const Database = require('better-sqlite3');
 const Module = require('module');
 const path = require('path');
+const { parseSqliteUtc } = require('../utils/dateUtils');
 
 let passed = 0;
 let failed = 0;

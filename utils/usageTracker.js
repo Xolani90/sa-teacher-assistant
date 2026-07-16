@@ -346,19 +346,34 @@ function markUserAsPro(phoneNumber, daysValid = 31) {
   const db   = getDb();
   const hash = hashPhone(phoneNumber);
   ensureTeacher(hash);
+  const before = getTeacher(hash);
   db.prepare(`
     UPDATE teachers
     SET is_pro = 1,
-        pro_expires = datetime('now', '+' || ? || ' days'),
+        pro_expires = datetime(
+          MAX(COALESCE(pro_expires, datetime('now')), datetime('now')),
+          '+' || ? || ' days'
+        ),
         renewal_reminder_sent_at = NULL,
         updated_at = datetime('now')
     WHERE phone_hash = ?
   `).run(daysValid, hash);
-  console.log(`[ADMIN] Teacher ...${hash.slice(-8)} granted Pro for ${daysValid} days`);
-  
-  // Query the teacher record to get the expiry date
   const teacher = getTeacher(hash);
-  return new Date(teacher.pro_expires);
+  console.log(
+    `[ADMIN] Pro grant`,
+    {
+      teacher: `...${hash.slice(-8)}`,
+      daysAdded: daysValid,
+      before: before?.pro_expires ?? null,
+      after: teacher.pro_expires
+    }
+  );
+  return {
+    previousExpiry: before?.pro_expires ?? null,
+    newExpiry: teacher.pro_expires,
+    expiresAt: new Date(teacher.pro_expires),
+    daysAdded: daysValid
+  };
 }
 
 module.exports = {

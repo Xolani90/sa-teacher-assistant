@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require('uuid');
 const { hashPhone }  = require('../utils/usageTracker');
 const { getDb }      = require('../utils/database');
 const { encryptPhone, decryptPhone } = require('../utils/encryption');
+const { parseSqliteUtc } = require('../utils/dateUtils');
 const { sendMessage } = require('./whatsappService');
 
 const YOCO_CHECKOUT_URL = 'https://payments.yoco.com/api/checkouts';
@@ -506,7 +507,7 @@ async function handleWebhookEvent(event) {
 
   const { before: expiresBefore, after: expiresAfter } = renewalResult;
   const deltaDays = Math.round(
-    (new Date(expiresAfter).getTime() - new Date(expiresBefore || new Date().toISOString()).getTime())
+    (parseSqliteUtc(expiresAfter).getTime() - (parseSqliteUtc(expiresBefore) || new Date()).getTime())
     / (24 * 60 * 60 * 1000)
   );
 
@@ -533,7 +534,7 @@ async function handleWebhookEvent(event) {
 
   if (phone) {
     try {
-      const expiryDate = new Date(expiresAfter);
+      const expiryDate = parseSqliteUtc(expiresAfter);
       const formatted  = expiryDate.toLocaleDateString('en-ZA', {
         day: 'numeric', month: 'long', year: 'numeric',
       });
