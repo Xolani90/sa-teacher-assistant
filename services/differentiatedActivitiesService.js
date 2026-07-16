@@ -7,7 +7,7 @@
  * simple topic-string interpolation. It is entirely superseded by two better
  * paths that are already live:
  *
- *   1. EASIER / HARDER / VISUAL / ORAL commands in webhook.js (lines ~2363–2410)
+ *   1. EASIER / HARDER / VISUAL / ORAL commands in webhook.js (lines ~2736–2790)
  *      → re-run processGeneration() with a differentiation flag, feeding into
  *      the AI-powered worksheetPrompt() which has proper, subject-aware
  *      differentiation instructions.
