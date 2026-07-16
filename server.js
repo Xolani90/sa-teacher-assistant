@@ -393,7 +393,7 @@ app.post('/admin/grant-pro', adminLimiter, requireAdminSecret, async (req, res) 
     }
 
     // Grant Pro status (default 31 days)
-    const expiresAt = markUserAsPro(normalizedPhone, 31);
+    const { expiresAt } = markUserAsPro(normalizedPhone, 31);
 
     // Hash the phone for the response (don't return raw phone)
     const crypto = require('crypto');
