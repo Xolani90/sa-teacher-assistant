@@ -1,4 +1,21 @@
 /**
+ * ============================================================================
+ * TIMESTAMP CONVENTION
+ * ============================================================================
+ *
+ * All subscription expiry timestamps (e.g. pro_expires) are stored as UTC-based
+ * SQLite datetime('now', ...) strings ("YYYY-MM-DD HH:MM:SS"), with NO
+ * 'localtime' modifier.
+ *
+ * JavaScript's Date parser interprets this SQLite format as local time rather
+ * than UTC on many runtimes. Always use parseSqliteUtc() when converting these
+ * database values into JavaScript Date objects.
+ *
+ * If a future write path stores local-time values or uses a different timestamp
+ * format, this parser and its callers must be reviewed together.
+ */
+
+/**
  * Parses a SQLite datetime string (format: 'YYYY-MM-DD HH:MM:SS') as UTC.
  *
  * SQLite's datetime('now') and datetime(..., '+N days') always produce
