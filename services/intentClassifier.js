@@ -56,6 +56,7 @@ Respond with ONLY a single JSON object, no other text, no markdown fences, no pr
   "subject": one of [${VALID_SUBJECTS.map(s => `"${s}"`).join(', ')}] — use "general" if not stated or impliable,
   "topic": short string describing the specific topic, or null,
   "marks": integer (default 20 if a test/quiz but no number given; null for non-assessment types),
+  "questionCount": integer 1-30, ONLY meaningful for type "worksheet" when the teacher explicitly states a number of questions (e.g. "15 questions", "8 question worksheet", "a worksheet with 20 questions") — null for every other type, and null for worksheet too if no explicit count was given (the worksheet generator has its own default in that case),
   "language": the language the teacher should receive their CONTENT in (e.g. "english", "afrikaans", "isizulu") — default "english" unless the teacher wrote in or explicitly asked for another language
 }
 
@@ -92,6 +93,7 @@ CRITICAL DISAMBIGUATION RULES:
 - Wanting ONLY a rubric/marking criteria, with no accompanying task = rubric, even if the message also mentions the task topic.
 - A moderation-specific request (a pack/sample for HOD or subject-head sign-off) = moderationPack, not sbaTask or rubric alone.
 - "my observations" / "show observations" / "observation history" / "view observations" = observationHistory (viewing past saved data). "record an observation" / "log an observation" / "capture an observation" = observation (submitting new data). The distinguishing question is whether the teacher wants to SEE something already saved, or CREATE something new -- never default an ambiguous observation phrase to the record intent without checking for viewing language first.
+- questionCount is separate from marks and must never be inferred from it: a teacher who says "15 questions" wants exactly 15 questions with marks split automatically across them, even if no mark total is given. Only set questionCount when the teacher states an explicit number of questions; do not derive it from marks, grade, or topic complexity, and never set it for non-worksheet types.
 - Never invent a grade or subject the teacher didn't state or that isn't given to you as their known profile default — leave as null/"general" if genuinely unstated. Do not guess.
 - If the teacher writes in a South African language other than English, set "language" to that language so their content is generated in it, but still classify "type" correctly regardless of language.
 - A message that is ONLY a topic with no other context (e.g. "fractions") should still be classified using the most recent type the teacher was working with if you're given that context; otherwise default to worksheet.
@@ -157,10 +159,21 @@ function normalize(raw) {
     marks = 20; // matches regexParseIntent's default
   }
 
+  // questionCount only applies to worksheet — same 1-30 clamp as the regex fallback
+  // (utils/intentParser.js), so both paths converge on identical bounds.
+  let questionCount = null;
+  if (type === INTENT_TYPES.WORKSHEET) {
+    if (typeof raw?.questionCount === 'number' && Number.isFinite(raw.questionCount)) {
+      questionCount = Math.min(30, Math.max(1, Math.round(raw.questionCount)));
+    } else if (typeof raw?.questionCount === 'string' && /^\d{1,2}$/.test(raw.questionCount.trim())) {
+      questionCount = Math.min(30, Math.max(1, parseInt(raw.questionCount.trim(), 10)));
+    }
+  }
+
   const KNOWN_LANGUAGES = ['english', 'afrikaans', 'isizulu', 'isixhosa', 'sesotho', 'setswana', 'sepedi', 'xitsonga', 'siswati', 'tshivenda', 'isindebele'];
   const language = KNOWN_LANGUAGES.includes(raw?.language) ? raw.language : 'english';
 
-  return { type, grade, subject, topic, marks, language };
+  return { type, grade, subject, topic, marks, questionCount, language };
 }
 
 /**
@@ -183,7 +196,7 @@ function normalize(raw) {
  * @param {{ grade?: number|null, subject?: string|null, lastIntentType?: string|null }} [profile] -
  *   Known profile defaults, used so the classifier doesn't have to guess
  *   things the teacher already told the bot in a previous session.
- * @returns {Promise<{type: string, grade: number|null, subject: string, topic: string|null, marks: number|null, language: string, _source: 'ai'|'fallback'|'fallback-timeout'}>}
+ * @returns {Promise<{type: string, grade: number|null, subject: string, topic: string|null, marks: number|null, questionCount: number|null, language: string, _source: 'ai'|'fallback'|'fallback-timeout'}>}
  */
 
 // Maximum wall-clock time we're willing to spend on classification before
