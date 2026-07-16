@@ -60,6 +60,9 @@ List each topic block with week range, topic name, and any formal assessment due
 
 *ASSESSMENT OVERVIEW*
 List all formal CAPS assessment tasks for ${currentYear}: type, term, approximate date, marks weighting
+CRITICAL — this section must be internally consistent with the task list you just wrote, not restated from general CAPS knowledge:
+- Do NOT state a fixed number of formal assessment tasks (e.g. "CAPS requires 7 tasks") unless that number exactly equals the count of tasks you listed in this same section. If you are unsure of the exact CAPS-mandated count for ${gradeStr} ${subjectStr}, omit the sentence entirely rather than stating a number that might not match your own list.
+- If you include a promotion/final-mark breakdown (e.g. "Term 1-3 tasks (X%) = Y marks"), the mark values MUST be the actual sum of the marks you assigned to each task above — recalculate the sum before writing it. Do not use a generic or templated percentage/mark split. If you cannot verify the sum matches your own task list, omit the promotion-mark breakdown entirely.
 
 *NOTES*
 Any important CAPS requirements, resource suggestions, or cross-curriculum links specific to ${gradeStr} ${subjectStr}
