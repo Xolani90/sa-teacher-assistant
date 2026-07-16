@@ -17,6 +17,7 @@ const INTENT_TYPES = {
   INTERVENTION_PLAN: 'interventionPlan',
   MODERATION_PACK: 'moderationPack',
   OBSERVATION: 'observation',
+  OBSERVATION_HISTORY: 'observationHistory',
   CURRICULUM_QUERY: 'curriculumQuery',
   GREETING: 'greeting',
   SMALL_TALK: 'smallTalk',
@@ -196,6 +197,11 @@ function parseIntent(text) {
   // EXAM_PAPER detection (before INTERVENTION_PLAN and TEST)
   } else if (/\b(exam\s+paper|examination\s+paper|formal\s+exam|half[- ]year\s+exam|mid[- ]year\s+exam|end[- ]of[- ]year\s+exam|final\s+exam|june\s+exam|november\s+exam)\b/i.test(lower)) {
     type = INTENT_TYPES.EXAM_PAPER;
+  // OBSERVATION_HISTORY detection (before OBSERVATION — "my observations" / "show
+  // observations" is a request to VIEW past saved assessments, not to record a new
+  // one, and must not fall into the record-new-observation branch below)
+  } else if (/\b(my\s+observations?|show\s+observations?|view\s+observations?|observation\s+history|list\s+observations?|see\s+(my\s+)?observations?)\b/i.test(lower)) {
+    type = INTENT_TYPES.OBSERVATION_HISTORY;
   // OBSERVATION detection (before INTERVENTION_PLAN/EMOTIONAL_SUPPORT — developmental
   // observation notes for Foundation Phase learners are distinct from marks-based
   // assessment or "struggling learner" support-planning language)
@@ -280,7 +286,7 @@ function parseIntent(text) {
   // Assessment analysis and intervention planning collect their data via a
   // guided conversation (grade, subject, performance details) rather than a
   // free-text "topic" — clear it so the flow handler always asks properly.
-  if (type === INTENT_TYPES.ASSESSMENT_ANALYSIS || type === INTENT_TYPES.DATA_ASSESSMENT || type === INTENT_TYPES.INTERVENTION_PLAN || type === INTENT_TYPES.OBSERVATION) {
+  if (type === INTENT_TYPES.ASSESSMENT_ANALYSIS || type === INTENT_TYPES.DATA_ASSESSMENT || type === INTENT_TYPES.INTERVENTION_PLAN || type === INTENT_TYPES.OBSERVATION || type === INTENT_TYPES.OBSERVATION_HISTORY) {
     topic = null;
   }
 

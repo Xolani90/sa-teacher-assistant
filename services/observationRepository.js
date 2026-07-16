@@ -146,7 +146,111 @@ function getObservationAssessment(assessmentId) {
   }
 }
 
+/**
+ * Retrieves a teacher's observation assessment history, most recent first.
+ * Phase 7. Teacher (phoneHash) is the primary axis — "by learner" and
+ * "by assessment" are both just filters on top of this, not separate
+ * repository methods, since observation_records has no phone_hash of its
+ * own (it's scoped to a teacher only via its parent observation_assessments
+ * row). Mirrors teacherWorkspaceService.js's getAssessmentHistory() in
+ * query-building style (dynamic WHERE clauses + params array).
+ *
+ * @param {string} phoneHash - Teacher's phone hash
+ * @param {{ grade?: string, subject?: string, learnerName?: string, limit?: number }} [filters]
+ *   learnerName is matched case-insensitively, consistent with
+ *   observationGroupingService.js's groupByLearner() dedup convention —
+ *   "sipho" and "Sipho" are the same learner throughout this pipeline.
+ * @returns {Array<{
+ *   id: number,
+ *   phoneHash: string,
+ *   grade: string|null,
+ *   subject: string|null,
+ *   assessmentName: string|null,
+ *   createdAt: string,
+ *   recordCount: number,
+ *   learnerCount: number
+ * }>}
+ */
+function getObservationHistory(phoneHash, filters = {}) {
+  const db = getDb();
+
+  if (!phoneHash) {
+    throw new Error('getObservationHistory: phoneHash must not be null or empty');
+  }
+
+  try {
+    let query = `
+      SELECT
+        a.*,
+        COUNT(r.id) as record_count,
+        COUNT(DISTINCT r.learner_name) as learner_count
+      FROM observation_assessments a
+      LEFT JOIN observation_records r ON a.id = r.assessment_id
+      WHERE a.phone_hash = ?
+    `;
+    const params = [phoneHash];
+
+    if (filters.grade) {
+      query += ` AND a.grade = ?`;
+      params.push(filters.grade);
+    }
+
+    if (filters.subject) {
+      query += ` AND a.subject = ?`;
+      params.push(filters.subject);
+    }
+
+    // Subquery rather than filtering the LEFT JOIN directly — filtering the
+    // join itself would silently drop this assessment's OTHER learners'
+    // record_count/learner_count from the aggregate once WHERE narrows the
+    // joined rows before GROUP BY runs. This keeps the counts accurate for
+    // the whole assessment while still only returning assessments that
+    // actually contain the named learner.
+    if (filters.learnerName) {
+      query += ` AND a.id IN (
+        SELECT assessment_id FROM observation_records
+        WHERE LOWER(learner_name) = LOWER(?)
+      )`;
+      params.push(filters.learnerName);
+    }
+
+    // id DESC tiebreak alongside created_at DESC: datetime('now') has
+    // second-resolution, so two assessments saved within the same second
+    // get identical created_at values and ordering by created_at alone is
+    // non-deterministic on ties. Same fix already applied to saved_resources
+    // — see phase-b2-hardening.test.js "B2-15: resource rows have
+    // deterministic id DESC ordering when timestamps collide".
+    query += ` GROUP BY a.id ORDER BY a.created_at DESC, a.id DESC`;
+
+    if (filters.limit) {
+      query += ` LIMIT ?`;
+      params.push(filters.limit);
+    }
+
+    const rows = db.prepare(query).all(...params);
+
+    const history = rows.map((row) => ({
+      id: row.id,
+      phoneHash: row.phone_hash,
+      grade: row.grade,
+      subject: row.subject,
+      assessmentName: row.assessment_name,
+      createdAt: row.created_at,
+      recordCount: row.record_count,
+      learnerCount: row.learner_count,
+    }));
+
+    logger.debug('Retrieved observation history', { phoneHash, count: history.length, filters });
+
+    return history;
+  } catch (err) {
+    logger.error('Failed to retrieve observation history', { phoneHash, error: err.message });
+    throw err;
+  }
+}
+
 module.exports = {
   saveObservationSubmission,
   getObservationAssessment,
+  getObservationHistory,
 };

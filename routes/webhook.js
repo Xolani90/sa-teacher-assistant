@@ -33,7 +33,7 @@ const { gradeLabel, parseGrade } = require('../utils/capsPhase');
 const { buildFullInterventionPlanPrompt } = require('../prompts/fullInterventionPlan');
 const { processObservationSubmission } = require('../utils/observationWorkflowService');
 const { getObservationFormatHelpText } = require('../utils/observationParser');
-const { saveObservationSubmission } = require('../services/observationRepository');
+const { saveObservationSubmission, getObservationHistory, getObservationAssessment } = require('../services/observationRepository');
 
 /**
  * Rolls back a usage_events row created by checkAndIncrementUsage() when
@@ -173,6 +173,7 @@ const interventionPlanState   = new SessionStore('interventionPlan',   30 * 60 *
 const dataAssessmentState     = new SessionStore('dataAssessment',     45 * 60 * 1000); // longer TTL — CSV upload may take time
 const lastGeneratedState      = new SessionStore('lastGenerated',      30 * 60 * 1000); // SAVE command reads this
 const observationState        = new SessionStore('observation',        30 * 60 * 1000);
+const observationHistoryState = new SessionStore('observationHistory',  15 * 60 * 1000);
 const saveLock = new Set(); // B5-F1: per-phone SAVE in-flight lock (try/finally in SAVE handler)
 
 // ── Clear all session states for a teacher ─────────────────────────────────
@@ -1773,6 +1774,165 @@ async function handleObservationFlow(from, text, preClassifiedIntent = null) {
   return false;
 }
 
+// ── Observation history flow handler ──────────────────────────────────────
+/**
+ * Handles MY OBSERVATIONS: shows the teacher's recent saved observation
+ * assessments, then lets them reply with a number to view that
+ * assessment's detail (learner/record counts, per-domain breakdown).
+ *
+ * Read-only view over data already written by handleObservationFlow's
+ * saveObservationSubmission() call — same relationship teacherWorkspaceService's
+ * getSavedResources() has to the SAVE command. No PDF/export option is
+ * offered here since no observation-specific PDF generation exists yet
+ * (that would need a real prompts/pdfService addition, not a promise).
+ *
+ * Returns true if handled (skip normal processing), false otherwise.
+ *
+ * @param {string} from
+ * @param {string} text
+ * @param {Object|null} preClassifiedIntent
+ * @returns {Promise<boolean>}
+ */
+function formatObservationDate(createdAt) {
+  if (!createdAt) return '';
+  // SQLite datetime('now') format: 'YYYY-MM-DD HH:MM:SS'
+  const datePart = createdAt.slice(0, 10);
+  const d = new Date(`${datePart}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return datePart;
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${String(d.getUTCDate()).padStart(2, '0')} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+async function handleObservationHistoryFlow(from, text, preClassifiedIntent = null) {
+  const phoneHash = hashPhone(from);
+  const state = observationHistoryState.get(phoneHash);
+
+  if (state && Date.now() - state.lastActivity > 15 * 60 * 1000) {
+    observationHistoryState.delete(phoneHash);
+    return false;
+  }
+
+  const trimmed = text.trim();
+
+  // Entry point: not currently in this flow — check if this message
+  // triggers it (either a fresh intent classification, or "BACK" from
+  // inside the detail view re-entering the list).
+  if (!state) {
+    const intent = preClassifiedIntent || parseIntent(text);
+    if (intent.type !== 'observationHistory') return false;
+    return sendObservationHistoryList(from, phoneHash);
+  }
+
+  if (trimmed.toUpperCase() === 'CANCEL') {
+    observationHistoryState.delete(phoneHash);
+    await safeSendMessage(from, `No problem — cancelled.`);
+    return true;
+  }
+
+  if (state.step === 'listShown') {
+    if (trimmed.toUpperCase() === 'BACK') {
+      return sendObservationHistoryList(from, phoneHash);
+    }
+
+    const choice = parseInt(trimmed, 10);
+    const ids = state.ids || [];
+    if (!Number.isInteger(choice) || choice < 1 || choice > ids.length) {
+      observationHistoryState.set(phoneHash, { ...state, lastActivity: Date.now() });
+      await safeSendMessage(from,
+        `Reply with a number from 1 to ${ids.length} to view that observation, or *BACK* to see the list again.`
+      );
+      return true;
+    }
+
+    const assessmentId = ids[choice - 1];
+    let assessment;
+    try {
+      assessment = getObservationAssessment(assessmentId);
+    } catch (err) {
+      console.error('[Workspace] getObservationAssessment error:', err.message);
+      await safeSendMessage(from, `⚠️ Couldn't load that observation right now. Please try again.`);
+      return true;
+    }
+
+    if (!assessment) {
+      await safeSendMessage(from, `That observation couldn't be found — it may have been removed. Reply *BACK* to see the list.`);
+      return true;
+    }
+
+    // Group records by domain for a short breakdown (counts only —
+    // no invented commentary beyond what's actually in the records).
+    const byDomain = {};
+    for (const r of assessment.records) {
+      if (!byDomain[r.domain]) byDomain[r.domain] = [];
+      byDomain[r.domain].push(r.developmentalStatus);
+    }
+
+    const gradeStr = assessment.grade != null ? gradeLabel(assessment.grade === '0' || assessment.grade === 0 ? 0 : assessment.grade) : '—';
+    let msg = `📋 *Grade ${gradeStr} ${assessment.subject || ''}*\n`;
+    if (assessment.assessmentName) msg += `Assessment: ${assessment.assessmentName}\n`;
+    msg += `${formatObservationDate(assessment.createdAt)}\n\n`;
+    msg += `Learners: ${new Set(assessment.records.map(r => r.learnerName)).size}\n`;
+    msg += `Records: ${assessment.records.length}\n\n`;
+    msg += `*By domain:*\n`;
+    for (const [domain, statuses] of Object.entries(byDomain)) {
+      const counts = {};
+      for (const s of statuses) counts[s] = (counts[s] || 0) + 1;
+      const breakdown = Object.entries(counts).map(([s, n]) => `${n} ${s}`).join(', ');
+      msg += `• ${domain}: ${breakdown}\n`;
+    }
+    msg += `\n_Reply *BACK* to see your other observations._`;
+
+    observationHistoryState.set(phoneHash, { ...state, lastActivity: Date.now() });
+    await safeSendMessage(from, msg);
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Fetches and sends the observation history list, storing the
+ * displayed number → assessmentId mapping so the next numeric reply
+ * can be resolved back to a real assessment.
+ */
+async function sendObservationHistoryList(from, phoneHash) {
+  let history;
+  try {
+    history = getObservationHistory(phoneHash, { limit: 8 });
+  } catch (err) {
+    console.error('[Workspace] getObservationHistory error:', err.message);
+    await safeSendMessage(from, `⚠️ Couldn't load your observations right now. Please try again.`);
+    return true;
+  }
+
+  if (history.length === 0) {
+    observationHistoryState.delete(phoneHash);
+    await safeSendMessage(from,
+      `👀 *My Observations*\n\nYou haven't saved any observations yet.\n\nReply with an observation to record your first one.`
+    );
+    return true;
+  }
+
+  let msg = `👀 *My Observations*\n\nHere are your most recent observations:\n\n`;
+  history.forEach((h, i) => {
+    const gradeStr = h.grade != null ? gradeLabel(h.grade === '0' || h.grade === 0 ? 0 : h.grade) : '—';
+    msg += `${i + 1}. Grade ${gradeStr} • ${h.subject || 'General'}\n`;
+    if (h.assessmentName) msg += `   "${h.assessmentName}"\n`;
+    msg += `   ${formatObservationDate(h.createdAt)}\n`;
+    msg += `   ${h.learnerCount} learner${h.learnerCount === 1 ? '' : 's'}\n\n`;
+  });
+  msg += `Reply with the number to view details.`;
+
+  observationHistoryState.set(phoneHash, {
+    step: 'listShown',
+    ids: history.map(h => h.id),
+    lastActivity: Date.now(),
+  });
+
+  await safeSendMessage(from, msg);
+  return true;
+}
+
 // ── Profile update flow handler ───────────────────────────────────────────
 /**
  * Handles the multi-turn profile update conversation.
@@ -3050,7 +3210,8 @@ async function processMessage(message) {
     dataAssessmentState.get(phoneHash) ||
     interventionPlanState.get(phoneHash) ||
     profileUpdateState.get(phoneHash) ||
-    observationState.get(phoneHash)
+    observationState.get(phoneHash) ||
+    observationHistoryState.get(phoneHash)
   );
 
   if (alreadyMidFlow) {
@@ -3064,6 +3225,7 @@ async function processMessage(message) {
     if (await handleAssessmentAnalysisFlow(from, text)) return;
     if (await handleInterventionPlanFlow(from, text)) return;
     if (await handleObservationFlow(from, text)) return;
+    if (await handleObservationHistoryFlow(from, text)) return;
     // Defensive fallback: state existed a moment ago but no handler
     // claimed it (e.g. TTL expired between the check above and now) —
     // fall through to normal classification below.
@@ -3131,6 +3293,10 @@ async function processMessage(message) {
   // ── Observation multi-turn flow ─────────────────────────────────────
   const observationHandled = await handleObservationFlow(from, text, intent);
   if (observationHandled) return;
+
+  // ── Observation history multi-turn flow (list + numbered selection) ────
+  const observationHistoryHandled = await handleObservationHistoryFlow(from, text, intent);
+  if (observationHistoryHandled) return;
 
   // ── Conversational intents (GREETING, SMALL_TALK, EMOTIONAL_SUPPORT, THANKS, UNKNOWN) ─
   // These should NEVER consume quota, generate PDFs, or invoke content-generation workflows.
