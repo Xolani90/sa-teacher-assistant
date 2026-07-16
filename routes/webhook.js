@@ -96,25 +96,56 @@ const {
   generateInterventionReport,
 } = require('../services/interventionReportsService');
 
-// ── Per-phone AI rate limiter ──────────────────────────────────────────────
-// Prevents a single teacher from firing many AI calls in a short burst
-// (e.g. rapidly typing 5 messages before any respond). Allows up to 5 AI
-// calls per phone per 60 seconds. Separate from the monthly quota.
-const aiCallTimestamps = new Map(); // phoneHash → [timestamp, ...]
-const AI_RATE_LIMIT    = 5;        // max calls
-const AI_RATE_WINDOW   = 60_000;   // per 60 seconds
+// ── Per-phone rate limiters (SQLite-backed) ─────────────────────────────────
+// Backlog Item 4 fix: previously in-memory Maps (aiCallTimestamps /
+// classifierCallTimestamps), which reset on every Render restart/redeploy —
+// a teacher near the ceiling effectively got a free reset on every deploy.
+// Now persisted in rate_limit_events (see utils/database.js Migration 023).
+// Each write opportunistically deletes that phone's own stale rows for the
+// same limiter, so no separate cleanup interval is needed.
+const AI_RATE_LIMIT             = 5;      // max AI calls
+const AI_RATE_WINDOW_MS         = 60_000; // per 60 seconds
+const CLASSIFIER_RATE_LIMIT     = 20;     // max classification calls
+const CLASSIFIER_RATE_WINDOW_MS = 60_000; // per 60 seconds
 
-function isAiRateLimited(from) {
-  const hash = hashPhone(from);
-  const now  = Date.now();
-  const calls = (aiCallTimestamps.get(hash) || []).filter(t => now - t < AI_RATE_WINDOW);
-  if (calls.length >= AI_RATE_LIMIT) return true;
-  calls.push(now);
-  aiCallTimestamps.set(hash, calls);
-  return false;
+function checkAndRecordRateLimit(from, limiterType, limit, windowMs) {
+  const db     = require('../utils/database').getDb();
+  const hash   = hashPhone(from);
+  const cutoff = `-${Math.floor(windowMs / 1000)} seconds`;
+
+  return db.transaction(() => {
+    const { count } = db.prepare(`
+      SELECT COUNT(*) as count FROM rate_limit_events
+      WHERE phone_hash = ? AND limiter_type = ?
+        AND created_at > datetime('now', ?)
+    `).get(hash, limiterType, cutoff);
+
+    if (count >= limit) return true;
+
+    db.prepare(`
+      INSERT INTO rate_limit_events (phone_hash, limiter_type)
+      VALUES (?, ?)
+    `).run(hash, limiterType);
+
+    // Opportunistic cleanup of this phone's own stale rows for this limiter —
+    // keeps the table bounded without a separate background job.
+    db.prepare(`
+      DELETE FROM rate_limit_events
+      WHERE phone_hash = ? AND limiter_type = ?
+        AND created_at <= datetime('now', ?)
+    `).run(hash, limiterType, cutoff);
+
+    return false;
+  })();
 }
 
-// ── Per-phone classifier rate limiter ───────────────────────────────────────
+// Prevents a single teacher from firing many AI calls in a short burst
+// (e.g. rapidly typing 5 messages before any respond). Separate from the
+// monthly quota.
+function isAiRateLimited(from) {
+  return checkAndRecordRateLimit(from, 'ai', AI_RATE_LIMIT, AI_RATE_WINDOW_MS);
+}
+
 // Every incoming text message now triggers an AI classification call (the
 // new understanding step), unlike the old purely-synchronous regex parser.
 // A real back-and-forth conversation legitimately sends many messages per
@@ -125,30 +156,9 @@ function isAiRateLimited(from) {
 // instead of blocking the teacher's message entirely — there is no
 // equivalent of the "please wait" message here because the teacher should
 // never feel blocked just for chatting quickly.
-const classifierCallTimestamps = new Map(); // phoneHash → [timestamp, ...]
-const CLASSIFIER_RATE_LIMIT  = 20;  // max classification calls
-const CLASSIFIER_RATE_WINDOW = 60_000; // per 60 seconds
-
 function isClassifierRateLimited(from) {
-  const hash = hashPhone(from);
-  const now  = Date.now();
-  const calls = (classifierCallTimestamps.get(hash) || []).filter(t => now - t < CLASSIFIER_RATE_WINDOW);
-  if (calls.length >= CLASSIFIER_RATE_LIMIT) return true;
-  calls.push(now);
-  classifierCallTimestamps.set(hash, calls);
-  return false;
+  return checkAndRecordRateLimit(from, 'classifier', CLASSIFIER_RATE_LIMIT, CLASSIFIER_RATE_WINDOW_MS);
 }
-
-// Clean up the rate-limit maps every 5 minutes to prevent unbounded growth
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, calls] of aiCallTimestamps.entries()) {
-    if (calls.every(t => now - t >= AI_RATE_WINDOW)) aiCallTimestamps.delete(key);
-  }
-  for (const [key, calls] of classifierCallTimestamps.entries()) {
-    if (calls.every(t => now - t >= CLASSIFIER_RATE_WINDOW)) classifierCallTimestamps.delete(key);
-  }
-}, 5 * 60 * 1000);
 
 // ── Report comment conversation state (in-memory) ─────────────────────────
 // ── Multi-turn session state (SQLite-backed, survives deploys) ────────────

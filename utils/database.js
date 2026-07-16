@@ -464,6 +464,25 @@ function runMigrations() {
       ON curriculum_coverage(phone_hash);
   `);
 
+  // Migration 023: Persistent per-phone rate limiting.
+  // Replaces the in-memory Map-based sliding-window counters in
+  // routes/webhook.js (aiCallTimestamps/classifierCallTimestamps), which
+  // reset on every Render restart/redeploy — a teacher near the ceiling
+  // effectively got a free reset on every deploy. One row per call attempt;
+  // each write opportunistically deletes that phone's own stale rows for
+  // the same limiter, so no separate cleanup job is needed (mirrors the
+  // inline-cleanup style already used elsewhere, e.g. checkAndIncrementUsage).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS rate_limit_events (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash    TEXT    NOT NULL,
+      limiter_type  TEXT    NOT NULL,
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_rate_limit_events_lookup
+      ON rate_limit_events(phone_hash, limiter_type, created_at);
+  `);
+
   for (const sql of alterations) {
     try {
       db.exec(sql);
