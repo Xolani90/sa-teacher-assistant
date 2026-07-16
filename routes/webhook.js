@@ -3523,7 +3523,9 @@ async function processGeneration(from, intent, originalText = null) {
         grade:   intent.grade != null ? gradeLabel(intent.grade) : (teacher?.grade != null ? gradeLabel(teacher.grade) : 'Grade 7'),
         subject: intent.subject !== 'general' ? intent.subject : (teacher?.subject || 'General'),
         school:  teacher?.school || '',
-        marks:   intent.marks,
+        marks: intent.type === 'worksheet'
+          ? getWorksheetTotalMarks(intent.grade != null ? intent.grade : (teacher?.grade ?? null))
+          : intent.marks,
       });
       const pdfUrl = buildPdfUrl(fileId);
       await sendDocument(from, pdfUrl, filename, `📎 *PDF Download* (available for 2 hours)\n\n_Open in your browser to download and print._`);
