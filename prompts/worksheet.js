@@ -79,7 +79,34 @@ Generate all activities with complete, specific content — no placeholder text 
  * @param {{ grade: number|null, subject: string, topic: string, language: string, differentiation?: string }} intent
  * @returns {string}
  */
-function worksheetPrompt({ grade, subject, topic, language, differentiation }) {
+function buildDynamicQuestionsBlock(questionCount, totalMarks) {
+  const base = Math.floor(totalMarks / questionCount);
+  let remainder = totalMarks - (base * questionCount);
+  const perQuestionMarks = [];
+  for (let i = 0; i < questionCount; i++) {
+    let m = base;
+    if (remainder > 0) { m += 1; remainder -= 1; }
+    perQuestionMarks.push(Math.max(1, m));
+  }
+  const firstThird = Math.ceil(questionCount / 3);
+  const secondThird = Math.ceil((questionCount * 2) / 3);
+  const lines = [];
+  for (let i = 0; i < questionCount; i++) {
+    const level = i < firstThird
+      ? 'recall/knowledge level'
+      : (i < secondThird ? 'routine application level' : 'complex application / problem-solving level (South African context where relevant)');
+    lines.push((i + 1) + '. [Question at ' + level + ']');
+    lines.push('');
+    lines.push('   Working:');
+    lines.push('');
+    lines.push('');
+    lines.push('   Answer: ________________________________    (' + perQuestionMarks[i] + ')');
+    lines.push('');
+  }
+  return '*Questions*\r\n\r\n' + lines.join('\r\n') + '---\r\n\r\n*MARKING GRID (Teacher use only)*\r\nTOTAL: ___/' + totalMarks;
+}
+
+function worksheetPrompt({ grade, subject, topic, language, differentiation, questionCount = null }) {
   const gradeStr = grade != null ? gradeLabel(grade) : 'the appropriate grade level';
   const subjectStr = subject && subject !== 'general' ? subject.charAt(0).toUpperCase() + subject.slice(1) : 'General';
 
@@ -108,6 +135,10 @@ function worksheetPrompt({ grade, subject, topic, language, differentiation }) {
   const sectionAMarks = 3;
   const sectionBMarks = 7;
   const sectionCMarks = totalMarks - sectionAMarks - sectionBMarks;
+
+  const questionsBlock = questionCount
+    ? buildDynamicQuestionsBlock(questionCount, totalMarks)
+    : null;
 
   // Differentiation instructions
   let differentiationInstruction = '';
@@ -142,50 +173,7 @@ function worksheetPrompt({ grade, subject, topic, language, differentiation }) {
       `Do NOT add any conversational text, summary, sign-off, or note addressed to the teacher (e.g. "Let me know if you would like any adjustments") anywhere in the output — the ENTIRE response must be the worksheet content itself, starting with the title line and ${guardEndAnchor}, with nothing before or after it.`
     : '';
 
-  return `You are a qualified South African teacher producing classroom-ready material strictly aligned to the CAPS curriculum.
-
-TASK: Generate a complete, print-ready worksheet.
-
-CAPS ALIGNMENT REQUIREMENTS:
-- Align to ${gradeStr} ${subjectStr} CAPS curriculum
-- Use CAPS cognitive levels: ${cognitiveLevels}
-- Language and difficulty must be appropriate for ${gradeStr}
-- Mark allocations must be clearly shown per question
-- Total marks: ${totalMarks}
-- Include real South African context where possible (SA place names, rand currency, local examples)
-- Any prices, quantities, or measurements used in word problems must be realistic for South Africa (e.g. paint is priced per tin/litre in the R80-R350 per litre range depending on type, not arbitrary round numbers) — sense-check numbers against real-world SA retail pricing before including them
-
-WORKSHEET DETAILS:
-- Topic: ${topic}
-- Grade: ${gradeStr}
-- Subject: ${subjectStr}
-- Total Marks: ${totalMarks}
-
-NUMBER LINES: If any question needs a number line (integers, inequalities, rounding, ordering, temperature, etc.), do NOT draw one out of dashes, pipes, or spaced-out characters — that never renders aligned. Instead output a single line using this exact bracket syntax, which is rendered as a real number-line graphic:
-[NUMBERLINE from=<start> to=<end> step=<interval> mark=<comma-separated values, solid dots> open=<comma-separated values, open circles> ray=<value>,<left|right> label="<optional caption>"]
-from, to, and step are required; mark, open, ray, and label are optional — include only the ones the question needs. Never write the number line as plain numbers separated by spaces either (e.g. "-2 -1 0 1 2 3 4 5") — that has no line, ticks, or marked point and is exactly the mistake this format exists to prevent. The line must contain nothing but the bracket syntax. Examples:
-[NUMBERLINE from=-10 to=10 step=1 mark=-3,4]
-[NUMBERLINE from=0 to=10 step=1 open=3 ray=3,right label="x > 3"]
-[NUMBERLINE from=-2 to=8 step=1 open=4 ray=4,left label="x < 4"]
-This format is required in BOTH directions: when a question asks the learner to draw/represent a solution on a number line, AND when a question shows the learner an already-marked number line and asks them to read off the inequality it represents (e.g. "Write down the inequality shown on this number line"). In the second case you are the one choosing what point and direction to mark — pick a specific inequality yourself (e.g. x >= 2) and emit the marked spec for it, exactly as if it were the answer. Never emit a bare, unmarked NUMBERLINE (no mark/open/ray) for this question type — an unmarked line gives the learner nothing to read off and makes the question unanswerable.
-[NUMBERLINE from=-3 to=5 step=1 mark=2 ray=2,right label="Given number line for 2.3"]
-This format is ALSO required whenever a number line depicts specific points, values, or positions the learner needs to identify or reference — not just inequality-reading questions. This includes: named points at given values (e.g. "Point A is at -3, point B is at 2, point C is at 5"), plotted/labeled points the learner must compare or use (e.g. "P, Q, and R are shown below"), and word-problem positions on a scale (e.g. temperatures recorded, taxi stops along a route, distances traveled). In every one of these cases you must emit mark=<values> (or ray=<value>,<direction> where appropriate) for each specific point mentioned — never emit a bare from/to/step-only NUMBERLINE with just a label when the question text names or implies specific positions. A caption alone is not a substitute for the actual marks. Example:
-[NUMBERLINE from=-5 to=5 step=1 mark=-3,2,5 label="Points A, B and C"]
-
-OUTPUT — produce a complete worksheet in this EXACT format for WhatsApp:
-
-*WORKSHEET: ${topic.charAt(0).toUpperCase() + topic.slice(1)}*
-*${subjectStr} | ${gradeStr} | Total: ____/${totalMarks}*
-
-[School Logo]                    [SA Teacher Assistant Logo]
-
-Name: ________________________________
-Class: ________________ Date: __________
-
-
----
-
-*SECTION A: Multiple Choice* (Circle the correct answer)
+  const staticQuestionsBlock = `*SECTION A: Multiple Choice* (Circle the correct answer)
 
 1. [Question at recall/knowledge level]
    A) [option]  B) [option]  C) [option]  D) [option]    (1)
@@ -236,7 +224,52 @@ Class: ________________ Date: __________
 ---
 
 *MARKING GRID (Teacher use only)*
-A: ___/${sectionAMarks}  B: ___/${sectionBMarks}  C: ___/${sectionCMarks}  TOTAL: ___/${totalMarks}
+A: ___/${sectionAMarks}  B: ___/${sectionBMarks}  C: ___/${sectionCMarks}  TOTAL: ___/${totalMarks}`;
+
+  return `You are a qualified South African teacher producing classroom-ready material strictly aligned to the CAPS curriculum.
+
+TASK: Generate a complete, print-ready worksheet.
+
+CAPS ALIGNMENT REQUIREMENTS:
+- Align to ${gradeStr} ${subjectStr} CAPS curriculum
+- Use CAPS cognitive levels: ${cognitiveLevels}
+- Language and difficulty must be appropriate for ${gradeStr}
+- Mark allocations must be clearly shown per question
+- Total marks: ${totalMarks}
+- Include real South African context where possible (SA place names, rand currency, local examples)
+- Any prices, quantities, or measurements used in word problems must be realistic for South Africa (e.g. paint is priced per tin/litre in the R80-R350 per litre range depending on type, not arbitrary round numbers) — sense-check numbers against real-world SA retail pricing before including them
+
+WORKSHEET DETAILS:
+- Topic: ${topic}
+- Grade: ${gradeStr}
+- Subject: ${subjectStr}
+- Total Marks: ${totalMarks}
+
+NUMBER LINES: If any question needs a number line (integers, inequalities, rounding, ordering, temperature, etc.), do NOT draw one out of dashes, pipes, or spaced-out characters — that never renders aligned. Instead output a single line using this exact bracket syntax, which is rendered as a real number-line graphic:
+[NUMBERLINE from=<start> to=<end> step=<interval> mark=<comma-separated values, solid dots> open=<comma-separated values, open circles> ray=<value>,<left|right> label="<optional caption>"]
+from, to, and step are required; mark, open, ray, and label are optional — include only the ones the question needs. Never write the number line as plain numbers separated by spaces either (e.g. "-2 -1 0 1 2 3 4 5") — that has no line, ticks, or marked point and is exactly the mistake this format exists to prevent. The line must contain nothing but the bracket syntax. Examples:
+[NUMBERLINE from=-10 to=10 step=1 mark=-3,4]
+[NUMBERLINE from=0 to=10 step=1 open=3 ray=3,right label="x > 3"]
+[NUMBERLINE from=-2 to=8 step=1 open=4 ray=4,left label="x < 4"]
+This format is required in BOTH directions: when a question asks the learner to draw/represent a solution on a number line, AND when a question shows the learner an already-marked number line and asks them to read off the inequality it represents (e.g. "Write down the inequality shown on this number line"). In the second case you are the one choosing what point and direction to mark — pick a specific inequality yourself (e.g. x >= 2) and emit the marked spec for it, exactly as if it were the answer. Never emit a bare, unmarked NUMBERLINE (no mark/open/ray) for this question type — an unmarked line gives the learner nothing to read off and makes the question unanswerable.
+[NUMBERLINE from=-3 to=5 step=1 mark=2 ray=2,right label="Given number line for 2.3"]
+This format is ALSO required whenever a number line depicts specific points, values, or positions the learner needs to identify or reference — not just inequality-reading questions. This includes: named points at given values (e.g. "Point A is at -3, point B is at 2, point C is at 5"), plotted/labeled points the learner must compare or use (e.g. "P, Q, and R are shown below"), and word-problem positions on a scale (e.g. temperatures recorded, taxi stops along a route, distances traveled). In every one of these cases you must emit mark=<values> (or ray=<value>,<direction> where appropriate) for each specific point mentioned — never emit a bare from/to/step-only NUMBERLINE with just a label when the question text names or implies specific positions. A caption alone is not a substitute for the actual marks. Example:
+[NUMBERLINE from=-5 to=5 step=1 mark=-3,2,5 label="Points A, B and C"]
+
+OUTPUT — produce a complete worksheet in this EXACT format for WhatsApp:
+
+*WORKSHEET: ${topic.charAt(0).toUpperCase() + topic.slice(1)}*
+*${subjectStr} | ${gradeStr} | Total: ____/${totalMarks}*
+
+[School Logo]                    [SA Teacher Assistant Logo]
+
+Name: ________________________________
+Class: ________________ Date: __________
+
+
+---
+
+${questionCount ? questionsBlock : staticQuestionsBlock}
 
 Generate all questions with complete text. Do not use placeholders. All questions must be answerable based on the topic. Mark allocation must add up to exactly ${totalMarks}.${languageInstruction}${differentiationInstruction}${singleVersionGuard}
 

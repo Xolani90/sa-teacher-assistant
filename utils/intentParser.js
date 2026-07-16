@@ -239,6 +239,9 @@ function parseIntent(text) {
   // --- Extract marks ---
   const marksMatch = lower.match(/\b(\d{1,3})\s*(?:-|–)?\s*marks?\b/i);
   const marks = marksMatch ? Math.min(100, Math.max(5, parseInt(marksMatch[1], 10))) : 20;
+  // --- Extract explicit question count (worksheet-specific; e.g. "15 questions") ---
+  const questionCountMatch = lower.match(/\b(\d{1,2})\s*(?:-|\u2013)?\s*questions?\b/i);
+  const questionCount = questionCountMatch ? Math.min(30, Math.max(1, parseInt(questionCountMatch[1], 10))) : null;
 
   // --- Detect subject ---
   let subject = 'general';
@@ -290,7 +293,7 @@ function parseIntent(text) {
     topic = null;
   }
 
-  return { type, grade, subject, topic, marks, language };
+  return { type, grade, subject, topic, marks, questionCount, language };
 }
 
 module.exports = { parseIntent, INTENT_TYPES };
