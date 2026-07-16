@@ -24,6 +24,7 @@ const { isDuplicate }            = require('../utils/deduplication');
 const { handleOnboarding, needsOnboarding } = require('../services/onboardingService');
 const { generatePdf, generateReportSummaryPdf } = require('../services/pdfService');
 const { validateAtpWeeks } = require('../utils/atpWeekValidator');
+const { getWorksheetTotalMarks } = require('../utils/capsPhase');
 const { buildPaymentUrl }        = require('../services/yocoService');
 const { encryptPhone }           = require('../utils/encryption');
 const { SessionStore, clearAllSessionsForHash } = require('../utils/sessionStore');
@@ -3439,7 +3440,9 @@ async function processGeneration(from, intent, originalText = null) {
     grade:   intent.grade,
     subject: intent.subject,
     topic:   intent.topic,
-    marks:   intent.marks,
+    marks: intent.type === 'worksheet'
+          ? getWorksheetTotalMarks(intent.grade != null ? intent.grade : (teacher?.grade ?? null))
+          : intent.marks,
   });
 
   // ── Generate content ──────────────────────────────────────────
