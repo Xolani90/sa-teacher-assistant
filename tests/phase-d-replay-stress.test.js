@@ -22,6 +22,7 @@ process.env.APP_URL = 'https://example.test';
 const Database = require('better-sqlite3');
 const Module = require('module');
 const path = require('path');
+const { parseSqliteUtc } = require('../utils/dateUtils');
 
 let passed = 0;
 let failed = 0;
@@ -162,7 +163,7 @@ function succeededEvent(checkoutId, amountCents = 9900) {
     check(ledgerRows[0].status === 'applied', 'Task6-A-03: that single ledger row has status=applied');
 
     const teacher = getTeacher(phoneHash);
-    const expiry = new Date(teacher.pro_expires);
+    const expiry = parseSqliteUtc(teacher.pro_expires);
     const expected = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000);
     check(Math.abs(expiry.getTime() - expected.getTime()) < 5000, 'Task6-A-04: pro_expires extended by exactly +31 days, NOT +155 (5x31)');
 
@@ -182,7 +183,7 @@ function succeededEvent(checkoutId, amountCents = 9900) {
     }
 
     const teacher = getTeacher(phoneHash);
-    const expiry = new Date(teacher.pro_expires);
+    const expiry = parseSqliteUtc(teacher.pro_expires);
     const expected = new Date(Date.now() + 93 * 24 * 60 * 60 * 1000); // 3 x 31
     check(Math.abs(expiry.getTime() - expected.getTime()) < 5000, 'Task6-B-final: three sequential payments stack to ~93 days total');
 
@@ -215,7 +216,7 @@ function succeededEvent(checkoutId, amountCents = 9900) {
     check(result1.upgraded === true, 'Task6-C-02: delayed delivery #1 (arrives second) still applies correctly');
 
     const teacher = getTeacher(phoneHash);
-    const expiry = new Date(teacher.pro_expires);
+    const expiry = parseSqliteUtc(teacher.pro_expires);
     const expected = new Date(Date.now() + 62 * 24 * 60 * 60 * 1000); // 2 x 31, regardless of arrival order
     check(Math.abs(expiry.getTime() - expected.getTime()) < 5000, 'Task6-C-03: both out-of-order payments stack correctly regardless of arrival order (~62 days)');
 

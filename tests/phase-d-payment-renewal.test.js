@@ -34,6 +34,7 @@ process.env.APP_URL = 'https://example.test';
 const Database = require('better-sqlite3');
 const Module = require('module');
 const path = require('path');
+const { parseSqliteUtc } = require('../utils/dateUtils');
 
 let passed = 0;
 let failed = 0;
@@ -160,7 +161,7 @@ function succeededEvent(checkoutId, amountCents = 9900) {
     check(result.upgraded === true, 'D-02: handleWebhookEvent reports upgraded=true');
     check(after.is_pro === 1, 'D-03: teacher is now Pro');
 
-    const expiry = new Date(after.pro_expires);
+    const expiry = parseSqliteUtc(after.pro_expires);
     const expectedExpiry = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000);
     const diffMs = Math.abs(expiry.getTime() - expectedExpiry.getTime());
     check(diffMs < 5000, 'D-04: pro_expires is ~31 days from now (within 5s tolerance)');
@@ -180,14 +181,14 @@ function succeededEvent(checkoutId, amountCents = 9900) {
 
     await handleWebhookEvent(succeededEvent(checkoutId1));
     const afterFirst = getTeacher(phoneHash);
-    const firstExpiry = new Date(afterFirst.pro_expires);
+    const firstExpiry = parseSqliteUtc(afterFirst.pro_expires);
 
     // Second real payment, second checkout, while well within the first period.
     seedPendingCheckout({ checkoutId: checkoutId2, phone });
     sentMessages.length = 0;
     const result2 = await handleWebhookEvent(succeededEvent(checkoutId2));
     const afterSecond = getTeacher(phoneHash);
-    const secondExpiry = new Date(afterSecond.pro_expires);
+    const secondExpiry = parseSqliteUtc(afterSecond.pro_expires);
 
     check(result2.upgraded === true, 'D-07: second payment reports upgraded=true');
     const diffDays = (secondExpiry.getTime() - firstExpiry.getTime()) / (24 * 60 * 60 * 1000);
@@ -212,7 +213,7 @@ function succeededEvent(checkoutId, amountCents = 9900) {
     }
 
     const finalTeacher = getTeacher(phoneHash);
-    const finalExpiry = new Date(finalTeacher.pro_expires);
+    const finalExpiry = parseSqliteUtc(finalTeacher.pro_expires);
     const expectedExpiry = new Date(Date.now() + 93 * 24 * 60 * 60 * 1000); // 3 x 31 days
     const diffMs = Math.abs(finalExpiry.getTime() - expectedExpiry.getTime());
     check(diffMs < 5000, 'D-11: three stacked payments correctly total ~93 days, not capped at 62');
