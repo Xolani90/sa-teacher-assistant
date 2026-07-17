@@ -43,15 +43,6 @@ function check(condition, label) {
   else { console.error(`  ❌ FAIL: ${label}`); failed++; }
 }
 
-// SQLite's datetime('now') strings (e.g. "2026-08-10 08:13:08") are UTC
-// but carry no timezone marker. Plain new Date(str) on that exact
-// space-separated format is parsed as LOCAL time by JS, not UTC -- so on
-// any machine not in UTC+0 this silently drifts the parsed value by the
-// local offset. Force UTC interpretation explicitly wherever a raw
-// SQLite datetime string is parsed into a Date for comparison.
-function parseSqliteUtc(str) {
-  return new Date(str.replace(' ', 'T') + 'Z');
-}
 
 function buildDb() {
   const db = new Database(':memory:');
