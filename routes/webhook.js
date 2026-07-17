@@ -3503,7 +3503,23 @@ async function processGeneration(from, intent, originalText = null) {
   }
 
   // ── Send text response ────────────────────────────────────────
-  await safeSendMessage(from, finalContent);
+  // Usage is only committed once WhatsApp has accepted the generated
+  // content. If delivery fails here, the teacher got nothing for their
+  // quota — roll it back, mirroring the isolation already used around
+  // generateContent() above. PDF delivery below stays a best-effort
+  // bonus (unchanged) since text delivery is what quota actually pays for.
+  let usageCommitted = false;
+  try {
+    await safeSendMessage(from, finalContent);
+    usageCommitted = true;
+  } catch (sendErr) {
+    console.error('[WEBHOOK] Delivery of generated content failed:', sendErr.message);
+    rollbackUsage(quota, from);
+    await safeSendMessage(from,
+      `Something went wrong sending your content — please try again in a moment. If it keeps happening, reply *HELP*.`
+    ).catch(() => {}); // best-effort — don't double-throw
+    return;
+  }
 
   // ── Offer PDF for worksheets, tests, lesson plans, and other printable documents ─
   // (sbaTask, examPaper, rubric, moderationPack added — these are physical/printable
