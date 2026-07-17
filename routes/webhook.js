@@ -161,7 +161,6 @@ function isClassifierRateLimited(from) {
   return checkAndRecordRateLimit(from, 'classifier', CLASSIFIER_RATE_LIMIT, CLASSIFIER_RATE_WINDOW_MS);
 }
 
-// ── Report comment conversation state (in-memory) ─────────────────────────
 // ── Multi-turn session state (SQLite-backed, survives deploys) ────────────
 // Each store is scoped by session type. TTL is enforced on read.
 const reportCommentState = new SessionStore('reportComment',  30 * 60 * 1000);
