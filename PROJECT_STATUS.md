@@ -53,3 +53,22 @@ Stable. `git status` clean, in sync with `origin/main`. 29/30 test suites passin
 
 ### Audit follow-up
 - Item 5 (stale code comment): **resolved**. Located and removed — a leftover '// Report comment conversation state (in-memory)' header comment at routes/webhook.js:164, which contradicted the correct comment directly below it describing the SessionStore SQLite-backed migration. Backlog audit is now fully closed.
+
+## Modularisation Metrics
+
+**routes/webhook.js**
+- Initial size: 3390 lines (42e5278)
+- Current size: 3263 lines
+- Net reduction: 127 lines
+
+Extracted:
+- ✅ observationFlow
+- ✅ workspaceFlow
+- ✅ worksheetFlow
+
+Remaining:
+- ⬜ assessmentFlow
+- ⬜ lessonPlanFlow
+- ⬜ onboardingFlow
+- ⬜ generationPipeline
+
