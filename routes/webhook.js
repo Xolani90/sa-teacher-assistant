@@ -213,6 +213,21 @@ function buildObservationDeps() {
   });
 }
 
+// ── Worksheet flow module (extracted from this file) ───────────────────────
+const {
+  handleWorksheetFlow,
+  recordWorksheetGeneration,
+} = require('../flows/worksheetFlow');
+
+function buildWorksheetDeps() {
+  return Object.freeze({
+    lastWorksheetState,
+    safeSendMessage,
+    hashPhone,
+    triggerGeneration: processGeneration, // placeholder until core/generationPipeline.js exists
+  });
+}
+
 /**
  * Handles the multi-turn report comment conversation.
  * Returns true if handled (skip normal processing), false otherwise.
@@ -2468,57 +2483,8 @@ async function handleCommand(from, text) {
     return true;
   }
 
-  // ── EASIER command (differentiation) ─────────────────────────────────
-  if (upper === 'EASIER') {
-    const phoneHash = hashPhone(from);
-    const lastWorksheet = lastWorksheetState.get(phoneHash);
-    if (!lastWorksheet) {
-      await safeSendMessage(from, `Send me a worksheet request first, then reply EASIER/HARDER/VISUAL/ORAL.`);
-      return true;
-    }
-    const intent = { ...lastWorksheet.intent, type: 'worksheet', differentiation: 'easier' };
-    await processGeneration(from, intent);
-    return true;
-  }
-
-  // ── HARDER command (differentiation) ─────────────────────────────────
-  if (upper === 'HARDER') {
-    const phoneHash = hashPhone(from);
-    const lastWorksheet = lastWorksheetState.get(phoneHash);
-    if (!lastWorksheet) {
-      await safeSendMessage(from, `Send me a worksheet request first, then reply EASIER/HARDER/VISUAL/ORAL.`);
-      return true;
-    }
-    const intent = { ...lastWorksheet.intent, type: 'worksheet', differentiation: 'harder' };
-    await processGeneration(from, intent);
-    return true;
-  }
-
-  // ── VISUAL command (differentiation) ────────────────────────────────
-  if (upper === 'VISUAL') {
-    const phoneHash = hashPhone(from);
-    const lastWorksheet = lastWorksheetState.get(phoneHash);
-    if (!lastWorksheet) {
-      await safeSendMessage(from, `Send me a worksheet request first, then reply EASIER/HARDER/VISUAL/ORAL.`);
-      return true;
-    }
-    const intent = { ...lastWorksheet.intent, type: 'worksheet', differentiation: 'visual' };
-    await processGeneration(from, intent);
-    return true;
-  }
-
-  // ── ORAL command (differentiation) ──────────────────────────────────
-  if (upper === 'ORAL') {
-    const phoneHash = hashPhone(from);
-    const lastWorksheet = lastWorksheetState.get(phoneHash);
-    if (!lastWorksheet) {
-      await safeSendMessage(from, `Send me a worksheet request first, then reply EASIER/HARDER/VISUAL/ORAL.`);
-      return true;
-    }
-    const intent = { ...lastWorksheet.intent, type: 'worksheet', differentiation: 'oral' };
-    await processGeneration(from, intent);
-    return true;
-  }
+  // ── Worksheet differentiation commands (EASIER/HARDER/VISUAL/ORAL) — extracted ─
+  if (await handleWorksheetFlow(from, text, buildWorksheetDeps())) return true;
 
   // ── FORMAL command (parent message) ────────────────────────────────
   if (upper === 'FORMAL') {
@@ -3155,19 +3121,9 @@ async function processGeneration(from, intent, originalText = null) {
     }, 1000);
   }
 
-  // ── Worksheet state storage and differentiation follow-up (Feature 2) ───────
+  // ── Worksheet state storage and differentiation follow-up (Feature 2) — extracted ─
   if (intent.type === 'worksheet' && !intent.differentiation) {
-    const phoneHash = hashPhone(from);
-    lastWorksheetState.set(phoneHash, {
-      intent: { topic: intent.topic, grade: intent.grade, subject: intent.subject },
-      content: content,
-      lastActivity: Date.now(),
-    });
-    setTimeout(async () => {
-      await safeSendMessage(from,
-        `🎯 Need different versions?\n\nReply EASIER — support version (more scaffolding)\n\nReply HARDER — extension version (higher challenge)\n\nReply VISUAL — diagram/image-based version\n\nReply ORAL — oral assessment questions`
-      );
-    }, 1000);
+    recordWorksheetGeneration(from, intent, content, buildWorksheetDeps());
   }
 
   // ── Quick quiz follow-up (Feature 4) ────────────────────────────────────────
