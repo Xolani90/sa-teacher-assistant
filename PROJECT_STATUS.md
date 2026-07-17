@@ -35,9 +35,9 @@ Stable. `git status` clean, in sync with `origin/main`. 29/30 test suites passin
 
 ### Completed
 - ✅ observationFlow extracted from routes/webhook.js (594a9dc) — handleObservationFlow, handleObservationHistoryFlow, formatObservationDate, sendObservationHistoryList. Dependencies injected via buildObservationDeps() factory; no reverse dependency on webhook.js.
+- ✅ workspaceFlow extracted from routes/webhook.js (9e364ae) — MY CLASSES, NEW CLASS, MY ASSESSMENTS, MY PROGRESS, WORKSPACE summary. SAVE/MY RESOURCES stay inline (tied to lastGeneratedState/saveLock). Dependencies injected via buildWorkspaceDeps() factory.
 
 ### Planned
-- ⬜ workspaceFlow
 - ⬜ worksheetFlow
 - ⬜ assessmentFlow
 - ⬜ lessonPlanFlow
