@@ -36,6 +36,7 @@ Stable. `git status` clean, in sync with `origin/main`. 29/30 test suites passin
 ### Completed
 - ✅ observationFlow extracted from routes/webhook.js (594a9dc) — handleObservationFlow, handleObservationHistoryFlow, formatObservationDate, sendObservationHistoryList. Dependencies injected via buildObservationDeps() factory; no reverse dependency on webhook.js.
 - ✅ workspaceFlow extracted from routes/webhook.js (9e364ae) — MY CLASSES, NEW CLASS, MY ASSESSMENTS, MY PROGRESS, WORKSPACE summary. SAVE/MY RESOURCES stay inline (tied to lastGeneratedState/saveLock). Dependencies injected via buildWorkspaceDeps() factory.
+- ✅ worksheetFlow extracted from routes/webhook.js (4e4f8e0) — EASIER/HARDER/VISUAL/ORAL differentiation commands + lastWorksheetState bookkeeping. AI generation, quota, PDF, SAVE all stay inline until core/generationPipeline.js exists. Dependencies injected via buildWorksheetDeps() factory; triggerGeneration is a placeholder pointing at processGeneration().
 
 ### Planned
 - ⬜ worksheetFlow
