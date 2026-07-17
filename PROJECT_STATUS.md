@@ -9,9 +9,7 @@ _Last updated: 2026-07-17_
 - **Old repos** (`sa-teacher-assistant-archive/`, `sa-teacher-assistant-archive-stale/`, and the various dated `.zip`/`.tar.gz` snapshots in `~/Downloads`) are **retired** — read-only backups only. Do not develop in them.
 
 ## Current Health
-Stable. `git status` clean, in sync with `origin/main`. 27/30 test suites passing as of last full run; the 3 failures are:
-- `phase-classifier-disambiguation.test.js` — not a code bug, blocked on Anthropic API credit balance (see Blockers below)
-- `phase-d-payment-renewal.test.js`, `phase-d-replay-stress.test.js` — **fixed**, duplicate stale local `parseSqliteUtc()` declarations removed (both now import the canonical version from `utils/dateUtils.js`)
+Stable. `git status` clean, in sync with `origin/main`. 29/30 test suites passing as of last full run. The 1 remaining failure is `phase-classifier-disambiguation.test.js` — not a code bug, blocked on Anthropic API credit balance (see Blockers below).
 
 ## Recently Completed
 - `rollbackUsage()` shared helper for quota rollback consistency (`bcbaff3`, 2026-07-13)
