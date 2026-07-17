@@ -41,7 +41,4 @@ Stable. `git status` clean, in sync with `origin/main`. 27/30 test suites passin
 - AI classifier improvements — blocked on Anthropic API credit balance (account tied to the API key used by `phase-classifier-disambiguation.test.js` is depleted; regex fallback works correctly in the meantime)
 
 ### Audit follow-up
-- Item 5 (stale code comment, from the original backlog audit): not yet revalidated after repository consolidation. Needs a quick audit to determine whether:
-  - it was fixed during later refactors,
-  - it still exists,
-  - or the original audit note is obsolete.
+- Item 5 (stale code comment): **resolved**. Located and removed — a leftover '// Report comment conversation state (in-memory)' header comment at routes/webhook.js:164, which contradicted the correct comment directly below it describing the SessionStore SQLite-backed migration. Backlog audit is now fully closed.
