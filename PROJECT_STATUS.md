@@ -30,6 +30,18 @@ Stable. `git status` clean, in sync with `origin/main`. 29/30 test suites passin
 
 ### Medium Priority
 - `routes/webhook.js` modularisation — currently ~3700 lines. First step: extract coherent handler blocks into a `flows/` directory (`worksheetFlow.js`, `testFlow.js`, `lessonPlanFlow.js`, `observationFlow.js`, `interventionFlow.js`, `pdfFlow.js`), leaving `webhook.js` as routing/orchestration only. Incremental, one flow at a time — no architecture redesign.
+
+## Modularisation Progress
+
+### Completed
+- ✅ observationFlow extracted from routes/webhook.js (594a9dc) — handleObservationFlow, handleObservationHistoryFlow, formatObservationDate, sendObservationHistoryList. Dependencies injected via buildObservationDeps() factory; no reverse dependency on webhook.js.
+
+### Planned
+- ⬜ workspaceFlow
+- ⬜ worksheetFlow
+- ⬜ assessmentFlow
+- ⬜ lessonPlanFlow
+- ⬜ onboardingFlow
 - School administration features
 - District dashboard
 - Department of Education reporting
