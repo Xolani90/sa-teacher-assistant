@@ -3725,3 +3725,8 @@ function FREE_LIMIT_DISPLAY() {
 // No additional cleanup loop is needed here.
 
 module.exports = router;
+
+// Exposed for direct testing only (tests/phase1-delivery-rollback.test.js).
+// Not part of the public route surface — do not depend on this from
+// application code.
+module.exports.__testExports = { processGeneration, rollbackUsage };

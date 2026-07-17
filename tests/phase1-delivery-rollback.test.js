@@ -9,19 +9,25 @@
 //
 // Fix: the send is now wrapped in its own try/catch. usageCommitted only
 // flips true after WhatsApp accepts the message; on a send failure,
-// rollbackUsage() is called with the same insertedRowId-based mechanism
-// already used around generateContent(), and a best-effort apology is sent.
+// rollbackUsage() deletes the exact usage_events row this request created
+// (quota.insertedRowId), and a best-effort apology is sent.
 //
-// This test exercises the REAL processGeneration() function (via the
-// module's __testExports), with every external dependency (AI, WhatsApp,
-// DB) stubbed so the exact interleaving can be controlled deterministically.
+// This test loads the REAL routes/webhook.js (via its __testExports seam)
+// against a real in-memory better-sqlite3 database and stubs only the
+// outbound AI and WhatsApp network calls — everything else is the actual
+// production code path. Follows the same Module._resolveFilename +
+// require.cache convention as tests/phase-d-payment-renewal.test.js.
 //
 // Run: node tests/phase1-delivery-rollback.test.js
 
-process.env.PII_SECRET = 'test-secret-key-32-bytes-long!!';
-process.env.FREE_LIMIT = '10';
-process.env.APP_URL = 'https://example.test';
-process.env.PDF_SECRET = 'pdf-secret';
+process.env.PII_SECRET  = 'test-secret-key-32-bytes-long!!';
+process.env.FREE_LIMIT  = '10';
+process.env.APP_URL     = 'https://example.test';
+process.env.PDF_SECRET  = 'pdf-secret';
+
+const Database = require('better-sqlite3');
+const Module = require('module');
+const path = require('path');
 
 let passed = 0;
 let failed = 0;
@@ -30,59 +36,181 @@ function check(condition, label) {
   else { console.error(`  ❌ FAIL: ${label}`); failed++; }
 }
 
-(async () => {
-  const control = require('../utils/mockControl');
-  const { getDb } = require('../utils/database');
-  const { hashPhone, currentMonthKey } = require('../utils/usageTracker');
-  const webhook = require('../routes/webhook');
-  const { processGeneration } = webhook.__testExports;
+function buildDb() {
+  const db = new Database(':memory:');
+  db.exec(`
+    CREATE TABLE teachers (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash TEXT NOT NULL UNIQUE,
+      name TEXT,
+      grade INTEGER,
+      subject TEXT,
+      language TEXT,
+      is_pro INTEGER NOT NULL DEFAULT 0,
+      pro_expires TEXT,
+      phone_enc TEXT,
+      opted_out INTEGER NOT NULL DEFAULT 0,
+      last_assessment_id INTEGER,
+      renewal_reminder_sent_at TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE usage_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash TEXT NOT NULL,
+      month_key TEXT NOT NULL,
+      intent_type TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE TABLE rate_limit_events (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash    TEXT    NOT NULL,
+      limiter_type  TEXT    NOT NULL,
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX idx_rate_limit_events_lookup
+      ON rate_limit_events(phone_hash, limiter_type, created_at);
+    CREATE TABLE sessions (
+      phone_hash    TEXT    NOT NULL,
+      session_type  TEXT    NOT NULL,
+      state         TEXT    NOT NULL,
+      updated_at    REAL    NOT NULL,
+      PRIMARY KEY (phone_hash, session_type)
+    );
+    CREATE INDEX idx_sessions_updated
+      ON sessions(updated_at);
+  `);
+  return db;
+}
 
-  const db = getDb();
-  const phone = '+27821140099';
-  const hash = hashPhone(phone);
-  const monthKey = currentMonthKey();
+const db = buildDb();
+
+// ── Patch utils/database to return our in-memory db ─────────────────────────
+const dbPath = path.resolve(__dirname, '../utils/database');
+require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { getDb: () => db } };
+
+// ── Stub services/whatsappService — controllable send behavior ─────────────
+const sentMessages = [];
+let sendShouldFailOnCallNumber = null; // e.g. 2 = the 2nd sendMessage call throws
+let sendCallCount = 0;
+const whatsappPath = path.resolve(__dirname, '../services/whatsappService');
+require.cache[whatsappPath] = {
+  id: whatsappPath, filename: whatsappPath, loaded: true,
+  exports: {
+    sendMessage: async (phone, text) => {
+      sendCallCount += 1;
+      sentMessages.push({ phone, text, callNumber: sendCallCount });
+      if (sendShouldFailOnCallNumber === sendCallCount) {
+        throw new Error('Simulated WhatsApp delivery failure');
+      }
+      return true;
+    },
+    sendDocument: async () => true,
+    downloadMedia: async () => null,
+    chunkMessage: (t) => [t],
+  },
+};
+
+// ── Stub services/aiService — controllable generation behavior ─────────────
+let generationShouldFail = false;
+const aiServicePath = path.resolve(__dirname, '../services/aiService');
+require.cache[aiServicePath] = {
+  id: aiServicePath, filename: aiServicePath, loaded: true,
+  exports: {
+    generateContent: async (prompt, intentType) => {
+      if (generationShouldFail) throw new Error('Simulated AI generation failure');
+      return `Generated ${intentType} content for prompt of length ${prompt.length}`;
+    },
+  },
+};
+
+const origResolve = Module._resolveFilename;
+Module._resolveFilename = function (request, ...rest) {
+  if (request === '../utils/database' || request === './database') return dbPath;
+  if (request === './whatsappService' || request === '../services/whatsappService') return whatsappPath;
+  if (request === './aiService' || request === '../services/aiService') return aiServicePath;
+  return origResolve.call(this, request, ...rest);
+};
+
+function hashPhoneForTest(phone) {
+  const crypto = require('crypto');
+  const normalized = phone.trim().replace(/^\+/, '');
+  return crypto.createHmac('sha256', process.env.PII_SECRET).update(normalized).digest('hex');
+}
+
+function countUsageEvents(phoneHash) {
+  return db.prepare(`SELECT COUNT(*) as c FROM usage_events WHERE phone_hash = ?`).get(phoneHash).c;
+}
+
+function makeIntent(overrides = {}) {
+  return {
+    type: 'worksheet',
+    grade: 7,
+    subject: 'mathematics',
+    topic: 'Fractions',
+    marks: null,
+    ...overrides,
+  };
+}
+
+(async () => {
+  const { processGeneration } = require('../routes/webhook').__testExports;
 
   console.log('\n── Phase 1: generation succeeds, delivery fails → usage must roll back ──');
   {
-    control.generationShouldFail = false;
-    control.sendMessageCallCount = 0;
-    control.sendMessageCalls = [];
-    // Sequence for a successful-generation/failed-delivery run is expected
-    // to be: (1) the "⏳ Generating..." ack, (2) the finalContent delivery
-    // attempt — this is the one we fail, (3) the best-effort apology.
-    control.sendMessageFailOnCall = 2;
+    const phone = '+27821140001';
+    const phoneHash = hashPhoneForTest(phone);
 
-    const intent = { type: 'worksheet', grade: 7, subject: 'general', topic: 'fractions' };
-    await processGeneration(phone, intent);
+    generationShouldFail = false;
+    sendCallCount = 0;
+    sentMessages.length = 0;
+    // Call sequence for this intent: 1) "Generating..." ack, 2) final content.
+    // Fail the 2nd call (final content delivery) — the ack itself must succeed.
+    sendShouldFailOnCallNumber = 2;
 
-    const rows = db.prepare(
-      `SELECT id FROM usage_events WHERE phone_hash = ? AND month_key = ?`
-    ).all(hash, monthKey);
+    await processGeneration(phone, makeIntent());
 
-    check(rows.length === 0, 'P1-01: usage_events has no surviving row for this teacher/month after delivery failure');
-    check(control.sendMessageCallCount === 3, 'P1-02: exactly 3 sendMessage calls occurred (ack + failed content + apology)');
-    check(control.sendMessageCalls[0].text.startsWith('⏳'), 'P1-03: call #1 was the generation acknowledgment');
-    check(control.sendMessageCalls[1].text.includes('Generated worksheet content'), 'P1-04: call #2 attempted to deliver the actual generated content');
-    check(control.sendMessageCalls[2].text.toLowerCase().includes('something went wrong'), 'P1-05: call #3 was the best-effort apology after delivery failure');
+    check(countUsageEvents(phoneHash) === 0, 'P1-01: usage_events row rolled back after delivery failure (0 rows remain)');
+    check(sentMessages.length === 3, 'P1-02: three messages attempted — ack, failed final content (still recorded as attempted), apology');
+    const apology = sentMessages[sentMessages.length - 1];
+    check(apology.text.includes('Something went wrong'), 'P1-03: best-effort apology message sent after rollback');
   }
 
-  console.log('\n── Sanity check: successful delivery commits usage (no rollback) ──');
+  console.log('\n── Phase 1: generation succeeds, delivery succeeds → usage must be committed ──');
   {
-    control.generationShouldFail = false;
-    control.sendMessageCallCount = 0;
-    control.sendMessageCalls = [];
-    control.sendMessageFailOnCall = null; // nothing fails this time
+    const phone = '+27821140002';
+    const phoneHash = hashPhoneForTest(phone);
 
-    const phone2 = '+27821140100';
-    const hash2 = hashPhone(phone2);
-    const intent = { type: 'worksheet', grade: 7, subject: 'general', topic: 'fractions' };
-    await processGeneration(phone2, intent);
+    generationShouldFail = false;
+    sendCallCount = 0;
+    sentMessages.length = 0;
+    sendShouldFailOnCallNumber = null; // no failures
 
-    const rows = db.prepare(
-      `SELECT id FROM usage_events WHERE phone_hash = ? AND month_key = ?`
-    ).all(hash2, monthKey);
+    await processGeneration(phone, makeIntent());
 
-    check(rows.length === 1, 'P1-06 (sanity): a successful generation+delivery leaves exactly one usage_events row (not rolled back)');
+    check(countUsageEvents(phoneHash) === 1, 'P1-04: usage_events row committed (1 row) when delivery succeeds');
+    // The generated content is delivered, but processGeneration continues
+    // afterward (e.g. offering a PDF download) — so check the content was
+    // sent SOMEWHERE in the sequence, not that it's necessarily the last message.
+    const contentWasSent = sentMessages.some(m => m.text.includes('Generated worksheet content'));
+    check(contentWasSent, 'P1-05: the generated content was actually sent, not silently dropped');
+    const apologyWasSent = sentMessages.some(m => m.text.includes('Something went wrong'));
+    check(!apologyWasSent, 'P1-05b: no apology message sent on the successful-delivery path');
+  }
+
+  console.log('\n── Phase 1 (existing behavior, unaffected): AI generation itself failing still rolls back ──');
+  {
+    const phone = '+27821140003';
+    const phoneHash = hashPhoneForTest(phone);
+
+    generationShouldFail = true;
+    sendCallCount = 0;
+    sentMessages.length = 0;
+    sendShouldFailOnCallNumber = null;
+
+    await processGeneration(phone, makeIntent());
+
+    check(countUsageEvents(phoneHash) === 0, 'P1-06: usage_events row rolled back when generateContent() itself fails (pre-existing behavior)');
   }
 
   console.log('\n─────────────────────────────────');
@@ -91,8 +219,10 @@ function check(condition, label) {
   console.log(`📊 Total:  ${passed + failed}`);
   console.log('─────────────────────────────────\n');
 
+  Module._resolveFilename = origResolve;
   process.exit(failed > 0 ? 1 : 0);
 })().catch(err => {
   console.error('UNCAUGHT ERROR IN TEST:', err);
+  Module._resolveFilename = origResolve;
   process.exit(1);
 });
