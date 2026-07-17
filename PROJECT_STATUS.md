@@ -56,6 +56,8 @@ Stable. `git status` clean, in sync with `origin/main`. 29/30 test suites passin
 
 ## Modularisation Metrics
 
+**Flow modules completed:** 3 / 7 (42.9%)
+
 **routes/webhook.js**
 - Initial size: 3390 lines (42e5278)
 - Current size: 3263 lines
