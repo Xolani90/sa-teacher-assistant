@@ -27,7 +27,8 @@ supports them.
 |---|---|---|
 | [ADR-001](./ADR-001-flow-boundaries.md) | ADR | Defines what qualifies as an extractable flow module, based on the four completed extractions (observationFlow, workspaceFlow, worksheetFlow, assessmentFlow) and two investigated non-cases (lessonPlanFlow, onboardingFlow). |
 | [generation-pipeline-analysis.md](./generation-pipeline-analysis.md) | Analysis | Dependency inventory, call graph, and state ownership analysis for `processGeneration()`, gathered before drafting ADR-002. |
-| ADR-002 | ADR | *(pending)* — Generation pipeline extraction boundary, informed by the analysis document above. |
+| [ADR-002](./ADR-002-generation-pipeline.md) | ADR | Generation pipeline extraction boundary — scopes core/generationPipeline.js, informed by the analysis document above. |
+| [generation-pipeline-interface-sketch.md](./generation-pipeline-interface-sketch.md) | Draft | triggerGeneration() public API — parameter shape, ownership boundaries, and control-flow contract, separated into evidence-backed (stable) vs. non-binding (deferred) sections. |
 
 See `PROJECT_STATUS.md` at the repo root for current extraction progress
 and metrics.
