@@ -35,15 +35,30 @@ comments as a future `triggerGeneration` target):
 `processGeneration()` itself is defined at line 2482 and returns void — it
 is a pure side-effect function, not a value-returning one.
 
-## Core services (business logic — inject)
+## Business services (inject)
 
 | Dependency | Source |
 |---|---|
 | `buildPrompt` | `services/promptService` |
 | `generateContent` | `services/aiService` |
 | `generatePdf` | `services/pdfService` |
-| `validateAtpWeeks` | `utils/atpWeekValidator` |
-| `getWorksheetTotalMarks` | `utils/capsPhase` |
+
+## Shared utility helpers (inject)
+
+| Dependency | Source | Notes |
+|---|---|---|
+| `gradeLabel` | `utils/capsPhase` | Cross-cutting formatting helper used across flows, prompt builders, services, and non-generation webhook handlers. Imported alongside `getWorksheetTotalMarks`; originally missing from this inventory despite that. |
+| `getWorksheetTotalMarks` | `utils/capsPhase` | Shared CAPS utility. |
+
+## Standalone domain utilities (import directly, do not inject)
+
+| Dependency | Source | Notes |
+|---|---|---|
+| `validateAtpWeeks` | `utils/atpWeekValidator` | Pure, independently unit-tested (`tests/test-atp-week-validator.js`), no shared/webhook state. Generation-exclusive today, but not generation-owned — required directly by `core/generationPipeline.js` rather than passed through `buildGenerationDeps()`. |
+
+**Dependency selection rule:** `buildGenerationDeps()` supplies runtime collaborators (services, infrastructure, shared state, cross-cutting helpers). Stable, deterministic library-style modules with independent ownership and tests are imported directly by `core/generationPipeline.js` rather than injected. In short: *inject runtime collaborators; import stable libraries.*
+
+> Correction (verification pass): `gradeLabel` was missing from the original inventory despite being imported alongside `getWorksheetTotalMarks`; added after grep confirmed cross-module usage. `validateAtpWeeks` was moved out of the injected-services table into a new "Standalone domain utilities" section after grep confirmed it is generation-exclusive but structurally independent (own module, own tests, no shared state).
 
 ## Infrastructure (shared — inject)
 
