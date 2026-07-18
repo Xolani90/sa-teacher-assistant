@@ -45,14 +45,23 @@ Per the analysis document's "Summary: what moves, what stays":
 
 ### What stays external, injected as dependencies
 
-- **Core services:** `buildPrompt`, `generateContent`, `generatePdf`,
-  `validateAtpWeeks`, `getWorksheetTotalMarks`
+- **Business services:** `buildPrompt`, `generateContent`, `generatePdf`
+- **Shared utility helpers:** `gradeLabel`, `getWorksheetTotalMarks`,
+  `intentLabel` — cross-cutting formatting/labeling helpers used across
+  multiple flow modules and non-generation call sites within
+  `webhook.js` itself (`intentLabel` has 3 non-generation call sites in
+  `webhook.js`, at the SAVE lifecycle and MY RESOURCES display logic;
+  it has no call sites in `flows/*.js` today, correcting an earlier,
+  unverified claim in this ADR that it was shared with
+  `worksheetFlow.js`/`assessmentFlow.js`)
 - **Infrastructure:** `sendDocument`, `safeSendMessage`, `hashPhone`,
   `getTeacherByPhone`, `isProActive`, `checkAndIncrementUsage`,
   `rollbackUsage`, `isAiRateLimited`, `FREE_LIMIT_DISPLAY`, `getDb`
-- **`intentLabel`** — shared with `worksheetFlow.js` and
-  `assessmentFlow.js`; stays in `webhook.js` for now rather than moving
-  into a module that isn't its only consumer
+- **Standalone domain utility (imported directly, not injected):**
+  `validateAtpWeeks` — pure, independently unit-tested, own module
+  (`utils/atpWeekValidator.js`); generation-exclusive today but not
+  generation-owned. See `generation-pipeline-analysis.md` for the full
+  reclassification evidence.
 
 ### What is passed in as shared state, not owned
 
@@ -105,10 +114,13 @@ This extraction explicitly does **not**:
 - Resolve the `pdfEligible`/`saveableTypes` array duplication noted in the
   analysis document. Both arrays move in as-is; deduplicating them is a
   separate, smaller cleanup.
-- Move `intentLabel` out of `webhook.js`. It has three consumers across
-  three different modules; moving it into the pipeline would just relocate
-  the coupling rather than remove it. A future `utils/intentLabel.js`
-  extraction is the correct fix, out of scope here.
+- Move `intentLabel` out of `webhook.js`. It has 3 call sites, but all 3
+  are within `webhook.js` itself (SAVE lifecycle, MY RESOURCES display) —
+  not spread across other modules, correcting an earlier unverified claim
+  in this section. Moving it into the pipeline would still just relocate
+  the coupling rather than remove it, since the pipeline is not its only
+  consumer. A future `utils/intentLabel.js` extraction remains the
+  correct fix, out of scope here.
 
 ## Alternatives considered
 
