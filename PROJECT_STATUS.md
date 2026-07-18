@@ -84,12 +84,15 @@ This is shared infrastructure used across all generation types, not another conv
 ## Modularisation Metrics
 
 **Flow modules completed:** 4 / 4 (100%)
+**Architectural extraction completed:** 1 / 1 (100%) — generationPipeline
 
 **routes/webhook.js**
 - Initial size: 3390 lines (42e5278)
-- Current size: 2840 lines
-- Net reduction: 550 lines (~16.2%)
+- Current size: ~2340 lines
+- Net reduction: ~1050 lines (~31%)
 
-Remaining architectural extraction:
-- ⬜ generationPipeline
+All planned modularisation work is complete: 4 flow modules
+(observation, workspace, worksheet, assessment) plus the shared
+generation pipeline (triggerGeneration in core/generationPipeline.js),
+per ADR-001 and ADR-002.
 
