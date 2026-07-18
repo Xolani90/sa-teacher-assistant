@@ -33,6 +33,12 @@ Stable. `git status` clean, in sync with `origin/main`. 29/30 test suites passin
 
 ## Modularisation Status
 
+### Architecture decisions
+Design rationale and supporting evidence for the modularisation effort now live in `docs/adr/`:
+- [ADR-001 — Flow module boundaries](docs/adr/ADR-001-flow-boundaries.md)
+- [ADR-002 — Generation pipeline boundary](docs/adr/ADR-002-generation-pipeline.md)
+- [Generation pipeline analysis](docs/adr/generation-pipeline-analysis.md) — supporting evidence for ADR-002
+
 ### Flow-layer extraction
 - ✅ observationFlow extracted from routes/webhook.js (594a9dc) — handleObservationFlow, handleObservationHistoryFlow, formatObservationDate, sendObservationHistoryList. Dependencies injected via buildObservationDeps() factory; no reverse dependency on webhook.js.
 - ✅ workspaceFlow extracted from routes/webhook.js (9e364ae) — MY CLASSES, NEW CLASS, MY ASSESSMENTS, MY PROGRESS, WORKSPACE summary. SAVE/MY RESOURCES stay inline (tied to lastGeneratedState/saveLock). Dependencies injected via buildWorkspaceDeps() factory.
