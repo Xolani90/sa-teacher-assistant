@@ -37,6 +37,7 @@ Stable. `git status` clean, in sync with `origin/main`. 29/30 test suites passin
 - ✅ observationFlow extracted from routes/webhook.js (594a9dc) — handleObservationFlow, handleObservationHistoryFlow, formatObservationDate, sendObservationHistoryList. Dependencies injected via buildObservationDeps() factory; no reverse dependency on webhook.js.
 - ✅ workspaceFlow extracted from routes/webhook.js (9e364ae) — MY CLASSES, NEW CLASS, MY ASSESSMENTS, MY PROGRESS, WORKSPACE summary. SAVE/MY RESOURCES stay inline (tied to lastGeneratedState/saveLock). Dependencies injected via buildWorkspaceDeps() factory.
 - ✅ worksheetFlow extracted from routes/webhook.js (4e4f8e0) — EASIER/HARDER/VISUAL/ORAL differentiation commands + lastWorksheetState bookkeeping. AI generation, quota, PDF, SAVE all stay inline until core/generationPipeline.js exists. Dependencies injected via buildWorksheetDeps() factory; triggerGeneration is a placeholder pointing at processGeneration().
+- ✅ assessmentFlow extracted from routes/webhook.js (b6ef2da) — upload marks multi-turn flow (CSV/photo/document -> parse -> processAssessmentData() diagnostic summary). Scoped narrower than the full pipeline: handleAssessmentAnalysisFlow and handleInterventionPlanFlow remain inline (separate state stores, future extraction candidate). Dependencies injected via buildAssessmentDeps() factory.
 
 ### Planned
 - ⬜ worksheetFlow
@@ -56,20 +57,20 @@ Stable. `git status` clean, in sync with `origin/main`. 29/30 test suites passin
 
 ## Modularisation Metrics
 
-**Flow modules completed:** 3 / 7 (42.9%)
+**Flow modules completed:** 4 / 7 (57.1%)
 
 **routes/webhook.js**
 - Initial size: 3390 lines (42e5278)
-- Current size: 3263 lines
-- Net reduction: 127 lines
+- Current size: 2840 lines
+- Net reduction: 550 lines
 
 Extracted:
 - ✅ observationFlow
 - ✅ workspaceFlow
 - ✅ worksheetFlow
+- ✅ assessmentFlow
 
 Remaining:
-- ⬜ assessmentFlow
 - ⬜ lessonPlanFlow
 - ⬜ onboardingFlow
 - ⬜ generationPipeline
