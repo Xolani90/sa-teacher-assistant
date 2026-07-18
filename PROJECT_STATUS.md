@@ -31,19 +31,39 @@ Stable. `git status` clean, in sync with `origin/main`. 29/30 test suites passin
 ### Medium Priority
 - `routes/webhook.js` modularisation — currently ~3700 lines. First step: extract coherent handler blocks into a `flows/` directory (`worksheetFlow.js`, `testFlow.js`, `lessonPlanFlow.js`, `observationFlow.js`, `interventionFlow.js`, `pdfFlow.js`), leaving `webhook.js` as routing/orchestration only. Incremental, one flow at a time — no architecture redesign.
 
-## Modularisation Progress
+## Modularisation Status
 
-### Completed
+### Flow-layer extraction
 - ✅ observationFlow extracted from routes/webhook.js (594a9dc) — handleObservationFlow, handleObservationHistoryFlow, formatObservationDate, sendObservationHistoryList. Dependencies injected via buildObservationDeps() factory; no reverse dependency on webhook.js.
 - ✅ workspaceFlow extracted from routes/webhook.js (9e364ae) — MY CLASSES, NEW CLASS, MY ASSESSMENTS, MY PROGRESS, WORKSPACE summary. SAVE/MY RESOURCES stay inline (tied to lastGeneratedState/saveLock). Dependencies injected via buildWorkspaceDeps() factory.
 - ✅ worksheetFlow extracted from routes/webhook.js (4e4f8e0) — EASIER/HARDER/VISUAL/ORAL differentiation commands + lastWorksheetState bookkeeping. AI generation, quota, PDF, SAVE all stay inline until core/generationPipeline.js exists. Dependencies injected via buildWorksheetDeps() factory; triggerGeneration is a placeholder pointing at processGeneration().
 - ✅ assessmentFlow extracted from routes/webhook.js (b6ef2da) — upload marks multi-turn flow (CSV/photo/document -> parse -> processAssessmentData() diagnostic summary). Scoped narrower than the full pipeline: handleAssessmentAnalysisFlow and handleInterventionPlanFlow remain inline (separate state stores, future extraction candidate). Dependencies injected via buildAssessmentDeps() factory.
 
-### Planned
-- ⬜ worksheetFlow
-- ⬜ assessmentFlow
-- ⬜ lessonPlanFlow
-- ⬜ onboardingFlow
+**Status: 4 / 4 real flow modules extracted (100%)**
+
+### Roadmap adjustments (revised after code inspection)
+
+The original roadmap listed lessonPlanFlow and onboardingFlow as pending extractions. Investigation of the actual codebase found neither is a standalone flow, so both were removed from the extraction list rather than left as stale unchecked items:
+
+**lessonPlanFlow** — Not extracted because no standalone flow exists. Lesson plans are one of several resource types (alongside worksheet, test, atp, sbaTask, etc.) handled entirely by the shared generation pipeline (processGeneration(), intent routing, PDF eligibility, SAVE lifecycle). The only lesson-plan-specific code in webhook.js is a ~6-line LESSONPLAN disambiguation command handler and entries in shared arrays (pdfEligible, saveableTypes, intentLabel).
+
+**onboardingFlow** — Already extracted before this modularisation effort began, into services/onboardingService.js (handleOnboarding, needsOnboarding). routes/webhook.js only delegates via a 2-line call site; there is no onboarding-specific logic left to extract.
+
+### Remaining architectural work
+
+- ⬜ core/generationPipeline
+
+This is the one remaining major extraction and includes:
+- processGeneration() — shared generation orchestration
+- prompt dispatch across all resource types
+- PDF eligibility/delivery
+- SAVE lifecycle (B2–B5 state machine)
+- quota / usage rollback handling
+- generic resource-type disambiguation (WORKSHEET/TEST/LESSONPLAN/etc.)
+
+This is shared infrastructure used across all generation types, not another conversation flow — architecturally significant but a single focused piece of work rather than several unrelated extractions.
+
+### Other planned work (non-modularisation)
 - School administration features
 - District dashboard
 - Department of Education reporting
@@ -57,21 +77,13 @@ Stable. `git status` clean, in sync with `origin/main`. 29/30 test suites passin
 
 ## Modularisation Metrics
 
-**Flow modules completed:** 4 / 7 (57.1%)
+**Flow modules completed:** 4 / 4 (100%)
 
 **routes/webhook.js**
 - Initial size: 3390 lines (42e5278)
 - Current size: 2840 lines
-- Net reduction: 550 lines
+- Net reduction: 550 lines (~16.2%)
 
-Extracted:
-- ✅ observationFlow
-- ✅ workspaceFlow
-- ✅ worksheetFlow
-- ✅ assessmentFlow
-
-Remaining:
-- ⬜ lessonPlanFlow
-- ⬜ onboardingFlow
+Remaining architectural extraction:
 - ⬜ generationPipeline
 
