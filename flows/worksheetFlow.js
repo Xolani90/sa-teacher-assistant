@@ -28,8 +28,8 @@
  *   lastWorksheetState,   // SessionStore instance (owned/instantiated in webhook.js)
  *   safeSendMessage,      // async (from, text) => void
  *   hashPhone,            // (from) => phoneHash
- *   triggerGeneration,    // async (from, intent) => void — currently processGeneration(),
- *                         // will point at core/generationPipeline.js once it exists
+ *   triggerGeneration,    // async ({ from, intent, originalText, deps }) => void
+ *                         // — core/generationPipeline.js
  * }
  */
 
@@ -72,7 +72,7 @@ async function handleWorksheetFlow(from, text, deps) {
   }
 
   const intent = { ...lastWorksheet.intent, type: 'worksheet', differentiation };
-  await triggerGeneration(from, intent);
+  await triggerGeneration({ from, intent, deps });
   return true;
 }
 

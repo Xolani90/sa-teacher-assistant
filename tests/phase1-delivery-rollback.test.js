@@ -1,7 +1,8 @@
 'use strict';
 // Phase 1 — Delivery-failure usage rollback regression test.
 //
-// Confirmed defect (pre-fix): processGeneration() in routes/webhook.js only
+// Confirmed defect (pre-fix): triggerGeneration() (formerly processGeneration())
+// in routes/webhook.js, now in core/generationPipeline.js, only
 // rolled back the usage_events row if generateContent() itself failed. If
 // generation SUCCEEDED but the subsequent WhatsApp delivery of that content
 // failed (safeSendMessage(from, finalContent) throwing), the teacher's
@@ -154,7 +155,7 @@ function makeIntent(overrides = {}) {
 }
 
 (async () => {
-  const { processGeneration } = require('../routes/webhook').__testExports;
+  const { triggerGeneration, buildGenerationDeps } = require('../routes/webhook').__testExports;
 
   console.log('\n── Phase 1: generation succeeds, delivery fails → usage must roll back ──');
   {
@@ -168,7 +169,7 @@ function makeIntent(overrides = {}) {
     // Fail the 2nd call (final content delivery) — the ack itself must succeed.
     sendShouldFailOnCallNumber = 2;
 
-    await processGeneration(phone, makeIntent());
+    await triggerGeneration({ from: phone, intent: makeIntent(), deps: buildGenerationDeps() });
 
     check(countUsageEvents(phoneHash) === 0, 'P1-01: usage_events row rolled back after delivery failure (0 rows remain)');
     check(sentMessages.length === 3, 'P1-02: three messages attempted — ack, failed final content (still recorded as attempted), apology');
@@ -186,10 +187,10 @@ function makeIntent(overrides = {}) {
     sentMessages.length = 0;
     sendShouldFailOnCallNumber = null; // no failures
 
-    await processGeneration(phone, makeIntent());
+    await triggerGeneration({ from: phone, intent: makeIntent(), deps: buildGenerationDeps() });
 
     check(countUsageEvents(phoneHash) === 1, 'P1-04: usage_events row committed (1 row) when delivery succeeds');
-    // The generated content is delivered, but processGeneration continues
+    // The generated content is delivered, but triggerGeneration continues
     // afterward (e.g. offering a PDF download) — so check the content was
     // sent SOMEWHERE in the sequence, not that it's necessarily the last message.
     const contentWasSent = sentMessages.some(m => m.text.includes('Generated worksheet content'));
@@ -208,7 +209,7 @@ function makeIntent(overrides = {}) {
     sentMessages.length = 0;
     sendShouldFailOnCallNumber = null;
 
-    await processGeneration(phone, makeIntent());
+    await triggerGeneration({ from: phone, intent: makeIntent(), deps: buildGenerationDeps() });
 
     check(countUsageEvents(phoneHash) === 0, 'P1-06: usage_events row rolled back when generateContent() itself fails (pre-existing behavior)');
   }
