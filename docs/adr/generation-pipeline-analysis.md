@@ -1,5 +1,12 @@
 # Generation Pipeline Analysis
 
+**Status:** Frozen architectural snapshot (pre-extraction)
+**Captured at commit:** 4fc947f
+**Subject:** `processGeneration()` in `routes/webhook.js`
+**Purpose:** Evidence collected before extraction into `core/generationPipeline.js`.
+
+---
+
 Supporting evidence for ADR-002. This document is a technical inventory of
 `processGeneration()` as it exists in `routes/webhook.js` (currently at
 lines 2482–2766), gathered by reading the full function body and grepping
@@ -133,3 +140,17 @@ not addressed by this extraction.
   by the pipeline
 - Quota/rollback implementation (`utils/usageTracker`) — pipeline is a
   consumer, not an owner
+
+## Evidence Summary
+
+The analysis demonstrates that `processGeneration()` is primarily an
+orchestration function rather than a business-logic function.
+
+Its dependencies naturally separate into:
+
+- orchestration logic
+- external services
+- shared infrastructure
+- shared session-state contracts
+
+This inventory is the factual basis for ADR-002.
