@@ -7,6 +7,7 @@
  */
 
 const { getDb } = require('../utils/database');
+const { resolveLearner } = require('./learnerIdentityService');
 const { performItemAnalysis, saveItemAnalysis } = require('./itemAnalysisService');
 const { performErrorAnalysis, saveErrorAnalysis } = require('./errorAnalysisService');
 const { groupLearners } = require('./learnerGroupingService');
@@ -32,7 +33,15 @@ function processAssessmentData(phoneHash, assessmentData) {
   }
 
   // Step 2: Store learner results
-  const storeResult = storeLearnerResults(assessmentId, assessmentData.learnerResults);
+  // classId comes from assessmentData.classId, resolved by the calling
+  // flow per ADR-004 before processAssessmentData() is invoked; null for
+  // teachers with 0 classes (zero-class policy).
+  const storeResult = storeLearnerResults(
+    phoneHash,
+    assessmentId,
+    assessmentData.learnerResults,
+    assessmentData.classId ?? null
+  );
 
   if (!storeResult.success) {
     return { error: 'Failed to store learner results' };
@@ -107,8 +116,8 @@ function storeAssessment(phoneHash, assessmentData) {
   try {
     const result = db.prepare(`
       INSERT INTO assessments (
-        phone_hash, title, grade, subject, term, assessment_type, total_marks, atp_topics
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        phone_hash, title, grade, subject, term, assessment_type, total_marks, atp_topics, class_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       phoneHash,
       assessmentData.title,
@@ -117,7 +126,10 @@ function storeAssessment(phoneHash, assessmentData) {
       assessmentData.term,
       assessmentData.type,
       assessmentData.totalMarks,
-      JSON.stringify(assessmentData.atpTopics || [])
+      JSON.stringify(assessmentData.atpTopics || []),
+      // ADR-004: null for teachers with 0 classes (zero-class policy) or
+      // when the calling flow hasn't resolved class context yet.
+      assessmentData.classId ?? null
     );
 
     return result.lastInsertRowid;
@@ -130,11 +142,13 @@ function storeAssessment(phoneHash, assessmentData) {
 /**
  * Stores learner results in the database.
  *
+ * @param {string} phoneHash - Teacher's phone hash (required for learner
+ *   identity resolution — see ADR-003; identity is scoped per-teacher)
  * @param {number} assessmentId - Assessment ID
  * @param {Array} learnerResults - Array of learner result objects
  * @returns {boolean} Success status
  */
-function storeLearnerResults(assessmentId, learnerResults) {
+function storeLearnerResults(phoneHash, assessmentId, learnerResults, classId = null) {
   const db = getDb();
 
   // Wrap the INSERT loop in a transaction so a throw partway through (e.g.
@@ -148,8 +162,8 @@ function storeLearnerResults(assessmentId, learnerResults) {
 
     const insert = db.prepare(`
       INSERT INTO learner_results (
-        assessment_id, learner_name, mark, total_marks, percentage, question_data
-      ) VALUES (?, ?, ?, ?, ?, ?)
+        assessment_id, learner_name, mark, total_marks, percentage, question_data, learner_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
 
     const skipped = [];
@@ -160,18 +174,38 @@ function storeLearnerResults(assessmentId, learnerResults) {
       // sorts that one learner into Group A since Infinity >= 80 is true.
       // Skip the bad row rather than insert garbage that corrupts every
       // other learner's grouping and the class-wide stats.
+      //
+      // This skip is also the validation gate for identity resolution
+      // (ADR-003 Implementation Addendum, Principle 2): a row that fails
+      // here never reaches resolveLearner(), so no learner identity is
+      // created for malformed/skipped rows.
       if (!result.totalMarks || result.totalMarks <= 0 || !Number.isFinite(result.mark)) {
         skipped.push(result.learnerName || '(unnamed)');
         continue;
       }
       const percentage = (result.mark / result.totalMarks) * 100;
+
+      // resolveLearner() participates in the BEGIN already open above —
+      // it opens no transaction of its own (ADR-003 Implementation
+      // Addendum, Principle 3). classId is resolved by the calling flow
+      // per ADR-004 (0/1/2+ class rule) and passed through here; it is
+      // null only for teachers with 0 classes (zero-class policy), in
+      // which case the learner lands in the unclassed bucket
+      // (idx_learners_identity_unclassed).
+      const learner = resolveLearner({
+        phoneHash,
+        classId,
+        learnerName: result.learnerName,
+      });
+
       insert.run(
         assessmentId,
         result.learnerName,
         result.mark,
         result.totalMarks,
         percentage,
-        JSON.stringify(result.questionData || {})
+        JSON.stringify(result.questionData || {}),
+        learner.id
       );
     }
 

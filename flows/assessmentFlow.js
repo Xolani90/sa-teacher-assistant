@@ -16,6 +16,9 @@ async function handleAssessmentFlow(from, text, message = null, preClassifiedInt
     extractMarksFromImage,
     getFormatHelpText,
     processAssessmentData,
+    getTeacherClasses,
+    formatClassSelectionPrompt,
+    matchClassSelection,
   } = deps;
 
 
@@ -47,6 +50,7 @@ async function handleAssessmentFlow(from, text, message = null, preClassifiedInt
       subject: intent.subject || null,
       title: null,
       term: null,
+      classId: null, // ADR-004: resolved after term, before marks
       lastActivity: Date.now(),
     });
 
@@ -123,6 +127,47 @@ async function handleAssessmentFlow(from, text, message = null, preClassifiedInt
   if (state.step === 'awaitingTerm') {
     const termMatch = trimmed.match(/\b([1-4])\b/);
     state.term = termMatch ? parseInt(termMatch[1], 10) : 1;
+
+    // ── ADR-004: resolve class context before collecting marks ──
+    // 0 classes -> stay unclassed (zero-class policy). 1 class -> use it
+    // automatically, no extra prompt. 2+ classes -> ask, since default_class_id
+    // is a preference, not evidence of current instructional context.
+    let classes = [];
+    try {
+      classes = getTeacherClasses(phoneHash);
+    } catch (err) {
+      console.error('[DataAssessment] getTeacherClasses failed:', err.message);
+      classes = []; // fail open into unclassed mode rather than blocking the flow
+    }
+
+    if (classes.length >= 2) {
+      state.step = 'awaitingClassSelection';
+      state.pendingClasses = classes.map(c => ({ id: c.id, name: c.name }));
+      dataAssessmentState.set(phoneHash, state);
+      await safeSendMessage(from, formatClassSelectionPrompt(state.pendingClasses));
+      return true;
+    }
+
+    state.classId = classes.length === 1 ? classes[0].id : null;
+    state.step = 'awaitingMarks';
+    dataAssessmentState.set(phoneHash, state);
+    await safeSendMessage(from, getFormatHelpText());
+    return true;
+  }
+
+  // ── Step: resolve class selection (only reached with 2+ classes) ──
+  if (state.step === 'awaitingClassSelection') {
+    const matched = matchClassSelection(trimmed, state.pendingClasses || []);
+    if (!matched) {
+      dataAssessmentState.set(phoneHash, state); // keep state, re-prompt
+      await safeSendMessage(from,
+        `Please reply with a number from 1 to ${(state.pendingClasses || []).length}.\n\n` +
+        formatClassSelectionPrompt(state.pendingClasses || [])
+      );
+      return true;
+    }
+    state.classId = matched.id;
+    delete state.pendingClasses;
     state.step = 'awaitingMarks';
     dataAssessmentState.set(phoneHash, state);
     await safeSendMessage(from, getFormatHelpText());
@@ -253,6 +298,7 @@ async function handleAssessmentFlow(from, text, message = null, preClassifiedInt
         totalMarks: parseResult.totalMark,
         atpTopics: Object.values(parseResult.questionTopics || {}),
         learnerResults: parseResult.learners, // already in { learnerName, mark, totalMarks, questionData } shape
+        classId: state.classId ?? null, // ADR-004: resolved after the term step
       };
       diagnosticResults = processAssessmentData(phoneHash, assessmentData);
     } catch (err) {

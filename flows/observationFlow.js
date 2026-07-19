@@ -18,6 +18,9 @@
  *   saveObservationSubmission,
  *   getObservationHistory,
  *   getObservationAssessment,
+ *   getTeacherClasses,          // ADR-004: (phoneHash) => Array<{id, name, ...}>
+ *   formatClassSelectionPrompt, // ADR-004: (classes) => string
+ *   matchClassSelection,        // ADR-004: (text, classes) => class|null
  * }
  */
 
@@ -43,6 +46,9 @@ async function handleObservationFlow(from, text, preClassifiedIntent, deps) {
     processObservationSubmission,
     getObservationFormatHelpText,
     saveObservationSubmission,
+    getTeacherClasses,
+    formatClassSelectionPrompt,
+    matchClassSelection,
   } = deps;
 
   const phoneHash = hashPhone(from);
@@ -57,8 +63,32 @@ async function handleObservationFlow(from, text, preClassifiedIntent, deps) {
     const intent = preClassifiedIntent || parseIntent(text);
     if (intent.type !== 'observation') return false;
 
+    // ── ADR-004: resolve class context before collecting the observation ──
+    // Same 0/1/2+ rule as assessmentFlow.js: auto-use the sole class,
+    // ask only when ambiguous, stay unclassed with 0 classes.
+    let classes = [];
+    try {
+      classes = getTeacherClasses(phoneHash);
+    } catch (err) {
+      console.error('[Observation] getTeacherClasses failed:', err.message);
+      classes = []; // fail open into unclassed mode rather than blocking the flow
+    }
+
+    if (classes.length >= 2) {
+      observationState.set(phoneHash, {
+        step: 'awaitingClassSelection',
+        pendingClasses: classes.map(c => ({ id: c.id, name: c.name })),
+        lastActivity: Date.now(),
+      });
+      await safeSendMessage(from, formatClassSelectionPrompt(
+        classes.map(c => ({ id: c.id, name: c.name }))
+      ));
+      return true;
+    }
+
     observationState.set(phoneHash, {
       step: 'awaitingObservationText',
+      classId: classes.length === 1 ? classes[0].id : null,
       lastActivity: Date.now(),
     });
     await safeSendMessage(from,
@@ -71,6 +101,27 @@ async function handleObservationFlow(from, text, preClassifiedIntent, deps) {
   if (trimmed.toUpperCase() === 'CANCEL') {
     observationState.delete(phoneHash);
     await safeSendMessage(from, `No problem — cancelled.`);
+    return true;
+  }
+
+  if (state.step === 'awaitingClassSelection') {
+    const matched = matchClassSelection(text.trim(), state.pendingClasses || []);
+    if (!matched) {
+      observationState.set(phoneHash, { ...state, lastActivity: Date.now() });
+      await safeSendMessage(from,
+        `Please reply with a number from 1 to ${(state.pendingClasses || []).length}.\n\n` +
+        formatClassSelectionPrompt(state.pendingClasses || [])
+      );
+      return true;
+    }
+    observationState.set(phoneHash, {
+      step: 'awaitingObservationText',
+      classId: matched.id,
+      lastActivity: Date.now(),
+    });
+    await safeSendMessage(from,
+      `👀 *Record an Observation*\n\n` + getObservationFormatHelpText()
+    );
     return true;
   }
 
@@ -90,7 +141,7 @@ async function handleObservationFlow(from, text, preClassifiedIntent, deps) {
 
     let saveError = null;
     try {
-      saveObservationSubmission(phoneHash, result.header, result.records);
+      saveObservationSubmission(phoneHash, result.header, result.records, state.classId ?? null);
     } catch (err) {
       saveError = err;
       console.error('[WEBHOOK] saveObservationSubmission failed:', err.message);

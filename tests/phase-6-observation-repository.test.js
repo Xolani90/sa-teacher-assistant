@@ -19,9 +19,23 @@ const { DatabaseSync } = require('node:sqlite');
 
 let _db = null;
 
+const path = require('path');
+const dbPath = path.resolve(__dirname, '../utils/database');
+
+// FIX (test-harness bug, not production code): the previous version of this
+// override only special-cased the 'better-sqlite3' request string and relied
+// on require.cache[dbPath] alone for '../utils/database'. But Node's real
+// resolver returns the fully-resolved filename WITH extension
+// (".../utils/database.js"), while dbPath (built via path.resolve, no
+// extension) never matched that cache key -- so the mock was silently never
+// hit; observationRepository.js was loading the real utils/database.js the
+// whole time instead of this test's in-memory _db. Redirecting the request
+// string itself (matching the working pattern already used in
+// tests/phase-c2-diagnostic-atomicity.test.js) closes that gap.
 const _origResolve = Module._resolveFilename.bind(Module);
 Module._resolveFilename = function (request, parent, isMain, opts) {
   if (request === 'better-sqlite3') return request;
+  if (request === '../utils/database' || request === './database') return dbPath;
   return _origResolve(request, parent, isMain, opts);
 };
 require.cache['better-sqlite3'] = {
@@ -34,8 +48,6 @@ require.cache['better-sqlite3'] = {
   },
 };
 
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
 require.cache[dbPath] = {
   id: dbPath,
   filename: dbPath,
@@ -88,7 +100,7 @@ function assertThrows(fn, expectedMsg, label) {
   }
 }
 
-// ── Schema (mirrors Migration 022) ────────────────────────────────────────────
+// ── Schema (mirrors Migration 022 + Migration 027's class_id addition) ─────
 function buildSchema(db) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS teachers (
@@ -96,14 +108,48 @@ function buildSchema(db) {
       phone_hash TEXT UNIQUE NOT NULL
     );
 
+    -- Added for ADR-003 PR 3: saveObservationSubmission() now calls
+    -- resolveLearner() before every record insert, same as
+    -- storeLearnerResults(). classes/learners shape mirrors
+    -- tests/learnerIdentityService.test.js -- not re-derived independently,
+    -- deliberately kept identical across both integration suites so they
+    -- don't silently diverge from each other. Same caveat as the C2 patch:
+    -- inferred from test-file usage, not yet checked against the real
+    -- migration source in utils/database.js.
+    CREATE TABLE IF NOT EXISTS classes (
+      id INTEGER PRIMARY KEY,
+      phone_hash TEXT NOT NULL,
+      name TEXT,
+      grade INTEGER,
+      subject TEXT,
+      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
+    );
+    CREATE TABLE IF NOT EXISTS learners (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash TEXT NOT NULL,
+      class_id INTEGER,
+      canonical_name TEXT NOT NULL,
+      normalized_name TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
+      FOREIGN KEY (class_id) REFERENCES classes(id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_classed
+      ON learners(phone_hash, class_id, normalized_name) WHERE class_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_unclassed
+      ON learners(phone_hash, normalized_name) WHERE class_id IS NULL;
+
     CREATE TABLE IF NOT EXISTS observation_assessments (
       id                INTEGER PRIMARY KEY AUTOINCREMENT,
       phone_hash        TEXT    NOT NULL,
       grade             TEXT,
       subject           TEXT,
       assessment_name   TEXT,
+      class_id          INTEGER,
       created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
+      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
+      FOREIGN KEY (class_id) REFERENCES classes(id)
     );
 
     CREATE TABLE IF NOT EXISTS observation_records (
@@ -113,6 +159,7 @@ function buildSchema(db) {
       domain                TEXT    NOT NULL,
       developmental_status  TEXT    NOT NULL,
       notes                 TEXT,
+      learner_id            INTEGER,
       created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (assessment_id) REFERENCES observation_assessments(id)
     );

@@ -35,6 +35,9 @@ const { buildFullInterventionPlanPrompt } = require('../prompts/fullIntervention
 const { processObservationSubmission } = require('../utils/observationWorkflowService');
 const { getObservationFormatHelpText } = require('../utils/observationParser');
 const { saveObservationSubmission, getObservationHistory, getObservationAssessment } = require('../services/observationRepository');
+// ADR-004: class-context resolution for assessment/observation flows.
+const { getTeacherClasses } = require('../services/teacherWorkspaceService');
+const { formatClassSelectionPrompt, matchClassSelection } = require('../utils/classContext');
 
 /**
  * Rolls back a usage_events row created by checkAndIncrementUsage() when
@@ -194,6 +197,9 @@ function buildObservationDeps() {
     saveObservationSubmission,
     getObservationHistory,
     getObservationAssessment,
+    getTeacherClasses, // ADR-004: class-context resolution
+    formatClassSelectionPrompt,
+    matchClassSelection,
   });
 }
 
@@ -254,6 +260,9 @@ function buildAssessmentDeps() {
     extractMarksFromImage,
     getFormatHelpText,
     processAssessmentData,
+    getTeacherClasses, // ADR-004: class-context resolution
+    formatClassSelectionPrompt,
+    matchClassSelection,
   });
 }
 

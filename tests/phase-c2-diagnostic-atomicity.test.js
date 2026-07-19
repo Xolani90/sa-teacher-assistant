@@ -28,6 +28,40 @@ const db = new Database(':memory:');
 
 db.exec(`
   CREATE TABLE teachers (phone_hash TEXT PRIMARY KEY);
+
+  -- Added for ADR-003 PR 3: storeLearnerResults() now calls resolveLearner()
+  -- before every insert, which requires classes (FK target of learners.class_id)
+  -- and learners to exist. Column shape mirrors the INSERT/SELECT statements
+  -- already exercised in tests/learnerIdentityService.test.js -- not invented
+  -- fresh here, just replicated so this suite's schema doesn't drift from that
+  -- one. NOTE: I have not seen utils/database.js's actual migration source for
+  -- these two tables; this is inferred from test-file usage, not confirmed
+  -- against the real migration. Flagging so it gets checked against a real
+  -- .schema dump before this is trusted as authoritative.
+  CREATE TABLE classes (
+    id INTEGER PRIMARY KEY,
+    phone_hash TEXT NOT NULL,
+    name TEXT,
+    grade INTEGER,
+    subject TEXT,
+    FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
+  );
+  CREATE TABLE learners (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    phone_hash TEXT NOT NULL,
+    class_id INTEGER,
+    canonical_name TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now')),
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
+    FOREIGN KEY (class_id) REFERENCES classes(id)
+  );
+  CREATE UNIQUE INDEX idx_learners_identity_classed
+    ON learners(phone_hash, class_id, normalized_name) WHERE class_id IS NOT NULL;
+  CREATE UNIQUE INDEX idx_learners_identity_unclassed
+    ON learners(phone_hash, normalized_name) WHERE class_id IS NULL;
+
   CREATE TABLE assessments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     phone_hash TEXT NOT NULL,
@@ -48,6 +82,7 @@ db.exec(`
     total_marks INTEGER NOT NULL,
     percentage REAL NOT NULL,
     question_data TEXT,
+    learner_id INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE item_analysis (

@@ -24,6 +24,7 @@
  */
 
 const { getDb } = require('../utils/database');
+const { resolveLearner } = require('./learnerIdentityService');
 const logger = require('../utils/logger').child({ module: 'observationRepository' });
 
 /**
@@ -35,9 +36,13 @@ const logger = require('../utils/logger').child({ module: 'observationRepository
  * @param {string} phoneHash - Teacher's phone hash
  * @param {{ assessment: string|null, grade: string|null, subject: string|null }} header
  * @param {Array<{ learnerName: string, domain: string, developmentalStatus: string, notes: string|null }>} records
+ * @param {number|null} [classId] - Resolved class context per ADR-004
+ *   (0/1/2+ class rule). Null for teachers with 0 classes (zero-class
+ *   policy) — the assessment and its learners land in the unclassed
+ *   bucket.
  * @returns {{ assessmentId: number, recordCount: number }}
  */
-function saveObservationSubmission(phoneHash, header, records) {
+function saveObservationSubmission(phoneHash, header, records, classId = null) {
   const db = getDb();
 
   if (!phoneHash) {
@@ -53,29 +58,45 @@ function saveObservationSubmission(phoneHash, header, records) {
       db.prepare('BEGIN').run();
 
       const assessmentResult = db.prepare(`
-        INSERT INTO observation_assessments (phone_hash, grade, subject, assessment_name)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO observation_assessments (phone_hash, grade, subject, assessment_name, class_id)
+        VALUES (?, ?, ?, ?, ?)
       `).run(
         phoneHash,
         header?.grade ?? null,
         header?.subject ?? null,
-        header?.assessment ?? null
+        header?.assessment ?? null,
+        classId
       );
 
       assessmentId = assessmentResult.lastInsertRowid;
 
       const insertRecord = db.prepare(`
-        INSERT INTO observation_records (assessment_id, learner_name, domain, developmental_status, notes)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO observation_records (assessment_id, learner_name, domain, developmental_status, notes, learner_id)
+        VALUES (?, ?, ?, ?, ?, ?)
       `);
 
       for (const record of records) {
+        // resolveLearner() runs plain statements against this same `db`
+        // connection — it does not open its own transaction, so this
+        // insert participates in the BEGIN already open above (ADR-003
+        // Implementation Addendum, Principle 3). classId is resolved by
+        // the calling flow per ADR-004 (0/1/2+ class rule); null only for
+        // teachers with 0 classes (zero-class policy), in which case the
+        // learner lands in the unclassed bucket
+        // (idx_learners_identity_unclassed).
+        const learner = resolveLearner({
+          phoneHash,
+          classId,
+          learnerName: record.learnerName,
+        });
+
         insertRecord.run(
           assessmentId,
           record.learnerName,
           record.domain,
           record.developmentalStatus,
-          record.notes ?? null
+          record.notes ?? null,
+          learner.id
         );
       }
 

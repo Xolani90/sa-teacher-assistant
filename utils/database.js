@@ -249,6 +249,17 @@ function runMigrations() {
     // column whitelist — this migration plus the whitelist fix close that gap.
     `ALTER TABLE teachers ADD COLUMN last_assessment_id INTEGER`,
 
+    // Migration 027: class_id on assessment-level entities (ADR-004).
+    // learners.class_id (Migration 024) was sufficient for identity
+    // resolution, but the assessment/observation event itself also needs
+    // to carry class context independently — otherwise "all assessments
+    // for Grade 5A" has no way to be answered without joining through
+    // every individual learner_result/observation_record row. Nullable:
+    // unclassed submissions (teachers with 0 classes) remain valid per
+    // ADR-004's zero-class policy.
+    `ALTER TABLE assessments ADD COLUMN class_id INTEGER REFERENCES classes(id)`,
+    `ALTER TABLE observation_assessments ADD COLUMN class_id INTEGER REFERENCES classes(id)`,
+
     // Migration 019 and Migration 021 (grade data-repair) were moved out of
     // this array — see dataRepairMigrations below. They are UPDATE
     // statements, not ALTER TABLEs, so they don't belong under this loop's
@@ -483,6 +494,80 @@ function runMigrations() {
       ON rate_limit_events(phone_hash, limiter_type, created_at);
   `);
 
+  // Migration 024: Persistent learner identity (ADR-003).
+  // Introduces `learners` as the canonical identity for learner history,
+  // per docs/adr/ADR-003-longitudinal-learner-progress.md. This table is
+  // deliberately conservative: identity fields only. Mastery, progress,
+  // statistics, and intervention flags are derived projections (ADR-003
+  // Decision 3 / System of Record) and belong in later tables once the
+  // projection engine is built — not here.
+  //
+  // normalized_name is not declared UNIQUE. Identity is only meaningful
+  // scoped to one teacher's one class (phone_hash, class_id,
+  // normalized_name) — idx_learners_lookup below reflects that scope,
+  // but enforcing uniqueness on it is a matching-policy decision left to
+  // ADR-004, not assumed here.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS learners (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash        TEXT    NOT NULL,
+      class_id          INTEGER,
+      canonical_name    TEXT    NOT NULL,
+      normalized_name   TEXT    NOT NULL,
+      created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
+      FOREIGN KEY (class_id) REFERENCES classes(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_learners_phone
+      ON learners(phone_hash);
+    CREATE INDEX IF NOT EXISTS idx_learners_class
+      ON learners(class_id);
+    CREATE INDEX IF NOT EXISTS idx_learners_lookup
+      ON learners(phone_hash, class_id, normalized_name);
+  `);
+
+  // Migration 025: link existing evidence tables to learner identity
+  // (ADR-003). learner_id is nullable and additive only — no existing
+  // learner_results or observation_records row is modified, and
+  // learner_name is retained unchanged everywhere as the original
+  // teacher-entered evidence. Population of learner_id happens at write
+  // time once the identity-resolution service exists (ADR-003 PR 2);
+  // historical rows are intentionally left unmatched (NULL) rather than
+  // backfilled, per Phase 1 scope.
+  for (const stmt of [
+    `ALTER TABLE learner_results ADD COLUMN learner_id INTEGER REFERENCES learners(id)`,
+    `ALTER TABLE observation_records ADD COLUMN learner_id INTEGER REFERENCES learners(id)`,
+  ]) {
+    try { db.exec(stmt); } catch (_) { /* column already exists */ }
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_learner_results_learner
+      ON learner_results(learner_id);
+    CREATE INDEX IF NOT EXISTS idx_observation_records_learner
+      ON observation_records(learner_id);
+  `);
+
+  // Migration 026: enforce learner identity uniqueness (ADR-003 PR 2).
+  // idx_learners_lookup (Migration 024) is a plain, non-unique index, so it
+  // does not stop learnerIdentityService.resolveLearner() from racing two
+  // concurrent inserts into a duplicate identity. A single
+  // UNIQUE(phone_hash, class_id, normalized_name) index would not close
+  // that gap either — SQLite treats every NULL as distinct from every
+  // other NULL inside a UNIQUE index, so two "unmatched" (class_id IS
+  // NULL) learners with the same name would still both insert. Two
+  // partial unique indexes handle the classed and unclassed cases
+  // explicitly. resolveLearner() relies on these: find -> insert -> catch
+  // UNIQUE violation -> re-find.
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_classed
+      ON learners(phone_hash, class_id, normalized_name)
+      WHERE class_id IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_unclassed
+      ON learners(phone_hash, normalized_name)
+      WHERE class_id IS NULL;
+  `);
+
   for (const sql of alterations) {
     try {
       db.exec(sql);
@@ -490,6 +575,15 @@ function runMigrations() {
       // Column already exists — this is expected on subsequent startups
     }
   }
+
+  // Indexes for Migration 027's class_id columns — created after the
+  // alterations loop above, since the columns must exist first.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_assessments_class
+      ON assessments(class_id);
+    CREATE INDEX IF NOT EXISTS idx_observation_assessments_class
+      ON observation_assessments(class_id);
+  `);
 
   console.log('[DB] Migrations complete');
 }
