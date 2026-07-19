@@ -19,6 +19,14 @@ async function handleAssessmentFlow(from, text, message = null, preClassifiedInt
     getTeacherClasses,
     formatClassSelectionPrompt,
     matchClassSelection,
+    downloadMedia,
+    updateTeacherProfile,
+    checkAndIncrementUsage,
+    rollbackUsage,
+    buildFullInterventionPlanPrompt,
+    generateContent,
+    saveReport,
+    parseInterventionSections,
   } = deps;
 
 

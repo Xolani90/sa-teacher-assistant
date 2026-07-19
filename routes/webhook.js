@@ -263,6 +263,17 @@ function buildAssessmentDeps() {
     getTeacherClasses, // ADR-004: class-context resolution
     formatClassSelectionPrompt,
     matchClassSelection,
+    // --- Stabilization Issue #1: previously referenced in assessmentFlow.js's
+    // mark-upload and AI intervention-plan sections but never injected here,
+    // causing a ReferenceError at runtime. All 8 already exist in this file. ---
+    downloadMedia,
+    updateTeacherProfile,
+    checkAndIncrementUsage,
+    rollbackUsage,
+    buildFullInterventionPlanPrompt,
+    generateContent,
+    saveReport,
+    parseInterventionSections,
   });
 }
 
@@ -2551,4 +2562,4 @@ module.exports = router;
 // Exposed for direct testing only (tests/phase1-delivery-rollback.test.js).
 // Not part of the public route surface — do not depend on this from
 // application code.
-module.exports.__testExports = { triggerGeneration, buildGenerationDeps, rollbackUsage };
+module.exports.__testExports = { triggerGeneration, buildGenerationDeps, buildAssessmentDeps, rollbackUsage };

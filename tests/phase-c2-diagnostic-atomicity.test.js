@@ -72,6 +72,7 @@ db.exec(`
     assessment_type TEXT NOT NULL,
     total_marks INTEGER NOT NULL,
     atp_topics TEXT,
+    class_id INTEGER REFERENCES classes(id),
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE learner_results (
