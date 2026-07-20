@@ -12,6 +12,7 @@ async function handleAssessmentFlow(from, text, message = null, preClassifiedInt
     isProActive,
     getTeacherByPhone,
     dataAssessmentState,
+    parseIntent,
     parseMarks,
     extractMarksFromImage,
     getFormatHelpText,

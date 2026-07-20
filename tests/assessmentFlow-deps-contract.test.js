@@ -28,6 +28,12 @@ const REQUIRED_DEPS = [
   'isProActive',
   'getTeacherByPhone',
   'dataAssessmentState',
+  // regression coverage — added 2026-07-20: referenced in assessmentFlow.js's
+  // fresh-trigger check (`preClassifiedIntent || parseIntent(text)`) but
+  // missing from buildAssessmentDeps() and from this test's own checklist.
+  // Only threw in production when another flow's mid-session dispatch probed
+  // handleAssessmentFlow with a null intent while dataAssessmentState was unset.
+  'parseIntent',
   'parseMarks',
   'extractMarksFromImage',
   'getFormatHelpText',
@@ -51,7 +57,7 @@ const REQUIRED_DEPS = [
 // but still covered by the "defined" check above.
 const FUNCTION_DEPS = new Set([
   'hashPhone', 'safeSendMessage', 'gradeLabel', 'isProActive',
-  'getTeacherByPhone', 'parseMarks', 'extractMarksFromImage',
+  'getTeacherByPhone', 'parseIntent', 'parseMarks', 'extractMarksFromImage',
   'getFormatHelpText', 'processAssessmentData', 'getTeacherClasses',
   'formatClassSelectionPrompt', 'matchClassSelection',
   'downloadMedia', 'updateTeacherProfile', 'checkAndIncrementUsage',

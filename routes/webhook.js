@@ -256,6 +256,7 @@ function buildAssessmentDeps() {
     isProActive,
     getTeacherByPhone,
     dataAssessmentState,
+    parseIntent,
     parseMarks,
     extractMarksFromImage,
     getFormatHelpText,
