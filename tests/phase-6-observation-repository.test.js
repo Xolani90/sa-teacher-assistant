@@ -141,13 +141,14 @@ function buildSchema(db) {
       ON learners(phone_hash, normalized_name) WHERE class_id IS NULL;
 
     CREATE TABLE IF NOT EXISTS observation_assessments (
-      id                INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash        TEXT    NOT NULL,
-      grade             TEXT,
-      subject           TEXT,
-      assessment_name   TEXT,
-      class_id          INTEGER,
-      created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+      id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash                TEXT    NOT NULL,
+      grade                     TEXT,
+      subject                   TEXT,
+      assessment_name           TEXT,
+      class_id                  INTEGER,
+      corrects_assessment_id    INTEGER REFERENCES observation_assessments(id),
+      created_at                TEXT    NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
       FOREIGN KEY (class_id) REFERENCES classes(id)
     );
@@ -160,6 +161,7 @@ function buildSchema(db) {
       developmental_status  TEXT    NOT NULL,
       notes                 TEXT,
       learner_id            INTEGER,
+      resolved              INTEGER NOT NULL DEFAULT 0,
       created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (assessment_id) REFERENCES observation_assessments(id)
     );
@@ -249,18 +251,32 @@ async function run() {
   assertEq(result.subject, 'Numeracy', 'subject matches on retrieval');
   assertEq(result.assessmentName, 'Term 2 Observation', 'assessmentName matches on retrieval');
   assertEq(result.records.length, 2, 'both records retrieved');
-  assertEq(result.records[0], {
+  assertEq({
+    learnerName: result.records[0].learnerName,
+    domain: result.records[0].domain,
+    developmentalStatus: result.records[0].developmentalStatus,
+    notes: result.records[0].notes,
+    resolved: result.records[0].resolved,
+  }, {
     learnerName: 'Thabo',
     domain: 'Counting',
     developmentalStatus: 'Developing',
     notes: 'Counts to 10 confidently.',
-  }, 'first record matches exactly');
-  assertEq(result.records[1], {
+    resolved: false,
+  }, 'first record matches exactly (unresolved by default)');
+  assertEq({
+    learnerName: result.records[1].learnerName,
+    domain: result.records[1].domain,
+    developmentalStatus: result.records[1].developmentalStatus,
+    notes: result.records[1].notes,
+    resolved: result.records[1].resolved,
+  }, {
     learnerName: 'Lindiwe',
     domain: 'Counting',
     developmentalStatus: 'Achieved',
     notes: null,
-  }, 'second record matches exactly, null notes preserved');
+    resolved: false,
+  }, 'second record matches exactly, null notes preserved, unresolved by default');
 
   console.log('\nTest P6-07: missing/undefined header fields stored as null, not dropped');
   const { assessmentId: minimalId } = saveObservationSubmission(PHONE, {}, [

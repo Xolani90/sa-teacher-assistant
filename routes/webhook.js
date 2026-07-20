@@ -34,7 +34,7 @@ const { gradeLabel, parseGrade } = require('../utils/capsPhase');
 const { buildFullInterventionPlanPrompt } = require('../prompts/fullInterventionPlan');
 const { processObservationSubmission } = require('../utils/observationWorkflowService');
 const { getObservationFormatHelpText } = require('../utils/observationParser');
-const { saveObservationSubmission, getObservationHistory, getObservationAssessment } = require('../services/observationRepository');
+const { saveObservationSubmission, getObservationHistory, getObservationAssessment, appendObservationNote, deleteObservationAssessment, resolveObservationRecord } = require('../services/observationRepository');
 const { analyzeObservations } = require('../services/observationAnalysisService');
 // ADR-004: class-context resolution for assessment/observation flows.
 const { getTeacherClasses } = require('../services/teacherWorkspaceService');
@@ -199,6 +199,9 @@ function buildObservationDeps() {
     getObservationHistory,
     getObservationAssessment,
     analyzeObservations,
+    appendObservationNote,
+    deleteObservationAssessment,
+    resolveObservationRecord,
     getTeacherClasses, // ADR-004: class-context resolution
     formatClassSelectionPrompt,
     matchClassSelection,

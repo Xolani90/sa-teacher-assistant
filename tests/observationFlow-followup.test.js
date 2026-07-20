@@ -132,7 +132,13 @@ check('includes "Developing" concerns with notes, not just "Not Yet"', () => {
 
 check('does not list a clean "Achieved" record as a concern', () => {
   const msg = buildObservationDetailMessage(assessmentWithConcern, fakeGradeLabel, fakeAnalyzeObservations);
-  const concernSection = msg.split('Needs follow-up:')[1] || '';
+  // Scope strictly to the "Needs follow-up" block — the message also has a
+  // later "*Records:*" section listing every record (including clean ones,
+  // tagged rather than filtered) so a teacher can address one for ADD NOTE
+  // / RESOLVE / CORRECT. That later section is expected to include Zanele;
+  // only the follow-up block itself must not.
+  const afterHeader = msg.split('Needs follow-up:')[1] || '';
+  const concernSection = afterHeader.split('*Records:*')[0];
   assert.ok(!concernSection.includes('Zanele'), 'Zanele is Achieved and should not appear in the concern list');
 });
 

@@ -18,6 +18,9 @@
  *   saveObservationSubmission,
  *   getObservationHistory,
  *   getObservationAssessment,
+ *   appendObservationNote,      // (recordId, phoneHash, noteText) => { recordId, notes }|null
+ *   deleteObservationAssessment, // (assessmentId, phoneHash) => { assessmentId, deleted }|null
+ *   resolveObservationRecord,    // (recordId, phoneHash) => { recordId, resolved }|null
  *   getTeacherClasses,          // ADR-004: (phoneHash) => Array<{id, name, ...}>
  *   formatClassSelectionPrompt, // ADR-004: (classes) => string
  *   matchClassSelection,        // ADR-004: (text, classes) => class|null
@@ -26,10 +29,18 @@
 
 // ── Observation flow handler ──────────────────────────────────────────────
 /**
- * Handles the single-turn "record a Foundation Phase observation" conversation.
- * Collects one raw text block (header + per-learner domain/status/notes),
- * parses and persists it in one round-trip.
+ * Handles the "record a Foundation Phase observation" conversation.
+ * Collects raw text blocks (header + per-learner domain/status/notes)
+ * across one or more messages — a teacher can log a few learners now
+ * and add more later in the same session — then persists everything
+ * together once they reply DONE.
  * Returns true if handled (skip normal processing), false otherwise.
+ *
+ * When deps.observationState already has a pending entry with
+ * correctsAssessmentId set (placed there externally by
+ * handleObservationHistoryFlow's CORRECT command), the collected
+ * submission is saved as a correction of that assessment instead of a
+ * fresh one — see saveObservationSubmission's correctsAssessmentId param.
  *
  * @param {string} from
  * @param {string} text
@@ -139,25 +150,102 @@ async function handleObservationFlow(from, text, preClassifiedIntent, deps) {
       return true;
     }
 
-    let saveError = null;
-    try {
-      saveObservationSubmission(phoneHash, result.header, result.records, state.classId ?? null);
-    } catch (err) {
-      saveError = err;
-      console.error('[WEBHOOK] saveObservationSubmission failed:', err.message);
-    }
+    // Don't save yet — a teacher observing a class over a morning often
+    // wants to log a few learners now and add more later. Hold what's
+    // been parsed so far and let them keep appending, rather than
+    // forcing everything into one atomic message.
+    observationState.set(phoneHash, {
+      step: 'collectingRecords',
+      classId: state.classId ?? null,
+      correctsAssessmentId: state.correctsAssessmentId ?? null,
+      header: result.header,
+      records: result.records,
+      lastActivity: Date.now(),
+    });
 
-    observationState.delete(phoneHash);
+    await safeSendMessage(from,
+      `Got it — ${result.records.length} record${result.records.length === 1 ? '' : 's'} so far.\n\n` +
+      `Reply *DONE* to save, send more *Learner:* blocks to add to this same observation, or *CANCEL* to discard.`
+    );
+    return true;
+  }
 
-    if (saveError) {
+  if (state.step === 'collectingRecords') {
+    if (trimmed.toUpperCase() === 'DONE') {
+      const learnerCount = new Set(state.records.map(r => r.learnerName)).size;
+
+      let saveError = null;
+      try {
+        saveObservationSubmission(
+          phoneHash,
+          state.header,
+          state.records,
+          state.classId ?? null,
+          state.correctsAssessmentId ?? null
+        );
+      } catch (err) {
+        saveError = err;
+        console.error('[WEBHOOK] saveObservationSubmission failed:', err.message);
+      }
+
+      observationState.delete(phoneHash);
+
+      if (saveError) {
+        await safeSendMessage(from,
+          `⚠️ *Couldn't save that observation right now.* Please try sending it again in a moment.`
+        );
+        return true;
+      }
+
+      const correctionNote = state.correctsAssessmentId
+        ? `\n\n_This replaces the earlier version — the old one is now marked as corrected._`
+        : '';
+
       await safeSendMessage(from,
-        `⚠️ *Couldn't save that observation right now.* Please try sending it again in a moment.`
+        `✅ *Observation saved successfully.*\n\n` +
+        `${state.records.length} record${state.records.length === 1 ? '' : 's'} for ${learnerCount} learner${learnerCount === 1 ? '' : 's'}.` +
+        correctionNote
       );
       return true;
     }
 
+    // Anything else is treated as more records to add to this same
+    // observation — parsed and merged in rather than replacing what's
+    // already been collected.
+    const more = processObservationSubmission(text);
+
+    if (!more.success) {
+      observationState.set(phoneHash, { ...state, lastActivity: Date.now() });
+      await safeSendMessage(from,
+        `⚠️ *Couldn't read that addition:*\n\n` +
+        more.errors.map(e => `• ${e}`).join('\n') +
+        `\n\nYour ${state.records.length} earlier record${state.records.length === 1 ? '' : 's'} are still safe. ` +
+        `Reply *DONE* to save just those, try the addition again, or *CANCEL* to discard everything.`
+      );
+      return true;
+    }
+
+    // Merge headers: keep whatever was already known, only fill in
+    // fields that were still missing (header is optional per-chunk once
+    // it's already been established for this observation).
+    const mergedHeader = {
+      assessment: state.header.assessment ?? more.header.assessment,
+      grade: state.header.grade ?? more.header.grade,
+      subject: state.header.subject ?? more.header.subject,
+    };
+
+    const combinedRecords = [...state.records, ...more.records];
+
+    observationState.set(phoneHash, {
+      ...state,
+      header: mergedHeader,
+      records: combinedRecords,
+      lastActivity: Date.now(),
+    });
+
     await safeSendMessage(from,
-      `✅ *Observation saved successfully.*\n\n${result.summary}`
+      `Added ${more.records.length} more record${more.records.length === 1 ? '' : 's'}. Total so far: ${combinedRecords.length}.\n\n` +
+      `Reply *DONE* to save, add more, or *CANCEL* to discard.`
     );
     return true;
   }
@@ -204,6 +292,14 @@ function buildObservationDetailMessage(assessment, gradeLabel, analyzeObservatio
   let msg = `📋 *${gradeStr} ${assessment.subject || ''}*\n`;
   if (assessment.assessmentName) msg += `Assessment: ${assessment.assessmentName}\n`;
   msg += `${formatObservationDate(assessment.createdAt)}\n\n`;
+
+  if (assessment.correctsAssessmentId) {
+    msg += `_This is a correction of an earlier observation._\n\n`;
+  }
+  if (assessment.supersededByAssessmentId) {
+    msg += `⚠️ *This observation has since been corrected — a newer version exists.*\n\n`;
+  }
+
   msg += `Learners: ${new Set(assessment.records.map(r => r.learnerName)).size}\n`;
   msg += `Records: ${assessment.records.length}\n\n`;
   msg += `*By domain:*\n`;
@@ -214,7 +310,11 @@ function buildObservationDetailMessage(assessment, gradeLabel, analyzeObservatio
     msg += `• ${domain}: ${breakdown}\n`;
   }
 
-  const analysis = analyzeObservations(assessment.records);
+  // Resolved records are excluded from "Needs follow-up" — once a
+  // teacher has worked with a learner and marked it resolved, it
+  // shouldn't keep nagging them on every future view of this assessment.
+  const unresolvedRecords = assessment.records.filter(r => !r.resolved);
+  const analysis = analyzeObservations(unresolvedRecords);
   if (analysis.observationsOfConcern.length > 0) {
     msg += `\n⚠️ *Needs follow-up:*\n`;
     for (const c of analysis.observationsOfConcern) {
@@ -225,7 +325,16 @@ function buildObservationDetailMessage(assessment, gradeLabel, analyzeObservatio
     msg += `\n✅ No follow-up needed — all learners on track.\n`;
   }
 
-  msg += `\n_Reply *BACK* to see your other observations._`;
+  // Numbered record list, so a teacher can reference a specific one for
+  // ADD NOTE or RESOLVE. Kept separate from the domain breakdown above
+  // (which is a summary) — this is the addressable, per-record list.
+  msg += `\n*Records:*\n`;
+  assessment.records.forEach((r, i) => {
+    const resolvedTag = r.resolved ? ' ✅ resolved' : '';
+    msg += `${i + 1}. ${r.learnerName} — ${r.domain}: ${r.developmentalStatus}${resolvedTag}\n`;
+  });
+
+  msg += `\n_Reply *ADD NOTE*, *CORRECT*, *RESOLVE*, or *DELETE*, or *BACK* to see your other observations._`;
   return msg;
 }
 
@@ -249,6 +358,11 @@ async function handleObservationHistoryFlow(from, text, preClassifiedIntent, dep
     hashPhone,
     getObservationAssessment,
     analyzeObservations,
+    appendObservationNote,
+    deleteObservationAssessment,
+    resolveObservationRecord,
+    observationState,
+    getObservationFormatHelpText,
   } = deps;
 
   const phoneHash = hashPhone(from);
@@ -308,8 +422,245 @@ async function handleObservationHistoryFlow(from, text, preClassifiedIntent, dep
 
     const msg = buildObservationDetailMessage(assessment, gradeLabel, analyzeObservations);
 
-    observationHistoryState.set(phoneHash, { ...state, lastActivity: Date.now() });
+    // Move into a new 'detailShown' step so ADD NOTE / CORRECT / DELETE /
+    // RESOLVE can be handled next turn, carrying forward what's needed
+    // to act on this specific assessment and its records.
+    observationHistoryState.set(phoneHash, {
+      step: 'detailShown',
+      ids: state.ids,
+      assessmentId: assessment.id,
+      assessmentClassId: assessment.classId,
+      supersededByAssessmentId: assessment.supersededByAssessmentId,
+      recordIds: assessment.records.map(r => r.id),
+      lastActivity: Date.now(),
+    });
     await safeSendMessage(from, msg);
+    return true;
+  }
+
+  // Viewing a single assessment's detail — from here a teacher can add a
+  // note, correct, resolve a follow-up, or delete the whole thing.
+  if (state.step === 'detailShown') {
+    if (trimmed.toUpperCase() === 'BACK') {
+      return sendObservationHistoryList(from, phoneHash, deps);
+    }
+
+    if (trimmed.toUpperCase() === 'ADD NOTE') {
+      observationHistoryState.set(phoneHash, {
+        step: 'awaitingNoteRecordSelection',
+        recordIds: state.recordIds,
+        listIds: state.ids,
+        lastActivity: Date.now(),
+      });
+      await safeSendMessage(from,
+        `Which record would you like to add a note to? Reply with its number (see the list above), or *BACK* to cancel.`
+      );
+      return true;
+    }
+
+    if (trimmed.toUpperCase() === 'CORRECT') {
+      if (state.supersededByAssessmentId) {
+        // Already corrected once — point them at re-opening the list
+        // rather than letting corrections chain confusingly.
+        observationHistoryState.set(phoneHash, { ...state, lastActivity: Date.now() });
+        await safeSendMessage(from,
+          `This observation has already been corrected by a newer one. Reply *BACK* to see your other observations and open the latest version instead.`
+        );
+        return true;
+      }
+
+      // Hand off to the observation-collection flow (a different session
+      // store), tagged with correctsAssessmentId so the eventual save
+      // supersedes this assessment instead of creating an unrelated one.
+      observationHistoryState.delete(phoneHash);
+      observationState.set(phoneHash, {
+        step: 'awaitingObservationText',
+        classId: state.assessmentClassId ?? null,
+        correctsAssessmentId: state.assessmentId,
+        lastActivity: Date.now(),
+      });
+      await safeSendMessage(from,
+        `✏️ *Correcting this observation*\n\n` +
+        `Send the corrected version in full — it will replace the one you were viewing.\n\n` +
+        getObservationFormatHelpText()
+      );
+      return true;
+    }
+
+    if (trimmed.toUpperCase() === 'DELETE') {
+      observationHistoryState.set(phoneHash, {
+        step: 'awaitingDeleteConfirmation',
+        targetAssessmentId: state.assessmentId,
+        listIds: state.ids,
+        lastActivity: Date.now(),
+      });
+      await safeSendMessage(from,
+        `⚠️ Delete this observation permanently? This can't be undone.\n\nReply *CONFIRM* to delete, or *BACK* to cancel.`
+      );
+      return true;
+    }
+
+    if (trimmed.toUpperCase() === 'RESOLVE') {
+      observationHistoryState.set(phoneHash, {
+        step: 'awaitingResolveRecordSelection',
+        recordIds: state.recordIds,
+        listIds: state.ids,
+        lastActivity: Date.now(),
+      });
+      await safeSendMessage(from,
+        `Which record has been resolved? Reply with its number (see the list above), or *BACK* to cancel.`
+      );
+      return true;
+    }
+
+    observationHistoryState.set(phoneHash, { ...state, lastActivity: Date.now() });
+    await safeSendMessage(from,
+      `Reply *ADD NOTE*, *CORRECT*, *RESOLVE*, or *DELETE* for this observation, or *BACK* to see your other observations.`
+    );
+    return true;
+  }
+
+  // Teacher is confirming (or backing out of) a delete.
+  if (state.step === 'awaitingDeleteConfirmation') {
+    if (trimmed.toUpperCase() === 'CONFIRM') {
+      let result = null;
+      let deleteErr = null;
+      try {
+        result = deleteObservationAssessment(state.targetAssessmentId, phoneHash);
+      } catch (err) {
+        deleteErr = err;
+        console.error('[Workspace] deleteObservationAssessment error:', err.message);
+      }
+
+      observationHistoryState.delete(phoneHash);
+
+      if (deleteErr) {
+        await safeSendMessage(from, `⚠️ Couldn't delete that observation right now. Please try again.`);
+        return true;
+      }
+
+      if (!result) {
+        await safeSendMessage(from, `That observation was already gone.`);
+        return true;
+      }
+
+      await safeSendMessage(from, `🗑️ Observation deleted.`);
+      return true;
+    }
+
+    // Any other reply (including BACK) cancels the delete without acting.
+    observationHistoryState.set(phoneHash, {
+      step: 'listShown',
+      ids: state.listIds,
+      lastActivity: Date.now(),
+    });
+    await safeSendMessage(from,
+      `Cancelled — nothing was deleted. Reply *BACK* to see your other observations, or a number to view detail again.`
+    );
+    return true;
+  }
+
+  // Teacher is picking which record to mark resolved.
+  if (state.step === 'awaitingResolveRecordSelection') {
+    if (trimmed.toUpperCase() === 'BACK') {
+      observationHistoryState.set(phoneHash, {
+        step: 'listShown',
+        ids: state.listIds,
+        lastActivity: Date.now(),
+      });
+      await safeSendMessage(from, `Cancelled. Reply *BACK* to see your other observations, or a number to view detail again.`);
+      return true;
+    }
+
+    const recordChoice = parseInt(trimmed, 10);
+    const recordIds = state.recordIds || [];
+    if (!Number.isInteger(recordChoice) || recordChoice < 1 || recordChoice > recordIds.length) {
+      observationHistoryState.set(phoneHash, { ...state, lastActivity: Date.now() });
+      await safeSendMessage(from,
+        `Please reply with a number from 1 to ${recordIds.length}, or *BACK* to cancel.`
+      );
+      return true;
+    }
+
+    const targetRecordId = recordIds[recordChoice - 1];
+    let result = null;
+    try {
+      result = resolveObservationRecord(targetRecordId, phoneHash);
+    } catch (err) {
+      console.error('[Workspace] resolveObservationRecord error:', err.message);
+      observationHistoryState.delete(phoneHash);
+      await safeSendMessage(from, `⚠️ Couldn't mark that as resolved right now. Please try again.`);
+      return true;
+    }
+
+    observationHistoryState.delete(phoneHash);
+
+    if (!result) {
+      await safeSendMessage(from, `That record couldn't be found — it may have changed. Please view the observation again.`);
+      return true;
+    }
+
+    await safeSendMessage(from, `✅ Marked as resolved — it won't show under "Needs follow-up" anymore.`);
+    return true;
+  }
+
+  // Teacher is picking which record to annotate.
+  if (state.step === 'awaitingNoteRecordSelection') {
+    if (trimmed.toUpperCase() === 'BACK') {
+      observationHistoryState.set(phoneHash, {
+        step: 'listShown',
+        ids: state.listIds,
+        lastActivity: Date.now(),
+      });
+      await safeSendMessage(from, `Cancelled. Reply *BACK* to see your other observations, or a number to view detail again.`);
+      return true;
+    }
+
+    const recordChoice = parseInt(trimmed, 10);
+    const recordIds = state.recordIds || [];
+    if (!Number.isInteger(recordChoice) || recordChoice < 1 || recordChoice > recordIds.length) {
+      observationHistoryState.set(phoneHash, { ...state, lastActivity: Date.now() });
+      await safeSendMessage(from,
+        `Please reply with a number from 1 to ${recordIds.length}, or *BACK* to cancel.`
+      );
+      return true;
+    }
+
+    observationHistoryState.set(phoneHash, {
+      step: 'awaitingNoteText',
+      targetRecordId: recordIds[recordChoice - 1],
+      lastActivity: Date.now(),
+    });
+    await safeSendMessage(from, `What would you like to note? Send your note as a message, or *BACK* to cancel.`);
+    return true;
+  }
+
+  // Teacher is typing the note itself.
+  if (state.step === 'awaitingNoteText') {
+    if (trimmed.toUpperCase() === 'BACK') {
+      observationHistoryState.delete(phoneHash);
+      await safeSendMessage(from, `Cancelled — note not added.`);
+      return true;
+    }
+
+    let result;
+    try {
+      result = appendObservationNote(state.targetRecordId, phoneHash, trimmed);
+    } catch (err) {
+      console.error('[Workspace] appendObservationNote error:', err.message);
+      observationHistoryState.delete(phoneHash);
+      await safeSendMessage(from, `⚠️ Couldn't save that note right now. Please try again from the start.`);
+      return true;
+    }
+
+    observationHistoryState.delete(phoneHash);
+
+    if (!result) {
+      await safeSendMessage(from, `That record couldn't be found — it may have changed. Please view the observation again.`);
+      return true;
+    }
+
+    await safeSendMessage(from, `✅ Note added.`);
     return true;
   }
 

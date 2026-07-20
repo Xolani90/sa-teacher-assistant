@@ -3,14 +3,18 @@
 /**
  * Observation repository (Foundation Phase) — Phase 6.
  *
- * Thin persistence layer over observation_assessments / observation_records.
+ * Persistence layer over observation_assessments / observation_records.
  * Mirrors the shape of teacherWorkspaceService.js's saveResource() /
  * getSavedResource(): manual BEGIN/COMMIT/ROLLBACK (not db.transaction())
  * for compatibility with both better-sqlite3 (production) and the
  * node:sqlite test shim used elsewhere in this test suite.
  *
- * Deliberately minimal: save + retrieve only. No update, delete, search,
- * or listing yet — those are Phase 7+.
+ * Supports: save, retrieve, append-note, correct (insert-only "supersedes"
+ * model — see saveObservationSubmission's correctsAssessmentId), delete,
+ * and resolve-followup. There is still no true in-place UPDATE of a
+ * record's core fields (learner/domain/status) — a correction is always
+ * a brand-new assessment row that supersedes the old one, not a mutation
+ * of it. This keeps the insert-only audit trail intact.
  *
  * Callers are expected to pass the header + records shape produced by
  * utils/observationWorkflowService.js's processObservationSubmission()
@@ -40,9 +44,18 @@ const logger = require('../utils/logger').child({ module: 'observationRepository
  *   (0/1/2+ class rule). Null for teachers with 0 classes (zero-class
  *   policy) — the assessment and its learners land in the unclassed
  *   bucket.
+ * @param {number|null} [correctsAssessmentId] - If set, this submission
+ *   is a correction of an earlier assessment. The original is never
+ *   mutated or deleted (insert-only pattern) — it is simply marked as
+ *   superseded by virtue of this new row pointing back at it via
+ *   corrects_assessment_id. getObservationHistory() hides superseded
+ *   assessments by default; getObservationAssessment() on the original
+ *   still returns it, with supersededByAssessmentId set, so nothing is
+ *   silently lost. Ownership of the original is verified — a teacher
+ *   cannot "correct" another teacher's assessment.
  * @returns {{ assessmentId: number, recordCount: number }}
  */
-function saveObservationSubmission(phoneHash, header, records, classId = null) {
+function saveObservationSubmission(phoneHash, header, records, classId = null, correctsAssessmentId = null) {
   const db = getDb();
 
   if (!phoneHash) {
@@ -52,20 +65,33 @@ function saveObservationSubmission(phoneHash, header, records, classId = null) {
     throw new Error('saveObservationSubmission: records must be a non-empty array');
   }
 
+  if (correctsAssessmentId != null) {
+    const original = db.prepare(`
+      SELECT id, phone_hash FROM observation_assessments WHERE id = ?
+    `).get(correctsAssessmentId);
+    if (!original) {
+      throw new Error('saveObservationSubmission: corrects_assessment_id does not reference an existing assessment');
+    }
+    if (original.phone_hash !== phoneHash) {
+      throw new Error("saveObservationSubmission: cannot correct another teacher's assessment");
+    }
+  }
+
   try {
     let assessmentId;
     try {
       db.prepare('BEGIN').run();
 
       const assessmentResult = db.prepare(`
-        INSERT INTO observation_assessments (phone_hash, grade, subject, assessment_name, class_id)
-        VALUES (?, ?, ?, ?, ?)
+        INSERT INTO observation_assessments (phone_hash, grade, subject, assessment_name, class_id, corrects_assessment_id)
+        VALUES (?, ?, ?, ?, ?, ?)
       `).run(
         phoneHash,
         header?.grade ?? null,
         header?.subject ?? null,
         header?.assessment ?? null,
-        classId
+        classId,
+        correctsAssessmentId
       );
 
       assessmentId = assessmentResult.lastInsertRowid;
@@ -129,8 +155,11 @@ function saveObservationSubmission(phoneHash, header, records, classId = null) {
  *   grade: string|null,
  *   subject: string|null,
  *   assessmentName: string|null,
+ *   classId: number|null,
+ *   correctsAssessmentId: number|null,
+ *   supersededByAssessmentId: number|null,
  *   createdAt: string,
- *   records: Array<{ learnerName: string, domain: string, developmentalStatus: string, notes: string|null }>
+ *   records: Array<{ id: number, learnerName: string, domain: string, developmentalStatus: string, notes: string|null, resolved: boolean }>
  * }|null}
  */
 function getObservationAssessment(assessmentId) {
@@ -147,22 +176,209 @@ function getObservationAssessment(assessmentId) {
       SELECT * FROM observation_records WHERE assessment_id = ? ORDER BY id ASC
     `).all(assessmentId);
 
+    // A given assessment can be corrected at most once in normal usage
+    // (the flow blocks re-correcting an already-superseded one), but if
+    // that were ever violated, the most recent corrector wins here.
+    const supersededByRow = db.prepare(`
+      SELECT id FROM observation_assessments WHERE corrects_assessment_id = ? ORDER BY id DESC LIMIT 1
+    `).get(assessmentId);
+
     return {
       id: assessmentRow.id,
       phoneHash: assessmentRow.phone_hash,
       grade: assessmentRow.grade,
       subject: assessmentRow.subject,
       assessmentName: assessmentRow.assessment_name,
+      classId: assessmentRow.class_id,
+      correctsAssessmentId: assessmentRow.corrects_assessment_id,
+      supersededByAssessmentId: supersededByRow ? supersededByRow.id : null,
       createdAt: assessmentRow.created_at,
       records: recordRows.map((r) => ({
+        id: r.id,
         learnerName: r.learner_name,
         domain: r.domain,
         developmentalStatus: r.developmental_status,
         notes: r.notes,
+        resolved: !!r.resolved,
       })),
     };
   } catch (err) {
     logger.error('Failed to retrieve observation assessment', { assessmentId, error: err.message });
+    throw err;
+  }
+}
+
+/**
+ * Appends a timestamped note to an existing observation record.
+ * Verifies the record belongs to the calling teacher before writing —
+ * a phoneHash mismatch throws rather than silently no-op'ing, since
+ * that would indicate either a bug or a cross-teacher data leak attempt.
+ *
+ * Existing notes are preserved and the new note is appended on a new
+ * line with a date stamp, rather than overwritten — a teacher adding a
+ * follow-up observation later shouldn't lose what they wrote initially.
+ *
+ * @param {number} recordId
+ * @param {string} phoneHash - Calling teacher's phone hash, for ownership check
+ * @param {string} noteText
+ * @returns {{ recordId: number, notes: string }|null} null if record not found
+ */
+function appendObservationNote(recordId, phoneHash, noteText) {
+  const db = getDb();
+
+  if (!recordId) {
+    throw new Error('appendObservationNote: recordId is required');
+  }
+  if (!noteText || !noteText.trim()) {
+    throw new Error('appendObservationNote: noteText must not be empty');
+  }
+
+  try {
+    const row = db.prepare(`
+      SELECT r.id, r.notes, a.phone_hash
+      FROM observation_records r
+      JOIN observation_assessments a ON a.id = r.assessment_id
+      WHERE r.id = ?
+    `).get(recordId);
+
+    if (!row) return null;
+
+    if (row.phone_hash !== phoneHash) {
+      throw new Error('appendObservationNote: record does not belong to this teacher');
+    }
+
+    const dateStamp = new Date().toISOString().slice(0, 10);
+    const addition = `[${dateStamp}] ${noteText.trim()}`;
+    const updatedNotes = row.notes ? `${row.notes}\n${addition}` : addition;
+
+    db.prepare(`UPDATE observation_records SET notes = ? WHERE id = ?`).run(updatedNotes, recordId);
+
+    logger.info('Observation note appended', { phoneHash, recordId });
+
+    return { recordId, notes: updatedNotes };
+  } catch (err) {
+    logger.error('Failed to append observation note', { phoneHash, recordId, error: err.message });
+    throw err;
+  }
+}
+
+/**
+ * Permanently deletes an observation assessment and all its records.
+ * Ownership is verified before deleting — a phoneHash mismatch throws
+ * rather than silently no-op'ing.
+ *
+ * Note: if this assessment has been corrected by a later one (i.e. some
+ * other row's corrects_assessment_id points at this id), deleting it
+ * does not touch or remove that linked row — only its
+ * corrects_assessment_id link back to this assessment is cleared, in
+ * the same transaction, before the delete runs. utils/database.js runs
+ * with PRAGMA foreign_keys = ON, so corrects_assessment_id (declared
+ * with REFERENCES observation_assessments(id)) is a real, enforced FK —
+ * deleting a referenced row without first clearing that link would
+ * throw a raw "FOREIGN KEY constraint failed" error rather than the
+ * clean, documented "just behaves like no correction found" outcome.
+ * Clearing the link explicitly is what actually delivers that intended
+ * behavior: getObservationAssessment()/getObservationHistory() resolve
+ * correctsAssessmentId/supersededByAssessmentId via a fresh id lookup
+ * each time, so once the link is cleared it reads exactly like the
+ * correction was always standalone. If this assessment is itself a
+ * correction of another one (this row's own corrects_assessment_id is
+ * set), that column is simply removed along with the rest of the row —
+ * nothing else references it via that FK, so no clearing is needed on
+ * that side.
+ *
+ * @param {number} assessmentId
+ * @param {string} phoneHash - Calling teacher's phone hash, for ownership check
+ * @returns {{ assessmentId: number, deleted: true }|null} null if not found
+ */
+function deleteObservationAssessment(assessmentId, phoneHash) {
+  const db = getDb();
+
+  if (!assessmentId) {
+    throw new Error('deleteObservationAssessment: assessmentId is required');
+  }
+  if (!phoneHash) {
+    throw new Error('deleteObservationAssessment: phoneHash must not be null or empty');
+  }
+
+  try {
+    const row = db.prepare(`
+      SELECT id, phone_hash FROM observation_assessments WHERE id = ?
+    `).get(assessmentId);
+
+    if (!row) return null;
+
+    if (row.phone_hash !== phoneHash) {
+      throw new Error('deleteObservationAssessment: assessment does not belong to this teacher');
+    }
+
+    try {
+      db.prepare('BEGIN').run();
+      // Clear any forward references to this row BEFORE deleting it —
+      // required under PRAGMA foreign_keys = ON (see docstring above).
+      db.prepare('UPDATE observation_assessments SET corrects_assessment_id = NULL WHERE corrects_assessment_id = ?').run(assessmentId);
+      db.prepare('DELETE FROM observation_records WHERE assessment_id = ?').run(assessmentId);
+      db.prepare('DELETE FROM observation_assessments WHERE id = ?').run(assessmentId);
+      db.prepare('COMMIT').run();
+    } catch (txErr) {
+      try { db.prepare('ROLLBACK').run(); } catch (_) { /* best-effort */ }
+      throw txErr;
+    }
+
+    logger.info('Observation assessment deleted', { phoneHash, assessmentId });
+
+    return { assessmentId, deleted: true };
+  } catch (err) {
+    logger.error('Failed to delete observation assessment', { phoneHash, assessmentId, error: err.message });
+    throw err;
+  }
+}
+
+/**
+ * Marks a single observation record's follow-up as resolved. This is a
+ * one-way flag (no "unresolve") — a teacher who marked something
+ * resolved by mistake can still see it in the record list (it just
+ * carries a "resolved" tag there instead of showing under "Needs
+ * follow-up"), so nothing is destructively lost.
+ *
+ * Ownership is verified before writing — a phoneHash mismatch throws
+ * rather than silently no-op'ing.
+ *
+ * @param {number} recordId
+ * @param {string} phoneHash - Calling teacher's phone hash, for ownership check
+ * @returns {{ recordId: number, resolved: true }|null} null if record not found
+ */
+function resolveObservationRecord(recordId, phoneHash) {
+  const db = getDb();
+
+  if (!recordId) {
+    throw new Error('resolveObservationRecord: recordId is required');
+  }
+  if (!phoneHash) {
+    throw new Error('resolveObservationRecord: phoneHash must not be null or empty');
+  }
+
+  try {
+    const row = db.prepare(`
+      SELECT r.id, a.phone_hash
+      FROM observation_records r
+      JOIN observation_assessments a ON a.id = r.assessment_id
+      WHERE r.id = ?
+    `).get(recordId);
+
+    if (!row) return null;
+
+    if (row.phone_hash !== phoneHash) {
+      throw new Error('resolveObservationRecord: record does not belong to this teacher');
+    }
+
+    db.prepare(`UPDATE observation_records SET resolved = 1 WHERE id = ?`).run(recordId);
+
+    logger.info('Observation record resolved', { phoneHash, recordId });
+
+    return { recordId, resolved: true };
+  } catch (err) {
+    logger.error('Failed to resolve observation record', { phoneHash, recordId, error: err.message });
     throw err;
   }
 }
@@ -177,10 +393,16 @@ function getObservationAssessment(assessmentId) {
  * query-building style (dynamic WHERE clauses + params array).
  *
  * @param {string} phoneHash - Teacher's phone hash
- * @param {{ grade?: string, subject?: string, learnerName?: string, limit?: number }} [filters]
+ * @param {{ grade?: string, subject?: string, learnerName?: string, limit?: number, includeSuperseded?: boolean }} [filters]
  *   learnerName is matched case-insensitively, consistent with
  *   observationGroupingService.js's groupByLearner() dedup convention —
  *   "sipho" and "Sipho" are the same learner throughout this pipeline.
+ *   includeSuperseded (default false): an assessment that has since been
+ *   corrected (see saveObservationSubmission's correctsAssessmentId) is
+ *   excluded from the list by default, since the corrected version is
+ *   what the teacher actually wants to see going forward. The original
+ *   row is never deleted, so it's still reachable via
+ *   getObservationAssessment() directly, or by passing includeSuperseded.
  * @returns {Array<{
  *   id: number,
  *   phoneHash: string,
@@ -219,6 +441,15 @@ function getObservationHistory(phoneHash, filters = {}) {
     if (filters.subject) {
       query += ` AND a.subject = ?`;
       params.push(filters.subject);
+    }
+
+    // Excludes assessments that have since been corrected (another row
+    // pointing back at this one via corrects_assessment_id) unless the
+    // caller explicitly opts in — see filters.includeSuperseded above.
+    if (!filters.includeSuperseded) {
+      query += ` AND NOT EXISTS (
+        SELECT 1 FROM observation_assessments s WHERE s.corrects_assessment_id = a.id
+      )`;
     }
 
     // Subquery rather than filtering the LEFT JOIN directly — filtering the
@@ -274,4 +505,7 @@ module.exports = {
   saveObservationSubmission,
   getObservationAssessment,
   getObservationHistory,
+  appendObservationNote,
+  deleteObservationAssessment,
+  resolveObservationRecord,
 };
