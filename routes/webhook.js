@@ -35,6 +35,7 @@ const { buildFullInterventionPlanPrompt } = require('../prompts/fullIntervention
 const { processObservationSubmission } = require('../utils/observationWorkflowService');
 const { getObservationFormatHelpText } = require('../utils/observationParser');
 const { saveObservationSubmission, getObservationHistory, getObservationAssessment } = require('../services/observationRepository');
+const { analyzeObservations } = require('../services/observationAnalysisService');
 // ADR-004: class-context resolution for assessment/observation flows.
 const { getTeacherClasses } = require('../services/teacherWorkspaceService');
 const { formatClassSelectionPrompt, matchClassSelection } = require('../utils/classContext');
@@ -197,6 +198,7 @@ function buildObservationDeps() {
     saveObservationSubmission,
     getObservationHistory,
     getObservationAssessment,
+    analyzeObservations,
     getTeacherClasses, // ADR-004: class-context resolution
     formatClassSelectionPrompt,
     matchClassSelection,

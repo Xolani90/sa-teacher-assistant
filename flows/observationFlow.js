@@ -177,6 +177,59 @@ function formatObservationDate(createdAt) {
 }
 
 /**
+ * Builds the MY OBSERVATIONS detail-view message for a single saved
+ * assessment: header, per-domain count breakdown, and — critically — the
+ * specific learners who need follow-up, sourced from analyzeObservations()
+ * (learner + domain + status + notes for every "Not Yet", and every
+ * "Developing" with notes). Previously the detail view only showed tallies;
+ * this is the actionable part teachers actually need.
+ *
+ * Exported via __testExports for regression coverage.
+ *
+ * @param {object} assessment
+ * @param {(grade: any) => string} gradeLabel
+ * @param {(records: Array) => {observationsOfConcern: Array}} analyzeObservations
+ * @returns {string}
+ */
+function buildObservationDetailMessage(assessment, gradeLabel, analyzeObservations) {
+  // Group records by domain for a short breakdown (counts only —
+  // no invented commentary beyond what's actually in the records).
+  const byDomain = {};
+  for (const r of assessment.records) {
+    if (!byDomain[r.domain]) byDomain[r.domain] = [];
+    byDomain[r.domain].push(r.developmentalStatus);
+  }
+
+  const gradeStr = assessment.grade != null ? gradeLabel(assessment.grade === '0' || assessment.grade === 0 ? 0 : assessment.grade) : '—';
+  let msg = `📋 *${gradeStr} ${assessment.subject || ''}*\n`;
+  if (assessment.assessmentName) msg += `Assessment: ${assessment.assessmentName}\n`;
+  msg += `${formatObservationDate(assessment.createdAt)}\n\n`;
+  msg += `Learners: ${new Set(assessment.records.map(r => r.learnerName)).size}\n`;
+  msg += `Records: ${assessment.records.length}\n\n`;
+  msg += `*By domain:*\n`;
+  for (const [domain, statuses] of Object.entries(byDomain)) {
+    const counts = {};
+    for (const s of statuses) counts[s] = (counts[s] || 0) + 1;
+    const breakdown = Object.entries(counts).map(([s, n]) => `${n} ${s}`).join(', ');
+    msg += `• ${domain}: ${breakdown}\n`;
+  }
+
+  const analysis = analyzeObservations(assessment.records);
+  if (analysis.observationsOfConcern.length > 0) {
+    msg += `\n⚠️ *Needs follow-up:*\n`;
+    for (const c of analysis.observationsOfConcern) {
+      msg += `• ${c.learnerName} — ${c.domain}: ${c.status}\n`;
+      if (c.notes) msg += `   "${c.notes}"\n`;
+    }
+  } else {
+    msg += `\n✅ No follow-up needed — all learners on track.\n`;
+  }
+
+  msg += `\n_Reply *BACK* to see your other observations._`;
+  return msg;
+}
+
+/**
  * Handles MY OBSERVATIONS: shows the teacher's recent saved observation
  * assessments, then lets them reply with a number to view that
  * assessment's detail (learner/record counts, per-domain breakdown).
@@ -195,6 +248,7 @@ async function handleObservationHistoryFlow(from, text, preClassifiedIntent, dep
     gradeLabel,
     hashPhone,
     getObservationAssessment,
+    analyzeObservations,
   } = deps;
 
   const phoneHash = hashPhone(from);
@@ -252,28 +306,7 @@ async function handleObservationHistoryFlow(from, text, preClassifiedIntent, dep
       return true;
     }
 
-    // Group records by domain for a short breakdown (counts only —
-    // no invented commentary beyond what's actually in the records).
-    const byDomain = {};
-    for (const r of assessment.records) {
-      if (!byDomain[r.domain]) byDomain[r.domain] = [];
-      byDomain[r.domain].push(r.developmentalStatus);
-    }
-
-    const gradeStr = assessment.grade != null ? gradeLabel(assessment.grade === '0' || assessment.grade === 0 ? 0 : assessment.grade) : '—';
-    let msg = `📋 *${gradeStr} ${assessment.subject || ''}*\n`;
-    if (assessment.assessmentName) msg += `Assessment: ${assessment.assessmentName}\n`;
-    msg += `${formatObservationDate(assessment.createdAt)}\n\n`;
-    msg += `Learners: ${new Set(assessment.records.map(r => r.learnerName)).size}\n`;
-    msg += `Records: ${assessment.records.length}\n\n`;
-    msg += `*By domain:*\n`;
-    for (const [domain, statuses] of Object.entries(byDomain)) {
-      const counts = {};
-      for (const s of statuses) counts[s] = (counts[s] || 0) + 1;
-      const breakdown = Object.entries(counts).map(([s, n]) => `${n} ${s}`).join(', ');
-      msg += `• ${domain}: ${breakdown}\n`;
-    }
-    msg += `\n_Reply *BACK* to see your other observations._`;
+    const msg = buildObservationDetailMessage(assessment, gradeLabel, analyzeObservations);
 
     observationHistoryState.set(phoneHash, { ...state, lastActivity: Date.now() });
     await safeSendMessage(from, msg);
@@ -338,4 +371,8 @@ module.exports = {
   handleObservationHistoryFlow,
   formatObservationDate,
   sendObservationHistoryList,
+  buildObservationDetailMessage,
+  __testExports: {
+    buildObservationDetailMessage,
+  },
 };
