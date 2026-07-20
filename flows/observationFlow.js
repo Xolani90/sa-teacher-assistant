@@ -261,7 +261,7 @@ async function handleObservationHistoryFlow(from, text, preClassifiedIntent, dep
     }
 
     const gradeStr = assessment.grade != null ? gradeLabel(assessment.grade === '0' || assessment.grade === 0 ? 0 : assessment.grade) : '—';
-    let msg = `📋 *Grade ${gradeStr} ${assessment.subject || ''}*\n`;
+    let msg = `📋 *${gradeStr} ${assessment.subject || ''}*\n`;
     if (assessment.assessmentName) msg += `Assessment: ${assessment.assessmentName}\n`;
     msg += `${formatObservationDate(assessment.createdAt)}\n\n`;
     msg += `Learners: ${new Set(assessment.records.map(r => r.learnerName)).size}\n`;
@@ -316,7 +316,7 @@ async function sendObservationHistoryList(from, phoneHash, deps) {
   let msg = `👀 *My Observations*\n\nHere are your most recent observations:\n\n`;
   history.forEach((h, i) => {
     const gradeStr = h.grade != null ? gradeLabel(h.grade === '0' || h.grade === 0 ? 0 : h.grade) : '—';
-    msg += `${i + 1}. Grade ${gradeStr} • ${h.subject || 'General'}\n`;
+    msg += `${i + 1}. ${gradeStr} • ${h.subject || 'General'}\n`;
     if (h.assessmentName) msg += `   "${h.assessmentName}"\n`;
     msg += `   ${formatObservationDate(h.createdAt)}\n`;
     msg += `   ${h.learnerCount} learner${h.learnerCount === 1 ? '' : 's'}\n\n`;
