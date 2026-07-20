@@ -222,7 +222,7 @@ function buildWorksheetDeps() {
 const { handleAssessmentFlow } = require('../flows/assessmentFlow');
 
 // ── Generation pipeline module (extracted from this file) ──────────────────
-const { triggerGeneration } = require('../core/generationPipeline');
+const { triggerGeneration, buildPdfUrl } = require('../core/generationPipeline');
 
 function buildGenerationDeps() {
   return Object.freeze({

@@ -355,4 +355,4 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
   console.log(`[WEBHOOK] Response delivered to ...${String(from || '').slice(-4)}`);
 }
 
-module.exports = { triggerGeneration };
+module.exports = { triggerGeneration, buildPdfUrl };

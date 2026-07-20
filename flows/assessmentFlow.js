@@ -498,12 +498,11 @@ async function handleAssessmentFlow(from, text, message = null, preClassifiedInt
         console.error('[DataAssessment] Failed to persist fallback report:', saveErr.message);
       }
       await safeSendMessage(from,
-        '📄 *Intervention plan ready.* Reply *REPORT* to receive the full diagnostic PDF with:\n' +
+        '⚠️ *We couldn\'t generate the AI intervention plan right now* — please try again shortly.\n\n' +
+        'Your assessment analysis (Steps 1–5) was saved. Reply *REPORT* to receive a diagnostic PDF with:\n' +
         '• Complete item analysis table\n' +
-        '• Error analysis by CAPS topic\n' +
-        '• Intervention plan for each learner group\n' +
-        '• Reteaching recommendations\n\n' +
-        'Or ask for a *parent report*, *HOD report*, *moderation pack*, or *differentiated activities*.'
+        '• Error analysis by CAPS topic\n\n' +
+        '_The intervention plan, differentiated activities, and reteaching plan sections aren\'t included in that PDF yet — we\'re sorry for the inconvenience._'
       );
     }
 
