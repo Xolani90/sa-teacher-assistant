@@ -218,7 +218,7 @@ function buildObservationDetailMessage(assessment, gradeLabel, analyzeObservatio
   if (analysis.observationsOfConcern.length > 0) {
     msg += `\n⚠️ *Needs follow-up:*\n`;
     for (const c of analysis.observationsOfConcern) {
-      msg += `• ${c.learnerName} — ${c.domain}: ${c.status}\n`;
+      msg += `• ${c.learnerName} — ${c.domain}: ${c.developmentalStatus}\n`;
       if (c.notes) msg += `   "${c.notes}"\n`;
     }
   } else {
