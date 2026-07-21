@@ -14,6 +14,7 @@ const { groupLearners } = require('./learnerGroupingService');
 const { generateInterventionPlan } = require('./interventionPlanService');
 const { generateInterventionReport, generateTeacherSummary } = require('./interventionReportsService');
 const { updateCoverageFromAssessment } = require('./curriculumCoverageService');
+const { validateLearnerResultsAgainstBlueprint } = require('./blueprintMarksImport');
 
 /**
  * Processes uploaded assessment data through the complete diagnostic workflow.
@@ -32,6 +33,43 @@ function processAssessmentData(phoneHash, assessmentData) {
     return { error: 'Failed to store assessment data' };
   }
 
+  // Step 1a: if this assessment was created from a published Blueprint
+  // (ADR-005, assessmentData.blueprintId), validate every learner's
+  // per-question marks against blueprint_questions.max_marks BEFORE
+  // storing anything, rather than accepting free-form question_data.
+  // A learner whose marks fail blueprint validation (unknown question
+  // number, marks exceeding max_marks, non-numeric) is skipped here —
+  // same "skip the bad row, don't corrupt the whole class's stats"
+  // policy storeLearnerResults() already applies to malformed
+  // total/mark values on the non-blueprint path.
+  let learnerResults = assessmentData.learnerResults;
+  let blueprintSkipped = [];
+
+  if (assessmentData.blueprintId) {
+    const { results: blueprintResults } = validateLearnerResultsAgainstBlueprint(
+      assessmentData.blueprintId,
+      learnerResults
+    );
+    const validationByName = new Map(blueprintResults.map((r) => [r.learnerName, r]));
+
+    learnerResults = learnerResults.filter((result) => {
+      const check = validationByName.get(result.learnerName);
+      if (!check || !check.valid) {
+        blueprintSkipped.push(result.learnerName || '(unnamed)');
+        return false;
+      }
+      // mark/totalMarks are derived from the blueprint, not trusted from
+      // the caller — total is the sum of validated per-question marks,
+      // totalMarks is the blueprint's declared total (blueprint_questions
+      // sum, mirrored on assessment_blueprints.total_marks), so a
+      // learner's percentage can never disagree with their own
+      // per-question breakdown.
+      result.mark = check.total;
+      result.totalMarks = assessmentData.totalMarks;
+      return true;
+    });
+  }
+
   // Step 2: Store learner results
   // classId comes from assessmentData.classId, resolved by the calling
   // flow per ADR-004 before processAssessmentData() is invoked; null for
@@ -39,13 +77,15 @@ function processAssessmentData(phoneHash, assessmentData) {
   const storeResult = storeLearnerResults(
     phoneHash,
     assessmentId,
-    assessmentData.learnerResults,
+    learnerResults,
     assessmentData.classId ?? null
   );
 
   if (!storeResult.success) {
     return { error: 'Failed to store learner results' };
   }
+
+  storeResult.skipped = [...blueprintSkipped, ...storeResult.skipped];
 
   // Step 3: Run item analysis
   const itemAnalysis = performItemAnalysis(assessmentId);
@@ -116,8 +156,8 @@ function storeAssessment(phoneHash, assessmentData) {
   try {
     const result = db.prepare(`
       INSERT INTO assessments (
-        phone_hash, title, grade, subject, term, assessment_type, total_marks, atp_topics, class_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        phone_hash, title, grade, subject, term, assessment_type, total_marks, atp_topics, class_id, blueprint_id, blueprint_version
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       phoneHash,
       assessmentData.title,
@@ -129,7 +169,12 @@ function storeAssessment(phoneHash, assessmentData) {
       JSON.stringify(assessmentData.atpTopics || []),
       // ADR-004: null for teachers with 0 classes (zero-class policy) or
       // when the calling flow hasn't resolved class context yet.
-      assessmentData.classId ?? null
+      assessmentData.classId ?? null,
+      // ADR-005/Migration 030: both null for an assessment created
+      // without going through the blueprint flow — every existing
+      // caller of storeAssessment() continues to work unchanged.
+      assessmentData.blueprintId ?? null,
+      assessmentData.blueprintVersion ?? null
     );
 
     return result.lastInsertRowid;

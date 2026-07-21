@@ -195,6 +195,58 @@ function runMigrations() {
       FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
       UNIQUE(phone_hash, grade, subject, term, topic)
     );
+
+    -- ── Assessment Blueprints (ADR-005) ───────────────────────────────────
+    -- Reusable, versioned, CAPS-validated question metadata, decoupled
+    -- from any single assessment run. assessments.blueprint_id (added
+    -- below, Migration 029) is nullable — existing and future
+    -- assessments work identically with or without a blueprint. This
+    -- table does not replace or duplicate assessments/learner_results/
+    -- item_analysis/error_analysis/intervention_plans/
+    -- curriculum_coverage; those are unchanged and are consumed exactly
+    -- as they are today regardless of whether an assessment originated
+    -- from a blueprint.
+    CREATE TABLE IF NOT EXISTS assessment_blueprints (
+      id                INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash        TEXT    NOT NULL,
+      title             TEXT    NOT NULL,
+      subject           TEXT    NOT NULL,
+      grade             INTEGER NOT NULL,
+      term              INTEGER,
+      total_marks       INTEGER NOT NULL,
+      version           INTEGER NOT NULL DEFAULT 1,
+      previous_version_id INTEGER REFERENCES assessment_blueprints(id),
+      status            TEXT    NOT NULL DEFAULT 'draft',
+      -- draft | published | archived
+      created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
+    );
+
+    -- ── Blueprint Questions (ADR-005) ──────────────────────────────────────
+    -- topic is required and CAPS-validated against CAPS_TOPICS
+    -- (curriculumIntelligenceService.js) at write time by the
+    -- application layer — not enforced at the SQLite layer, matching
+    -- how every other free-text/validated field in this schema (e.g.
+    -- assessments.subject) is handled. Remaining metadata columns are
+    -- nullable per ADR-005 Section 4 — Phase 1 populates only
+    -- question_number, topic, and max_marks; subtopic/bloom_level/
+    -- atp_reference/expected_misconception remain NULL until a later
+    -- phase needs them, avoiding a second schema migration.
+    CREATE TABLE IF NOT EXISTS blueprint_questions (
+      id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+      blueprint_id            INTEGER NOT NULL,
+      question_number         INTEGER NOT NULL,
+      topic                   TEXT    NOT NULL,
+      subtopic                TEXT,
+      bloom_level              TEXT,
+      atp_reference            TEXT,
+      expected_misconception  TEXT,
+      max_marks               INTEGER NOT NULL,
+      created_at              TEXT    NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (blueprint_id) REFERENCES assessment_blueprints(id)
+        ON DELETE CASCADE
+    );
   `);
 
   // ── Additive migrations (safe to re-run) ───────────────────────
@@ -277,6 +329,29 @@ function runMigrations() {
     // to avoid this happening again.
     `ALTER TABLE observation_assessments ADD COLUMN corrects_assessment_id INTEGER REFERENCES observation_assessments(id)`,
     `ALTER TABLE observation_records ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0`,
+
+    // Migration 029: link assessments to an optional blueprint
+    // (ADR-005). Nullable and purely additive — every existing
+    // assessments row, and every assessment created without going
+    // through the blueprint flow, continues to work identically with
+    // blueprint_id NULL. REPORT / HOD REPORT / PARENT REPORT and the
+    // Upload Marks flow require zero changes: they read from
+    // learner_results/item_analysis/error_analysis/intervention_plans,
+    // none of which this migration touches.
+    `ALTER TABLE assessments ADD COLUMN blueprint_id INTEGER REFERENCES assessment_blueprints(id)`,
+
+    // Migration 030: snapshot the blueprint's version at the moment this
+    // assessment (AssessmentInstance, ADR-005 Section 4) was created.
+    // Nullable and purely additive, same as blueprint_id above. Needed
+    // because Blueprints are versioned-not-mutable (ADR-005 Section 5):
+    // if a teacher later revises a published blueprint (Fractions Test
+    // v1 -> v2), assessments already administered against v1 must keep
+    // reporting against the questions/topics as they existed at v1, not
+    // silently pick up v2's corrections. blueprint_id alone only tells
+    // you which blueprint lineage was used, not which version — this
+    // column is what lets a report reconstruct "what this class actually
+    // wrote," independent of any later revision to the same blueprint_id.
+    `ALTER TABLE assessments ADD COLUMN blueprint_version INTEGER`,
 
     // Migration 019 and Migration 021 (grade data-repair) were moved out of
     // this array — see dataRepairMigrations below. They are UPDATE
@@ -607,6 +682,17 @@ function runMigrations() {
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_observation_assessments_corrects
       ON observation_assessments(corrects_assessment_id);
+  `);
+
+  // Indexes for Migration 029's assessment_blueprints /
+  // blueprint_questions / assessments.blueprint_id.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_assessment_blueprints_phone
+      ON assessment_blueprints(phone_hash);
+    CREATE INDEX IF NOT EXISTS idx_blueprint_questions_blueprint
+      ON blueprint_questions(blueprint_id);
+    CREATE INDEX IF NOT EXISTS idx_assessments_blueprint
+      ON assessments(blueprint_id);
   `);
 
   console.log('[DB] Migrations complete');
