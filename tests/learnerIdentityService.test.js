@@ -138,6 +138,20 @@ test('a learner created with class_id NULL is never moved when later resolved wi
   assert.strictEqual(stillUnclassed.class_id, null);
 });
 
+// ADR-003 intentionally uses exact normalized-string equality.
+// Fuzzy or partial-name matching is deferred to future ADR work.
+// "Sipho" and "Sipho Dlamini" must remain distinct identities.
+test('does not merge partial names', () => {
+  const learner1 = resolveLearner({ phoneHash: 't1', classId: 6, learnerName: 'Sipho' });
+  const learner2 = resolveLearner({ phoneHash: 't1', classId: 6, learnerName: 'Sipho Dlamini' });
+
+  assert.notStrictEqual(
+    learner1.id,
+    learner2.id,
+    'Partial/full names should remain distinct learners under ADR-003'
+  );
+});
+
 // --- concurrent duplicate protection (simulated) ---
 test('resolveLearner recovers via re-find when createLearner hits a UNIQUE violation', () => {
   // Pre-create the row "out from under" resolveLearner, simulating a
