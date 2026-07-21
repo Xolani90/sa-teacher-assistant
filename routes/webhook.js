@@ -2386,14 +2386,14 @@ async function processMessage(message) {
     // Route straight through without classifying — each handler will
     // recognize its own state and continue. Order matches the dispatch
     // order below so behavior is identical to the classified path.
+    if (await handleObservationFlow(from, text, null, buildObservationDeps())) return;
+    if (await handleObservationHistoryFlow(from, text, null, buildObservationDeps())) return;
     if (await handleReportCommentFlow(from, text)) return;
     if (await handleProfileUpdateFlow(from, text)) return;
     if (await handleParentMessageFlow(from, text)) return;
     if (await handleAssessmentFlow(from, text, message, null, buildAssessmentDeps())) return;
     if (await handleAssessmentAnalysisFlow(from, text)) return;
     if (await handleInterventionPlanFlow(from, text)) return;
-    if (await handleObservationFlow(from, text, null, buildObservationDeps())) return;
-    if (await handleObservationHistoryFlow(from, text, null, buildObservationDeps())) return;
     // Defensive fallback: state existed a moment ago but no handler
     // claimed it (e.g. TTL expired between the check above and now) —
     // fall through to normal classification below.
@@ -2430,6 +2430,20 @@ async function processMessage(message) {
     console.log(`[WEBHOOK] Intent classified via ${intent._source}: ${intent.type}`);
   }
 
+  // ── Observation multi-turn flow ─────────────────────────────────────
+  // Checked first: these handlers look at their own session state and
+  // cheaply return false if there's none, so this is a pure ordering
+  // change. Must precede the other flows below, since any one of them
+  // can hijack a message meant for an active observation session if
+  // their own intent classifier guesses wrong on ambiguous text like
+  // "Add note" or "Delete" (see routing-order regression test).
+  const observationHandled = await handleObservationFlow(from, text, intent, buildObservationDeps());
+  if (observationHandled) return;
+
+  // ── Observation history multi-turn flow (list + numbered selection) ────
+  const observationHistoryHandled = await handleObservationHistoryFlow(from, text, intent, buildObservationDeps());
+  if (observationHistoryHandled) return;
+
   // ── Report comment multi-turn flow ─────────────────────────────
   const reportCommentHandled = await handleReportCommentFlow(from, text, intent);
   if (reportCommentHandled) return;
@@ -2457,14 +2471,6 @@ async function processMessage(message) {
   // ── Intervention plan / SBA support multi-turn flow (Pro) ───────────
   const interventionPlanHandled = await handleInterventionPlanFlow(from, text, intent);
   if (interventionPlanHandled) return;
-
-  // ── Observation multi-turn flow ─────────────────────────────────────
-  const observationHandled = await handleObservationFlow(from, text, intent, buildObservationDeps());
-  if (observationHandled) return;
-
-  // ── Observation history multi-turn flow (list + numbered selection) ────
-  const observationHistoryHandled = await handleObservationHistoryFlow(from, text, intent, buildObservationDeps());
-  if (observationHistoryHandled) return;
 
   // ── Conversational intents (GREETING, SMALL_TALK, EMOTIONAL_SUPPORT, THANKS, UNKNOWN) ─
   // These should NEVER consume quota, generate PDFs, or invoke content-generation workflows.
