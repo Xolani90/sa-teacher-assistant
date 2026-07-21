@@ -14,6 +14,15 @@
 'use strict';
 
 const { validateAtpWeeks } = require('../utils/atpWeekValidator');
+const { resolveCurrentTopic, topicMatchesCurrentATP } = require('../services/curriculumIntelligenceService');
+
+// Types whose content is tied to a specific CAPS topic and should be
+// grounded against the ATP (rather than left to the AI to free-associate
+// a topic, or the classifier to guess one). atp/curriculumQuery/rubric/
+// moderationPack/assessmentAnalysis/reportComment/parentMessage etc. are
+// intentionally excluded — they either have no single topic, or (rubric/
+// moderationPack) wrap an existing task that already carries its own topic.
+const ATP_GROUNDED_TYPES = ['lessonPlan', 'worksheet', 'test', 'examPaper', 'sbaTask', 'quickQuiz'];
 
 /**
  * Builds the signed, time-limited download URL for a generated PDF.
@@ -153,6 +162,41 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
           : intent.marks,
   });
 
+  // ── Ground topic against the ATP ────────────────────────────────
+  // Fixes the "Algebraic Equations in Term 3" class of bug: previously
+  // intent.topic was passed straight into the prompt with no connection to
+  // the ATP the app itself generates, so an under-specified request left
+  // the AI free to invent a plausible-but-wrong topic. Resolve the
+  // effective grade/subject the same way the rest of this function does
+  // (intent, falling back to teacher profile), then either fill in a
+  // missing topic from the current ATP week, or softly flag one that
+  // doesn't match — never block, since teachers legitimately revisit or
+  // work ahead of the ATP.
+  let atpTopicWarning = null;
+  if (ATP_GROUNDED_TYPES.includes(intent.type)) {
+    const effGrade   = intent.grade != null ? intent.grade : (teacher?.grade ?? null);
+    const effSubject = intent.subject !== 'general' ? intent.subject : (teacher?.subject || null);
+
+    if (effGrade != null && effSubject) {
+      if (!intent.topic) {
+        const resolved = resolveCurrentTopic(effGrade, effSubject);
+        if (resolved) {
+          intent.topic = resolved.topic;
+          intent.atpTopic = true;
+          intent.term = resolved.term;
+        }
+      } else {
+        const check = topicMatchesCurrentATP(effGrade, effSubject, intent.topic);
+        if (check.checked && !check.matches) {
+          atpTopicWarning =
+            `ℹ️ _Heads up: "${intent.topic}" isn't in this term's ATP for ${gradeLabel(effGrade)} — ` +
+            `this term's topics are: ${check.currentTermTopics.join(', ')}. ` +
+            `Generating it anyway in case you're revisiting or working ahead._`;
+        }
+      }
+    }
+  }
+
   // ── Generate content ──────────────────────────────────────────
   const profile = {
     grade:   teacher?.grade   ?? null,
@@ -220,6 +264,9 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
   try {
     await safeSendMessage(from, finalContent);
     usageCommitted = true;
+    if (atpTopicWarning) {
+      await safeSendMessage(from, atpTopicWarning).catch(() => {}); // best-effort, never block delivery
+    }
   } catch (sendErr) {
     console.error('[WEBHOOK] Delivery of generated content failed:', sendErr.message);
     rollbackUsage(quota, from);

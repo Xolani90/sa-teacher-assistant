@@ -27,24 +27,33 @@ const SA_SCHOOL_CALENDAR = {
 
 // ── CAPS Topics — expanded to cover all common SA subjects & grades ──────────
 const CAPS_TOPICS = {
+  // NOTE (fixed — see PROJECT_STATUS.md "ATP/lesson-plan topic drift"):
+  // Grades 7-9 previously repeated almost the SAME full-year topic list in
+  // all 4 terms (e.g. "Algebraic equations" appeared in every term's array
+  // for Grade 7), so any code trusting this table as "what's the current
+  // topic" could return a topic from the wrong term entirely. Re-derived
+  // from the official 2026 DBE Senior Phase Mathematics ATPs
+  // (education.gov.za) so each topic appears only in the term it is
+  // actually taught in. FET (10-12) below was already term-specific and is
+  // unchanged.
   mathematics: {
     7: {
-      1: ['Whole numbers','Exponents','Integers','Common fractions','Decimal fractions','Numeric patterns','Geometric patterns','Functions & relationships','Algebraic expressions','Algebraic equations','Geometry of 2D shapes','Geometry of 3D objects','Transformation geometry'],
-      2: ['Whole numbers','Exponents','Integers','Common fractions','Decimal fractions','Numeric patterns','Geometric patterns','Functions & relationships','Algebraic expressions','Algebraic equations','Geometry of straight lines','Geometry of 2D shapes','Transformation geometry'],
-      3: ['Whole numbers','Exponents','Integers','Common fractions','Decimal fractions','Numeric patterns','Geometric patterns','Functions & relationships','Algebraic expressions','Algebraic equations','Geometry of 2D shapes','Geometry of 3D objects','Transformation geometry','Probability'],
-      4: ['Whole numbers','Exponents','Integers','Common fractions','Decimal fractions','Numeric patterns','Geometric patterns','Functions & relationships','Algebraic expressions','Algebraic equations','Geometry of 2D shapes','Geometry of 3D objects','Transformation geometry','Data handling'],
+      1: ['Integers','Common fractions','Numeric and geometric patterns','Functions and relationships'],
+      2: ['Decimal fractions','Exponents','Algebraic expressions','Graphs'],
+      3: ['Geometry of 2D shapes','Geometric constructions','Transformation geometry','Area and perimeter of 2D shapes','Surface area and volume'],
+      4: ['Measurement — time, distance and speed','Data handling','Probability'],
     },
     8: {
-      1: ['Integers','Exponents','Numeric patterns','Geometric patterns','Functions & relationships','Algebraic expressions','Algebraic equations','Geometry of 2D shapes','Geometry of 3D objects','Transformation geometry','Geometry of straight lines'],
-      2: ['Common fractions','Decimal fractions','Exponents','Numeric patterns','Geometric patterns','Functions & relationships','Algebraic expressions','Algebraic equations','Geometry of straight lines','Transformation geometry'],
-      3: ['Integers','Common fractions','Decimal fractions','Exponents','Numeric patterns','Functions & relationships','Algebraic expressions','Algebraic equations','Geometry of 2D shapes','Geometry of 3D objects','Probability'],
-      4: ['Integers','Common fractions','Decimal fractions','Exponents','Functions & relationships','Algebraic expressions','Algebraic equations','Geometry of 2D shapes','Geometry of 3D objects','Transformation geometry','Data handling'],
+      1: ['Whole numbers','Integers','Common fractions','Decimal fractions','Numeric and geometric patterns'],
+      2: ['Exponents','Algebraic expressions','Algebraic equations','Functions and relationships','Graphs'],
+      3: ['Data handling','Geometry of straight lines','Geometry of 2D shapes','Probability'],
+      4: ['Theorem of Pythagoras','Transformation geometry','Area and perimeter of 2D shapes','Surface area and volume of 3D objects'],
     },
     9: {
-      1: ['Integers','Exponents','Numbers — scientific notation','Numeric patterns','Functions & relationships','Algebraic expressions','Algebraic equations','Geometry of 2D shapes','Transformation geometry'],
-      2: ['Common fractions','Decimal fractions','Ratio & rate','Numbers — scientific notation','Functions & relationships','Algebraic expressions','Algebraic equations','Geometry of straight lines','Transformation geometry'],
-      3: ['Integers','Rational numbers','Exponents','Numeric patterns','Functions & relationships','Algebraic expressions','Algebraic equations','Geometry of 2D shapes','Geometry of 3D objects','Probability'],
-      4: ['Rational numbers','Exponents','Functions & relationships','Algebraic expressions','Algebraic equations','Geometry of 2D shapes','Geometry of 3D objects','Transformation geometry','Data handling'],
+      1: ['Whole numbers','Integers','Exponents','Numeric and geometric patterns','Functions and relationships','Algebraic expressions'],
+      2: ['Algebraic expressions','Algebraic equations','Graphs','Geometry of straight lines'],
+      3: ['Geometry of 2D shapes','Area and perimeter','Data handling','Probability'],
+      4: ['Geometry of 3D objects','Surface area and volume of 3D objects','Transformation geometry'],
     },
     10: {
       1: ['Algebraic expressions','Exponents','Equations & inequalities','Euclidean geometry','Trigonometry','Functions'],
@@ -272,6 +281,66 @@ function getTermTopics(grade, subject, term) {
   return (CAPS_TOPICS[key] && CAPS_TOPICS[key][grade] && CAPS_TOPICS[key][grade][term]) || [];
 }
 
+/**
+ * Resolves "the topic a teacher should be teaching right now" for a
+ * grade/subject, using today's date and this service's ATP topic table —
+ * the single source of truth for curriculum position. Used by
+ * core/generationPipeline.js to fill in intent.topic when the teacher (or
+ * the intent classifier) didn't provide one, instead of letting the AI
+ * prompt free-associate a topic from general CAPS knowledge.
+ *
+ * @param {number} grade
+ * @param {string} subject
+ * @param {Date} [date]
+ * @returns {{ topic: string, term: number, weekInTerm: number|null }|null}
+ *   null if no ATP reference data exists for this grade/subject.
+ */
+function resolveCurrentTopic(grade, subject, date = new Date()) {
+  const atpInfo = getCurrentATPWeek(date);
+  const term = atpInfo.isInTerm ? atpInfo.term : (atpInfo.nextTerm || atpInfo.term);
+  const weekInTerm = atpInfo.isInTerm ? atpInfo.weekInTerm : 1;
+
+  const termTopics = getTermTopics(grade, subject, term);
+  if (!termTopics.length) return null;
+
+  const { currentTopics } = getTopicsForWeek(grade, subject, term, weekInTerm);
+  const topic = (currentTopics[0] || termTopics[0]);
+
+  return { topic, term, weekInTerm: atpInfo.isInTerm ? weekInTerm : null };
+}
+
+/**
+ * Checks whether a teacher-provided topic string plausibly belongs to the
+ * CURRENT term's ATP for a grade/subject. Deliberately loose (word-overlap,
+ * not exact match) — teachers legitimately revisit earlier topics or work
+ * ahead, so this is used to WARN, never to block generation.
+ *
+ * @param {number} grade
+ * @param {string} subject
+ * @param {string} topic
+ * @param {Date} [date]
+ * @returns {{ checked: boolean, matches: boolean, currentTermTopics: string[] }}
+ *   checked: false if there's no ATP reference data to check against.
+ */
+function topicMatchesCurrentATP(grade, subject, topic, date = new Date()) {
+  if (!topic) return { checked: false, matches: true, currentTermTopics: [] };
+
+  const atpInfo = getCurrentATPWeek(date);
+  const term = atpInfo.isInTerm ? atpInfo.term : (atpInfo.nextTerm || atpInfo.term);
+  const termTopics = getTermTopics(grade, subject, term);
+
+  if (!termTopics.length) return { checked: false, matches: true, currentTermTopics: [] };
+
+  const topicWords = topic.toLowerCase().split(/\s+/).filter(w => w.length > 3);
+  const matches = termTopics.some(t => {
+    const tLower = t.toLowerCase();
+    return tLower.includes(topic.toLowerCase()) ||
+      topicWords.some(w => tLower.includes(w));
+  });
+
+  return { checked: true, matches, currentTermTopics: termTopics };
+}
+
 // ── Curriculum Query Handler ──────────────────────────────────────────────────
 
 /**
@@ -480,5 +549,7 @@ module.exports = {
   getTopicsForWeek,
   getTermTopics,
   handleCurriculumQuery,
+  resolveCurrentTopic,
+  topicMatchesCurrentATP,
   CAPS_TOPICS,
 };

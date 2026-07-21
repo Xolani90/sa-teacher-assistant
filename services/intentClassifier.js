@@ -54,7 +54,7 @@ Respond with ONLY a single JSON object, no other text, no markdown fences, no pr
   "type": one of [${VALID_TYPES.map(t => `"${t}"`).join(', ')}],
   "grade": integer 0-12 (0 means Grade R), or null if not stated or impliable from profile,
   "subject": one of [${VALID_SUBJECTS.map(s => `"${s}"`).join(', ')}] — use "general" if not stated or impliable,
-  "topic": short string describing the specific topic, or null,
+  "topic": short string naming the specific topic ONLY if the teacher actually stated or clearly implied one, otherwise null — never invent one,
   "marks": integer (default 20 if a test/quiz but no number given; null for non-assessment types),
   "questionCount": integer 1-30, ONLY meaningful for type "worksheet" when the teacher explicitly states a number of questions (e.g. "15 questions", "8 question worksheet", "a worksheet with 20 questions") — null for every other type, and null for worksheet too if no explicit count was given (the worksheet generator has its own default in that case),
   "language": the language the teacher should receive their CONTENT in (e.g. "english", "afrikaans", "isizulu") — default "english" unless the teacher wrote in or explicitly asked for another language
@@ -95,6 +95,7 @@ CRITICAL DISAMBIGUATION RULES:
 - "my observations" / "show observations" / "observation history" / "view observations" = observationHistory (viewing past saved data). "record an observation" / "log an observation" / "capture an observation" = observation (submitting new data). The distinguishing question is whether the teacher wants to SEE something already saved, or CREATE something new -- never default an ambiguous observation phrase to the record intent without checking for viewing language first.
 - questionCount is separate from marks and must never be inferred from it: a teacher who says "15 questions" wants exactly 15 questions with marks split automatically across them, even if no mark total is given. Only set questionCount when the teacher states an explicit number of questions; do not derive it from marks, grade, or topic complexity, and never set it for non-worksheet types.
 - Never invent a grade or subject the teacher didn't state or that isn't given to you as their known profile default — leave as null/"general" if genuinely unstated. Do not guess.
+- Never invent a specific curriculum topic the teacher didn't state or clearly imply (e.g. don't turn "grade 7 maths lesson plan for term 3" into a guessed topic like "Algebraic Equations" from your own general knowledge of what's typically taught). If the message names a subject/grade/term but no specific topic, set "topic" to null — the app resolves the current topic from its own ATP data, which is more reliable than a guess and may differ from what you'd expect for that term.
 - If the teacher writes in a South African language other than English, set "language" to that language so their content is generated in it, but still classify "type" correctly regardless of language.
 - A message that is ONLY a topic with no other context (e.g. "fractions") should still be classified using the most recent type the teacher was working with if you're given that context; otherwise default to worksheet.
 

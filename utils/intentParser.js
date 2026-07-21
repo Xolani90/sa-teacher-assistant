@@ -124,6 +124,12 @@ function cleanTopic(raw) {
   topic = topic.replace(/\b(?:grade|gr|g|graad)[\s.]?(?:\d{1,2}|r)\b/gi, '');
   // Remove mark references
   topic = topic.replace(/\b\d{1,3}\s*(?:-|–)?\s*marks?\b/gi, '');
+  // Remove term references (e.g. "term 3") — these describe WHEN, not the
+  // topic itself. Leaving these in place used to let a message like
+  // "lesson plan grade 7 maths term 3" fall through cleanTopic() with
+  // topic="term 3", a meaningless "topic" that would silently skip ATP
+  // auto-resolution downstream (since intent.topic was truthy).
+  topic = topic.replace(/\b(?:term|kwartaal)[\s.]?[1-4]\b/gi, '');
   // Remove noise words (whole word, case insensitive)
   for (const word of NOISE_WORDS) {
     const escaped = word.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&');
