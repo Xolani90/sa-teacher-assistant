@@ -230,6 +230,11 @@ async function testObservationZeroClasses() {
   assert(sent.some(m => m.text.includes('OBS_FORMAT_HELP')), 'flow proceeded straight to observation text prompt');
 
   await handleObservationFlow(from, 'Grade R | Life Skills\nThabo | Gross Motor | Achieved', null, deps);
+  // Incremental entry: a single Learner: block only collects records now —
+  // saveObservationSubmission isn't called until DONE is sent (a teacher
+  // observing a class over a morning can log a few learners and add more
+  // before saving). See observationFlow.js's 'collectingRecords' step.
+  await handleObservationFlow(from, 'DONE', null, deps);
   assert(capturedClassId === null, `classId passed to saveObservationSubmission is null (got ${JSON.stringify(capturedClassId)})`);
 }
 
@@ -266,6 +271,7 @@ async function testObservationOneClass() {
   assert(sent.some(m => m.text.includes('OBS_FORMAT_HELP')), 'flow proceeded straight to observation text prompt');
 
   await handleObservationFlow(from, 'Grade R | Life Skills\nThabo | Gross Motor | Achieved', null, deps);
+  await handleObservationFlow(from, 'DONE', null, deps);
   assert(capturedClassId === 77, `classId passed to saveObservationSubmission is the sole class's id (got ${JSON.stringify(capturedClassId)})`);
 }
 
@@ -312,6 +318,7 @@ async function testObservationManyClasses() {
   assert(sent.some(m => m.text.includes('OBS_FORMAT_HELP')), 'valid selection proceeds to observation text prompt');
 
   await handleObservationFlow(from, 'Grade R | Life Skills\nThabo | Gross Motor | Achieved', null, deps);
+  await handleObservationFlow(from, 'DONE', null, deps);
   assert(capturedClassId === 21, `classId passed to saveObservationSubmission matches the selected class (got ${JSON.stringify(capturedClassId)})`);
 }
 
