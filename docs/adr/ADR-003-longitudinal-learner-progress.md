@@ -1,6 +1,6 @@
 # ADR-003: Longitudinal Learner Progress
 
-**Status:** Proposed
+**Status:** Accepted (implemented — `c377f55` "feat: ADR-004 class-aware learner identity + ADR-003 persistent learner identity" merged to `main`; the `learners` table, `resolveLearner()`, identity uniqueness indexes, and regression coverage in `tests/adr003-learners-migration.test.js` are all live. This header previously read "Proposed" and was stale relative to `main`.)
 **Related:** `docs/adr/ADR-001-flow-boundaries.md`, `docs/adr/ADR-002-generation-pipeline.md`
 **Purpose:** Establishes whether and how the system should model learner
 identity persistently, as the prerequisite for any feature that answers
