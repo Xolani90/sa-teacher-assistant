@@ -260,6 +260,24 @@ function runMigrations() {
     `ALTER TABLE assessments ADD COLUMN class_id INTEGER REFERENCES classes(id)`,
     `ALTER TABLE observation_assessments ADD COLUMN class_id INTEGER REFERENCES classes(id)`,
 
+    // Migration 028: observation corrections (supersedes model) + resolved
+    // follow-up flag. corrects_assessment_id is nullable — most
+    // observations are not corrections. resolved defaults to 0 so every
+    // pre-existing observation_records row starts as an open follow-up,
+    // which is correct: nothing was resolved before this column existed.
+    //
+    // NOTE: this was originally shipped as a standalone
+    // migration_observation_corrections_resolution.sql file, which is NOT
+    // executed anywhere in the app's startup path — only the ALTER
+    // statements in this array run automatically against the live
+    // Render database. That file never actually reached production,
+    // which surfaced as "table observation_assessments has no column
+    // named corrects_assessment_id" in production logs. Moved here so it
+    // actually runs. The loose .sql file has been removed from the repo
+    // to avoid this happening again.
+    `ALTER TABLE observation_assessments ADD COLUMN corrects_assessment_id INTEGER REFERENCES observation_assessments(id)`,
+    `ALTER TABLE observation_records ADD COLUMN resolved INTEGER NOT NULL DEFAULT 0`,
+
     // Migration 019 and Migration 021 (grade data-repair) were moved out of
     // this array — see dataRepairMigrations below. They are UPDATE
     // statements, not ALTER TABLEs, so they don't belong under this loop's
@@ -583,6 +601,12 @@ function runMigrations() {
       ON assessments(class_id);
     CREATE INDEX IF NOT EXISTS idx_observation_assessments_class
       ON observation_assessments(class_id);
+  `);
+
+  // Index for Migration 028's corrects_assessment_id column — same reason.
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_observation_assessments_corrects
+      ON observation_assessments(corrects_assessment_id);
   `);
 
   console.log('[DB] Migrations complete');
