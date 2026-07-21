@@ -73,6 +73,8 @@ db.exec(`
     total_marks INTEGER NOT NULL,
     atp_topics TEXT,
     class_id INTEGER REFERENCES classes(id),
+    blueprint_id INTEGER,
+    blueprint_version INTEGER,
     created_at TEXT NOT NULL DEFAULT (datetime('now'))
   );
   CREATE TABLE learner_results (
