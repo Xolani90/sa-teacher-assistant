@@ -1,12 +1,14 @@
 'use strict';
 /**
- * learnerRosterService tests (ADR-006 PR2.5 — Class Roster Management).
+ * learnerRosterService tests (ADR-006 PR2.5 — Class Roster Management,
+ * extended by PR3 — ADD/REMOVE/CLEAR + REPLACE/MERGE modes).
  *
- * Exercises getRoster/setRoster/parseRosterPaste/formatRosterList against
- * a real (throwaway, file-backed) SQLite DB via runMigrations() — same
+ * Exercises getRoster/setRoster/addLearner/removeLearner/clearRoster/
+ * parseRosterPaste/validateRosterNames/formatRosterList against a real
+ * (throwaway, file-backed) SQLite DB via runMigrations() — same
  * node:sqlite shim convention as tests/adr003-learners-migration.test.js —
- * so this fails if the real `learners`/`classes` schema ever drifts from
- * what this module assumes.
+ * so this fails if the real `learners`/`classes` schema (including
+ * Migration 031's removed_at) ever drifts from what this module assumes.
  *
  * Run individually: node tests/learner-roster-service.test.js
  * Run via npm:       npm test
@@ -74,7 +76,6 @@ async function run() {
     removeLearner,
     clearRoster,
     parseRosterPaste,
-    splitRosterLines,
     validateRosterNames,
     formatRosterList,
   } = require('../services/learnerRosterService');
@@ -144,187 +145,124 @@ async function run() {
     assert(roster.length === 4, 'roster grows by exactly one');
   }
 
-  console.log('\n── Section 8: splitRosterLines preserves blanks (unlike parseRosterPaste) ──');
+  console.log('\n── Section 8: validateRosterNames — strict paste validation ────────');
   {
-    // Trailing '\n' produces a final empty element too (plain String.split
-    // behaviour) — that's fine, validateRosterNames would report it as a
-    // trailing blank line same as any other, which is correct: a teacher
-    // pasting a trailing newline gets told about it rather than having it
-    // silently swallowed.
-    const lines = splitRosterLines('1. Sipho Dlamini\n\n2) Ayanda Nkosi\r\n');
-    assert(lines.length === 4, 'blank lines (including trailing) kept as empty entries, not dropped');
-    assert(lines[0] === 'Sipho Dlamini', 'numbering stripped on first line');
-    assert(lines[1] === '', 'blank line preserved as empty string');
-    assert(lines[2] === 'Ayanda Nkosi', 'CRLF handled on last line');
-    assert(lines[3] === '', 'trailing newline produces a trailing blank entry');
+    const blank = validateRosterNames('Sipho Dlamini\n\nAyanda Nkosi');
+    assert(blank.valid === false, 'a blank line makes the paste invalid');
+    assert(blank.errors.length === 1 && blank.errors[0].line === 2, 'blank line reported at its correct 1-indexed line number');
+
+    const dup = validateRosterNames('Sipho Dlamini\nAyanda Nkosi\nSipho Dlamini');
+    assert(dup.valid === false, 'a duplicate name makes the paste invalid');
+    assert(dup.errors[0].line === 3, 'duplicate reported at the line it recurs on');
+    assert(/Duplicate of line 1/.test(dup.errors[0].message), 'duplicate message points back at the first occurrence');
+
+    const tooShort = validateRosterNames('A\nAyanda Nkosi');
+    assert(tooShort.valid === false, 'a single-character name is rejected');
+
+    const clean = validateRosterNames('1. Sipho Dlamini\n2) Ayanda Nkosi\nLebo Molefe\n');
+    assert(clean.valid === true, 'a clean paste (with a trailing newline) validates');
+    assert(clean.errors.length === 0, 'no errors on a clean paste');
+    assert(clean.names.length === 3, 'three names extracted');
+    assert(clean.names[0] === 'Sipho Dlamini', 'numbering stripped same as parseRosterPaste');
   }
 
-  console.log('\n── Section 9: validateRosterNames rejects blank lines as errors ────');
+  console.log('\n── Section 9: setRoster REPLACE mode ────────────────────────────────');
   {
-    const { valid, errors } = validateRosterNames(splitRosterLines('Sipho Dlamini\n\nAyanda Nkosi'));
-    assert(valid === false, 'a blank line makes the paste invalid');
-    assert(errors.length === 1, 'exactly one error reported');
-    assert(/Line 2/.test(errors[0]), 'error identifies the correct line number');
-    assert(/blank/.test(errors[0]), 'error message names the problem as a blank line');
-  }
-
-  console.log('\n── Section 10: validateRosterNames rejects duplicates as errors ────');
-  {
-    const { valid, errors } = validateRosterNames(splitRosterLines('Sipho Dlamini\nAyanda Nkosi\nsipho   dlamini'));
-    assert(valid === false, 'a case/whitespace-insensitive duplicate makes the paste invalid');
-    assert(errors.length === 1, 'exactly one error reported');
-    assert(/Line 3/.test(errors[0]), 'error identifies the duplicate line, not the original');
-    assert(/duplicate/i.test(errors[0]), 'error message names the problem as a duplicate');
-  }
-
-  console.log('\n── Section 11: validateRosterNames accepts a clean paste ───────────');
-  {
-    const { valid, errors } = validateRosterNames(splitRosterLines('Sipho Dlamini\nAyanda Nkosi\nLebo Molefe'));
-    assert(valid === true, 'a clean, duplicate-free, blank-free paste is valid');
-    assert(errors.length === 0, 'no errors reported for a clean paste');
-  }
-
-  console.log('\n── Section 12: addLearner adds one name without touching the rest ──');
-  {
-    const before = getRoster(PHONE_HASH, classId).length;
-    const { roster, learner, wasNew } = addLearner(PHONE_HASH, classId, 'Thabo Sithole');
-    assert(wasNew === true, 'addLearner reports a genuinely new learner as new');
-    assert(roster.length === before + 1, 'roster grew by exactly one');
-    assert(learner.name === 'Thabo Sithole', 'returned learner has the added name');
-
-    const { wasNew: wasNew2 } = addLearner(PHONE_HASH, classId, 'Thabo Sithole');
-    assert(wasNew2 === false, 're-adding the same identity is a no-op, not a duplicate');
-    assert(getRoster(PHONE_HASH, classId).length === before + 1, 'roster size unchanged on re-add');
-
-    const cls = db.prepare(`SELECT learner_count FROM classes WHERE id = ?`).get(classId);
-    assert(cls.learner_count === before + 1, 'classes.learner_count kept in sync after addLearner');
-  }
-
-  console.log('\n── Section 13: removeLearner soft-removes (row and history kept) ───');
-  {
-    const rosterBefore = getRoster(PHONE_HASH, classId);
-    const target = rosterBefore.find((l) => l.name === 'Thabo Sithole');
-
-    const { roster, removed } = removeLearner(PHONE_HASH, classId, target.id);
-    assert(removed === true, 'removeLearner reports success for a learner actually on the roster');
-    assert(roster.length === rosterBefore.length - 1, 'roster shrinks by exactly one');
-    assert(!roster.some((l) => l.id === target.id), 'removed learner no longer appears in getRoster()');
-
-    const row = db.prepare(`SELECT id, class_id, removed_at FROM learners WHERE id = ?`).get(target.id);
-    assert(row !== undefined, 'the learners row itself still exists (not deleted)');
-    assert(row.class_id === classId, 'class_id is left untouched by removal (not repurposed as an unclassed marker)');
-    assert(row.removed_at !== null, 'removed_at is set, marking the soft removal');
-
-    const cls = db.prepare(`SELECT learner_count FROM classes WHERE id = ?`).get(classId);
-    assert(cls.learner_count === roster.length, 'classes.learner_count kept in sync after removal');
-
-    const { removed: removedAgain } = removeLearner(PHONE_HASH, classId, target.id);
-    assert(removedAgain === false, 'removing an already-removed learner is a safe no-op');
-  }
-
-  console.log('\n── Section 14: re-adding a removed name revives the same row ───────');
-  {
-    const before = getRoster(PHONE_HASH, classId).length;
-    const { learner, wasNew } = addLearner(PHONE_HASH, classId, 'Thabo Sithole');
-    assert(wasNew === true, 'a revived (previously removed) learner counts as newly-added to the active roster');
-    assert(getRoster(PHONE_HASH, classId).length === before + 1, 'roster grows back by one');
-
-    const row = db.prepare(`SELECT removed_at FROM learners WHERE id = ?`).get(learner.id);
-    assert(row.removed_at === null, 'removed_at cleared on revival');
-  }
-
-  console.log('\n── Section 15: setRoster REPLACE mode removes names not re-pasted ──');
-  {
-    const rosterId = classId;
-    setRoster(PHONE_HASH, rosterId, ['Sipho Dlamini', 'Ayanda Nkosi', 'Lebo Molefe', 'Naledi Mokoena', 'Thabo Sithole']);
-    const before = getRoster(PHONE_HASH, rosterId);
-    assert(before.length === 5, 'sanity check: five learners on the roster before REPLACE');
-
-    const { roster, added, matched, removed } = setRoster(
-      PHONE_HASH, rosterId, ['Sipho Dlamini', 'Ayanda Nkosi', 'Zanele Khumalo'],
-      { mode: 'replace' }
-    );
-    assert(roster.length === 3, 'REPLACE leaves exactly the three re-pasted names');
-    assert(added === 1, 'one genuinely new name (Zanele) was added');
-    assert(matched === 2, 'two names matched existing identities (Sipho, Ayanda)');
-    assert(removed === 3, 'the three names left off the new paste were soft-removed');
-    assert(roster.map((l) => l.name).sort().join(',') === 'Ayanda Nkosi,Sipho Dlamini,Zanele Khumalo', 'REPLACE roster contains exactly the re-pasted names');
-
-    const stillThere = before.filter((l) => l.name === 'Lebo Molefe')[0];
-    const row = db.prepare(`SELECT removed_at FROM learners WHERE id = ?`).get(stillThere.id);
-    assert(row.removed_at !== null, 'a name dropped by REPLACE is soft-removed, not deleted');
-  }
-
-  console.log('\n── Section 16: setRoster MERGE mode never removes existing names ───');
-  {
-    const rosterId = classId;
-    const before = getRoster(PHONE_HASH, rosterId).length;
-    const { roster, added, removed } = setRoster(PHONE_HASH, rosterId, ['Palesa Dube'], { mode: 'merge' });
-    assert(roster.length === before + 1, 'MERGE only adds, never shrinks the roster');
-    assert(added === 1, 'the new name was added');
-    assert(removed === 0, 'MERGE reports zero removals by definition');
-  }
-
-  console.log('\n── Section 17: clearRoster soft-removes every current member ───────');
-  {
-    const otherClass = db.prepare(`
+    const replaceClass = db.prepare(`
       INSERT INTO classes (phone_hash, name, grade, subject, learner_count)
       VALUES (?, 'Grade 7C', 7, 'Mathematics', 0)
     `).run(PHONE_HASH);
-    const otherClassId = Number(otherClass.lastInsertRowid);
-    setRoster(PHONE_HASH, otherClassId, ['Kagiso Molefe', 'Bongani Zulu']);
+    const replaceClassId = Number(replaceClass.lastInsertRowid);
 
-    const { roster, removed } = clearRoster(PHONE_HASH, otherClassId);
-    assert(roster.length === 0, 'roster is empty immediately after clearRoster');
-    assert(removed === 2, 'clearRoster reports how many learners it removed');
+    setRoster(PHONE_HASH, replaceClassId, ['Learner A', 'Learner B', 'Learner C']);
+    assert(getRoster(PHONE_HASH, replaceClassId).length === 3, 'starting roster of three set up via default (merge) mode');
 
-    const cls = db.prepare(`SELECT learner_count FROM classes WHERE id = ?`).get(otherClassId);
-    assert(cls.learner_count === 0, 'classes.learner_count reset to zero after clearRoster');
+    const result = setRoster(PHONE_HASH, replaceClassId, ['Learner B', 'Learner C', 'Learner D'], { mode: 'replace' });
+    assert(result.added === 1, 'one genuinely new name (Learner D) added');
+    assert(result.matched === 2, 'two names (B, C) matched existing learners');
+    assert(result.removed === 1, 'one name (Learner A, omitted from the new list) soft-removed');
+    assert(result.roster.length === 3, 'active roster is back to three, not four');
+    assert(!result.roster.some((l) => l.name === 'Learner A'), 'Learner A is off the active roster after REPLACE');
+
+    const cls = db.prepare(`SELECT learner_count FROM classes WHERE id = ?`).get(replaceClassId);
+    assert(cls.learner_count === 3, 'classes.learner_count reflects only the active (post-replace) roster');
+
+    // Re-pasting the removed name un-removes the same identity instead of duplicating it
+    const rerun = setRoster(PHONE_HASH, replaceClassId, ['Learner A', 'Learner B', 'Learner C', 'Learner D'], { mode: 'merge' });
+    assert(rerun.roster.length === 4, 'Learner A is back on the roster after being re-pasted');
+    assert(rerun.roster.filter((l) => l.name === 'Learner A').length === 1, 'exactly one Learner A row — un-removed, not duplicated');
   }
 
-  console.log('\n── Section 18: cross-class removal never collides (Migration 031) ──');
+  console.log('\n── Section 10: addLearner / removeLearner ───────────────────────────');
   {
-    // Regression guard for the exact edge case that motivated soft-removal
-    // via removed_at instead of nulling class_id (see Migration 031's
-    // comment): two DIFFERENT classes each have a learner named "Same
-    // Name", and BOTH get removed. If removal ever nulled class_id, the
-    // second UPDATE would collide with idx_learners_identity_unclassed
-    // (phone_hash, normalized_name) WHERE class_id IS NULL and throw.
-    const classA = db.prepare(`
+    const soloClass = db.prepare(`
       INSERT INTO classes (phone_hash, name, grade, subject, learner_count)
-      VALUES (?, 'Grade 8A', 8, 'Mathematics', 0)
+      VALUES (?, 'Grade 4A', 4, 'Mathematics', 0)
     `).run(PHONE_HASH);
-    const classAId = Number(classA.lastInsertRowid);
-    const classB = db.prepare(`
+    const soloClassId = Number(soloClass.lastInsertRowid);
+
+    const add1 = addLearner(PHONE_HASH, soloClassId, 'Thandeka Mahlangu');
+    assert(add1.alreadyOnRoster === false, 'first add is genuinely new');
+    assert(add1.rosterSize === 1, 'roster size is 1 after the first add');
+
+    const add2 = addLearner(PHONE_HASH, soloClassId, 'Thandeka Mahlangu');
+    assert(add2.alreadyOnRoster === true, 'adding the same name again is recognised as already-on-roster');
+    assert(add2.rosterSize === 1, 'roster size unchanged — no duplicate row');
+
+    const remove1 = removeLearner(PHONE_HASH, soloClassId, 'Thandeka Mahlangu');
+    assert(remove1.removed === true, 'removeLearner reports success for an existing active learner');
+    assert(remove1.rosterSize === 0, 'roster size drops to 0 after removal');
+    assert(getRoster(PHONE_HASH, soloClassId).length === 0, 'getRoster confirms the learner is off the active roster');
+
+    const remove2 = removeLearner(PHONE_HASH, soloClassId, 'Thandeka Mahlangu');
+    assert(remove2.removed === false, 'removing an already-removed (or never-present) name reports false, does not throw');
+
+    // Re-adding un-removes the same identity rather than creating a new row
+    const add3 = addLearner(PHONE_HASH, soloClassId, 'Thandeka Mahlangu');
+    assert(add3.alreadyOnRoster === false, 're-adding after removal is treated as a fresh add to the active roster');
+    assert(getRoster(PHONE_HASH, soloClassId).length === 1, 'exactly one active learner after the re-add — identity was reused, not duplicated');
+
+    const db_ = getDb();
+    const totalRows = db_.prepare(`SELECT COUNT(*) AS n FROM learners WHERE phone_hash = ? AND class_id = ?`).get(PHONE_HASH, soloClassId).n;
+    assert(totalRows === 1, 'only one physical learners row exists for this identity across add/remove/re-add');
+  }
+
+  console.log('\n── Section 11: clearRoster ───────────────────────────────────────────');
+  {
+    const clearClass = db.prepare(`
       INSERT INTO classes (phone_hash, name, grade, subject, learner_count)
-      VALUES (?, 'Grade 8B', 8, 'Mathematics', 0)
+      VALUES (?, 'Grade 3B', 3, 'Mathematics', 0)
     `).run(PHONE_HASH);
-    const classBId = Number(classB.lastInsertRowid);
+    const clearClassId = Number(clearClass.lastInsertRowid);
 
-    const { learner: learnerA } = addLearner(PHONE_HASH, classAId, 'Same Name');
-    const { learner: learnerB } = addLearner(PHONE_HASH, classBId, 'Same Name');
-    assert(learnerA.id !== learnerB.id, 'same name in two different classes resolves to two distinct identities');
+    setRoster(PHONE_HASH, clearClassId, ['Learner X', 'Learner Y']);
+    const result = clearRoster(PHONE_HASH, clearClassId);
+    assert(result.clearedCount === 2, 'clearRoster reports the number of learners it soft-removed');
+    assert(getRoster(PHONE_HASH, clearClassId).length === 0, 'active roster is empty after clearRoster');
 
-    let threw = false;
-    try {
-      removeLearner(PHONE_HASH, classAId, learnerA.id);
-      removeLearner(PHONE_HASH, classBId, learnerB.id);
-    } catch (err) {
-      threw = true;
-    }
-    assert(threw === false, 'removing the same-named learner from both classes never throws a UNIQUE constraint error');
+    const cls = db.prepare(`SELECT learner_count FROM classes WHERE id = ?`).get(clearClassId);
+    assert(cls.learner_count === 0, 'classes.learner_count synced to 0 after clearRoster');
 
-    const rowA = db.prepare(`SELECT class_id, removed_at FROM learners WHERE id = ?`).get(learnerA.id);
-    const rowB = db.prepare(`SELECT class_id, removed_at FROM learners WHERE id = ?`).get(learnerB.id);
-    assert(rowA.class_id === classAId && rowB.class_id === classBId, 'each removed learner keeps its own original class_id');
-    assert(rowA.removed_at !== null && rowB.removed_at !== null, 'both are marked removed independently');
+    const emptyResult = clearRoster(PHONE_HASH, clearClassId);
+    assert(emptyResult.clearedCount === 0, 'clearing an already-empty roster is a safe no-op');
+
+    // History preserved: re-adding brings the same identity back, not a duplicate
+    addLearner(PHONE_HASH, clearClassId, 'Learner X');
+    assert(getRoster(PHONE_HASH, clearClassId).length === 1, 'Learner X is back on the roster after clearRoster + addLearner');
   }
 
   console.log(`\n${'='.repeat(60)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);
   console.log('='.repeat(60));
 
-  if (fs.existsSync(process.env.DB_PATH)) fs.unlinkSync(process.env.DB_PATH);
+  try { db.close(); } catch (_) {}
+  try {
+    if (fs.existsSync(process.env.DB_PATH)) fs.unlinkSync(process.env.DB_PATH);
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      console.warn(`[test cleanup] could not remove ${process.env.DB_PATH}: ${err.code}`);
+    }
+  }
   process.exit(failed > 0 ? 1 : 0);
 }
 

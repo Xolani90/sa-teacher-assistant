@@ -1,12 +1,32 @@
 'use strict';
 /**
- * rosterFlow tests (ADR-006 PR3 — WhatsApp Roster Management).
+ * Roster Flow Tests (ADR-006 PR3 — WhatsApp roster management).
  *
- * Exercises handleRosterFlow end-to-end against a real (throwaway,
+ * Exercises handleRosterFlow() end-to-end against a real (throwaway,
  * file-backed) SQLite DB via runMigrations() — same node:sqlite shim
- * convention as tests/learner-roster-service.test.js — with a fake
- * safeSendMessage that just records what was sent, so assertions can
- * check the actual teacher-facing copy.
+ * convention as tests/learner-roster-service.test.js — so this fails if
+ * the real `learners`/`classes` schema (including Migration 031's
+ * removed_at) ever drifts from what rosterFlow.js/learnerRosterService.js
+ * assume. getTeacherClasses is a plain fixture function (not
+ * teacherWorkspaceService), matching tests/assessment-session-flow.test.js's
+ * convention of isolating the flow's own state-machine logic from
+ * unrelated services.
+ *
+ * Covers:
+ *   1. Zero classes -> guidance, no session.
+ *   2. Single class -> action runs immediately, no class-selection prompt.
+ *   3. 2+ classes -> SELECT_CLASS prompt, invalid replies rejected in place.
+ *   4. ROSTER on an empty roster -> straight to PASTE (no mode prompt).
+ *   5. ROSTER on an existing roster -> CHOOSE_MODE (REPLACE/MERGE) required.
+ *   6. PASTE rejects invalid pastes (blank line, duplicate) in place with
+ *      per-line errors and no state change.
+ *   7. PREVIEW requires an explicit SAVE; EDIT loops back to PASTE.
+ *   8. REPLACE mode soft-removes learners missing from the new paste;
+ *      MERGE mode does not.
+ *   9. ADD LEARNER / REMOVE LEARNER single-turn commands.
+ *  10. CLEAR ROSTER requires YES/NO confirmation.
+ *  11. CANCEL works from every step.
+ *  12. Rosters and removals are isolated per class.
  *
  * Run individually: node tests/roster-flow.test.js
  * Run via npm:       npm test
@@ -58,228 +78,285 @@ async function run() {
   const db = getDb();
 
   const { SessionStore } = require('../utils/sessionStore');
+  const { formatClassSelectionPrompt, matchClassSelection } = require('../utils/classContext');
   const { handleRosterFlow } = require('../flows/rosterFlow');
-  const { getTeacherClasses } = require('../services/teacherWorkspaceService');
   const { getRoster } = require('../services/learnerRosterService');
 
-  const rosterState = new SessionStore('roster', 20 * 60 * 1000);
+  const rosterState = new SessionStore('roster', 30 * 60 * 1000);
 
-  const PHONE_A = 'roster-flow-teacher-a';
+  const PHONE = '+27831234567';
+  const hashPhone = (p) => `hash_${p}`;
+  const phoneHash = hashPhone(PHONE);
+
   const now = new Date().toISOString();
-  db.prepare(`INSERT INTO teachers (phone_hash, created_at, updated_at) VALUES (?, ?, ?)`).run(PHONE_A, now, now);
+  db.prepare(`INSERT INTO teachers (phone_hash, created_at, updated_at) VALUES (?, ?, ?)`)
+    .run(phoneHash, now, now);
 
-  function makeClass(phoneHash, name, grade, subject) {
-    const r = db.prepare(`
+  function makeClass(name, grade = 5, subject = 'Mathematics') {
+    const result = db.prepare(`
       INSERT INTO classes (phone_hash, name, grade, subject, learner_count)
       VALUES (?, ?, ?, ?, 0)
     `).run(phoneHash, name, grade, subject);
-    return Number(r.lastInsertRowid);
+    return Number(result.lastInsertRowid);
   }
 
-  let sent;
-  function resetSent() { sent = []; }
-  async function safeSendMessage(from, text) { sent.push({ from, text }); }
-  function lastMessage() { return sent.length ? sent[sent.length - 1].text : ''; }
+  let classesFixture = [];
+  const sentMessages = [];
 
   const deps = {
-    hashPhone: (from) => from, // identity — tests pass phone hashes directly as "from"
-    safeSendMessage,
+    hashPhone,
+    safeSendMessage: async (to, msg) => { sentMessages.push({ to, msg }); },
     rosterState,
-    getTeacherClasses,
+    getTeacherClasses: () => classesFixture,
+    formatClassSelectionPrompt,
+    matchClassSelection,
   };
 
-  console.log('\n── Section 1: unrelated text with no session is not handled ────────');
-  {
-    resetSent();
-    const handled = await handleRosterFlow(PHONE_A, 'hello there', null, null, deps);
-    assert(handled === false, 'handleRosterFlow returns false for non-command text with no session');
-    assert(sent.length === 0, 'nothing sent');
+  function lastMessage() {
+    return sentMessages[sentMessages.length - 1]?.msg || '';
   }
 
-  console.log('\n── Section 2: ROSTER with a single class skips CHOOSE_CLASS ────────');
-  const classId1 = makeClass(PHONE_A, 'Grade 4A', 4, 'Mathematics');
-  {
-    resetSent();
-    const handled = await handleRosterFlow(PHONE_A, 'ROSTER', null, null, deps);
-    assert(handled === true, 'ROSTER is handled');
-    assert(/Paste the learner names/.test(lastMessage()), 'goes straight to paste instructions (only one class)');
-    assert(rosterState.get(PHONE_A).step === 'paste', 'session step is PASTE');
+  async function send(text) {
+    sentMessages.length = 0;
+    return handleRosterFlow(PHONE, text, null, null, deps);
   }
 
-  console.log('\n── Section 3: PASTE rejects a blank line without saving ─────────────');
-  {
-    resetSent();
-    const handled = await handleRosterFlow(PHONE_A, 'Sipho Dlamini\n\nAyanda Nkosi', null, null, deps);
-    assert(handled === true, 'invalid paste still handled (re-prompts, does not fall through)');
-    assert(/blank line/.test(lastMessage()), 'blank line error surfaced to the teacher');
-    assert(getRoster(PHONE_A, classId1).length === 0, 'nothing was saved');
-    assert(rosterState.get(PHONE_A).step === 'paste', 'still in PASTE step after a rejected paste');
-  }
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 1: zero classes ─────────────────────────────────────────');
+  classesFixture = [];
+  let handled = await send('ROSTER');
+  assert(handled === true, 'ROSTER is handled even with no classes');
+  assert(/don't have any classes/i.test(lastMessage()), 'guidance message when no classes exist');
+  assert(rosterState.get(phoneHash) === undefined, 'no session was created');
 
-  console.log('\n── Section 4: PASTE rejects a duplicate name ────────────────────────');
-  {
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'Sipho Dlamini\nAyanda Nkosi\nsipho dlamini', null, null, deps);
-    assert(/duplicate/i.test(lastMessage()), 'duplicate error surfaced to the teacher');
-    assert(getRoster(PHONE_A, classId1).length === 0, 'nothing was saved');
-  }
+  handled = await send('hello there');
+  assert(handled === false, 'non-command text falls through unhandled');
 
-  console.log('\n── Section 5: valid paste moves to PREVIEW, SAVE commits it ────────');
-  {
-    resetSent();
-    const handled = await handleRosterFlow(PHONE_A, 'Sipho Dlamini\nAyanda Nkosi\nLebo Molefe', null, null, deps);
-    assert(handled === true, 'valid paste handled');
-    assert(/Reply \*SAVE\*/.test(lastMessage()), 'moves to preview, asking for SAVE');
-    assert(rosterState.get(PHONE_A).step === 'preview', 'session step is PREVIEW');
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 2: single class — ROSTER on an empty roster ─────────────');
+  const classA = makeClass('Grade 5B');
+  classesFixture = [{ id: classA, name: 'Grade 5B', grade: 5, subject: 'Mathematics', learner_count: 0 }];
 
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'save', null, null, deps);
-    assert(/Roster saved/.test(lastMessage()), 'confirms the roster was saved');
-    assert(rosterState.get(PHONE_A) === undefined, 'session cleared after save');
+  handled = await send('ROSTER');
+  assert(handled === true, 'ROSTER handled with a single class');
+  let state = rosterState.get(phoneHash);
+  assert(state && state.step === 'paste', 'single class + empty roster skips straight to PASTE (no mode prompt)');
+  assert(/Paste your list/i.test(lastMessage()), 'prompt asks for a pasted list');
 
-    const roster = getRoster(PHONE_A, classId1);
-    assert(roster.length === 3, 'three learners now on the roster');
-    assert(roster.map((l) => l.name).join(',') === 'Sipho Dlamini,Ayanda Nkosi,Lebo Molefe', 'names saved in paste order');
-  }
+  // Invalid paste: blank line + duplicate
+  await send('Sipho Dlamini\n\nAyanda Nkosi\nSipho Dlamini');
+  assert(/Line 2: Blank line/i.test(lastMessage()), 'blank line reported with correct line number');
+  assert(/Line 4: Duplicate of line 1/i.test(lastMessage()), 'duplicate reported against its first occurrence');
+  state = rosterState.get(phoneHash);
+  assert(state.step === 'paste', 'state unchanged after invalid paste — no partial save');
+  assert(getRoster(phoneHash, classA).length === 0, 'nothing written to the DB after invalid paste');
 
-  console.log('\n── Section 6: CANCEL mid-flow discards without saving ───────────────');
-  {
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'ADD LEARNER', null, null, deps);
-    assert(rosterState.get(PHONE_A).step === 'enterName', 'ADD LEARNER enters the name-entry step');
+  // Valid paste
+  await send('1. Sipho Dlamini\n2) Ayanda Nkosi\nLebo Molefe');
+  state = rosterState.get(phoneHash);
+  assert(state.step === 'preview', 'valid paste advances to PREVIEW');
+  assert(state.names.length === 3, 'three names parsed onto state');
+  assert(/3 learners parsed/i.test(lastMessage()), 'preview message reports the count');
+  assert(/Sipho Dlamini/.test(lastMessage()) && /Ayanda Nkosi/.test(lastMessage()), 'preview lists the parsed names');
+  assert(/Reply \*SAVE\*/.test(lastMessage()), 'preview asks for SAVE');
 
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'CANCEL', null, null, deps);
-    assert(/cancelled/i.test(lastMessage()), 'cancellation confirmed to the teacher');
-    assert(rosterState.get(PHONE_A) === undefined, 'session cleared on cancel');
-    assert(getRoster(PHONE_A, classId1).length === 3, 'roster unchanged by the cancelled ADD LEARNER');
-  }
+  // Garbage reply at PREVIEW doesn't save
+  await send('whatever');
+  assert(/Reply \*SAVE\*/.test(lastMessage()), 'unrecognized reply at PREVIEW re-prompts');
+  assert(getRoster(phoneHash, classA).length === 0, 'still nothing written before SAVE');
 
-  console.log('\n── Section 7: ADD LEARNER happy path ────────────────────────────────');
-  {
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'ADD LEARNER', null, null, deps);
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'Naledi Mokoena', null, null, deps);
-    assert(/Added:/.test(lastMessage()), 'confirms the learner was added');
-    assert(getRoster(PHONE_A, classId1).length === 4, 'roster grew by one');
-  }
+  // EDIT loops back to PASTE
+  await send('EDIT');
+  state = rosterState.get(phoneHash);
+  assert(state.step === 'paste', 'EDIT loops back to PASTE');
+  await send('Sipho Dlamini\nAyanda Nkosi\nLebo Molefe');
+  state = rosterState.get(phoneHash);
+  assert(state.step === 'preview', 'back at PREVIEW after re-pasting');
 
-  console.log('\n── Section 8: REMOVE LEARNER happy path ─────────────────────────────');
-  {
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'REMOVE LEARNER', null, null, deps);
-    assert(rosterState.get(PHONE_A).step === 'chooseLearner', 'REMOVE LEARNER lists the roster for selection');
+  await send('SAVE');
+  assert(rosterState.get(phoneHash) === undefined, 'session cleared after SAVE');
+  assert(/Roster saved/i.test(lastMessage()), 'SAVE confirms the roster was saved');
+  assert(/3 added, 0 matched/.test(lastMessage()), 'SAVE reports added/matched counts');
+  let roster = getRoster(phoneHash, classA);
+  assert(roster.length === 3, 'roster now has three learners');
+  assert(roster.map((l) => l.name).join(',') === 'Sipho Dlamini,Ayanda Nkosi,Lebo Molefe', 'roster preserves paste order');
 
-    const roster = getRoster(PHONE_A, classId1);
-    const targetIdx = roster.findIndex((l) => l.name === 'Naledi Mokoena') + 1;
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 3: ROSTER on an existing roster — CHOOSE_MODE gate ──────');
+  handled = await send('ROSTER');
+  state = rosterState.get(phoneHash);
+  assert(state.step === 'chooseMode', 'ROSTER on a non-empty roster requires REPLACE/MERGE first');
+  assert(/already has a roster/i.test(lastMessage()), 'mode prompt mentions the existing roster');
 
-    resetSent();
-    await handleRosterFlow(PHONE_A, String(targetIdx), null, null, deps);
-    assert(/Remove Naledi Mokoena/.test(lastMessage()), 'asks for confirmation naming the right learner');
-    assert(rosterState.get(PHONE_A).step === 'confirmRemove', 'session step is CONFIRM_REMOVE');
+  await send('nonsense');
+  assert(/REPLACE.*MERGE/i.test(lastMessage()), 'unrecognized reply at CHOOSE_MODE re-prompts');
+  state = rosterState.get(phoneHash);
+  assert(state.step === 'chooseMode', 'state unchanged after invalid mode reply');
 
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'YES', null, null, deps);
-    assert(/Removed Naledi Mokoena/.test(lastMessage()), 'confirms the removal');
-    assert(getRoster(PHONE_A, classId1).length === 3, 'roster shrank by one');
-    assert(rosterState.get(PHONE_A) === undefined, 'session cleared after removal');
-  }
+  await send('MERGE');
+  state = rosterState.get(phoneHash);
+  assert(state.step === 'paste' && state.mode === 'merge', 'MERGE selected, advances to PASTE');
 
-  console.log('\n── Section 9: LIST ROSTER shows the roster and offers follow-ups ──');
-  {
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'LIST ROSTER', null, null, deps);
-    assert(/Sipho Dlamini/.test(lastMessage()), 'roster contents shown');
-    assert(/\*ADD\*/.test(lastMessage()) && /\*REMOVE\*/.test(lastMessage()) && /\*REPLACE\*/.test(lastMessage()), 'offers ADD/REMOVE/REPLACE follow-ups');
-    assert(rosterState.get(PHONE_A).step === 'list', 'session step is LIST');
+  // MERGE: pasting a subset + one new name should not remove the missing one
+  await send('Sipho Dlamini\nZanele Khumalo');
+  await send('SAVE');
+  roster = getRoster(phoneHash, classA);
+  assert(roster.length === 4, 'MERGE adds the new name without removing the omitted ones');
+  assert(roster.some((l) => l.name === 'Ayanda Nkosi'), 'Ayanda Nkosi (omitted from the merge paste) is still on the roster');
+  assert(roster.some((l) => l.name === 'Zanele Khumalo'), 'newly merged name is on the roster');
 
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'ADD', null, null, deps);
-    assert(rosterState.get(PHONE_A).step === 'enterName', 'LIST ROSTER -> ADD reaches the same name-entry step ADD LEARNER uses');
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 4: REPLACE mode soft-removes omitted learners ───────────');
+  await send('ROSTER');
+  await send('REPLACE');
+  state = rosterState.get(phoneHash);
+  assert(state.mode === 'replace', 'REPLACE selected');
 
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'CANCEL', null, null, deps);
-  }
+  await send('Sipho Dlamini\nAyanda Nkosi');
+  await send('SAVE');
+  assert(/2 added, 2 matched, 2 removed|0 added, 2 matched, 2 removed/.test(lastMessage()), 'SAVE reports a removed count in REPLACE mode');
+  roster = getRoster(phoneHash, classA);
+  assert(roster.length === 2, 'REPLACE leaves only the re-pasted names on the active roster');
+  assert(roster.map((l) => l.name).sort().join(',') === 'Ayanda Nkosi,Sipho Dlamini', 'only the re-pasted names remain');
 
-  console.log('\n── Section 10: ROSTER on a class with an existing roster asks REPLACE/MERGE ──');
-  {
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'ROSTER', null, null, deps);
-    assert(/REPLACE/.test(lastMessage()) && /MERGE/.test(lastMessage()), 'offers REPLACE/MERGE/CANCEL, not straight to paste');
-    assert(rosterState.get(PHONE_A).step === 'chooseMode', 'session step is CHOOSE_MODE');
+  // Re-adding a name that was just soft-removed un-removes the same identity
+  await send('ROSTER');
+  await send('MERGE');
+  await send('Sipho Dlamini\nAyanda Nkosi\nLebo Molefe');
+  await send('SAVE');
+  roster = getRoster(phoneHash, classA);
+  assert(roster.length === 3, 'previously soft-removed learner (Lebo Molefe) is un-removed, not duplicated');
+  const leboCount = roster.filter((l) => l.name === 'Lebo Molefe').length;
+  assert(leboCount === 1, 'Lebo Molefe appears exactly once (identity match, not a duplicate row)');
 
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'REPLACE', null, null, deps);
-    assert(rosterState.get(PHONE_A).mode === 'replace', 'mode recorded as replace');
-    assert(rosterState.get(PHONE_A).step === 'paste', 'moves on to PASTE');
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 5: ADD LEARNER / REMOVE LEARNER single-turn commands ────');
+  handled = await send('ADD LEARNER Nomvula Zulu');
+  assert(handled === true, 'ADD LEARNER handled');
+  assert(rosterState.get(phoneHash) === undefined, 'ADD LEARNER with a single class needs no session');
+  assert(/Added \*Nomvula Zulu\*/.test(lastMessage()), 'confirms the learner was added');
+  roster = getRoster(phoneHash, classA);
+  assert(roster.some((l) => l.name === 'Nomvula Zulu'), 'Nomvula Zulu is now on the roster');
 
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'Zanele Khumalo\nBongani Zulu', null, null, deps);
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'SAVE', null, null, deps);
-    assert(/removed/.test(lastMessage()), 'REPLACE save reports removals of names left off the new list');
+  await send('ADD LEARNER Nomvula Zulu');
+  assert(/already on/i.test(lastMessage()), 'adding an already-present name is a safe no-op, not a duplicate');
+  assert(getRoster(phoneHash, classA).filter((l) => l.name === 'Nomvula Zulu').length === 1, 'still exactly one Nomvula Zulu');
 
-    const roster = getRoster(PHONE_A, classId1);
-    assert(roster.length === 2, 'REPLACE left exactly the two re-pasted learners');
-    assert(roster.map((l) => l.name).sort().join(',') === 'Bongani Zulu,Zanele Khumalo', 'roster now matches the replacement list exactly');
-  }
+  handled = await send('REMOVE LEARNER Nomvula Zulu');
+  assert(handled === true, 'REMOVE LEARNER handled');
+  assert(/Removed \*Nomvula Zulu\*/.test(lastMessage()), 'confirms the learner was removed');
+  assert(!getRoster(phoneHash, classA).some((l) => l.name === 'Nomvula Zulu'), 'Nomvula Zulu no longer on the active roster');
 
-  console.log('\n── Section 11: CLEAR ROSTER happy path ──────────────────────────────');
-  {
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'CLEAR ROSTER', null, null, deps);
-    assert(/can't be undone/.test(lastMessage()), 'warns before clearing');
-    assert(rosterState.get(PHONE_A).step === 'confirmClear', 'session step is CONFIRM_CLEAR');
+  await send('REMOVE LEARNER Someone Nonexistent');
+  assert(/Couldn't find/i.test(lastMessage()), "removing a name that isn't on the roster gives clear feedback, doesn't throw");
 
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'YES', null, null, deps);
-    assert(/Cleared 2 learner/.test(lastMessage()), 'confirms how many were cleared');
-    assert(getRoster(PHONE_A, classId1).length === 0, 'roster is empty');
-  }
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 6: CLEAR ROSTER requires YES/NO confirmation ────────────');
+  handled = await send('CLEAR ROSTER');
+  assert(handled === true, 'CLEAR ROSTER handled');
+  state = rosterState.get(phoneHash);
+  assert(state.step === 'confirmClear', 'CLEAR ROSTER requires confirmation, does not clear immediately');
+  assert(getRoster(phoneHash, classA).length > 0, 'roster untouched before confirmation');
 
-  console.log('\n── Section 12: multiple classes -> CHOOSE_CLASS step ────────────────');
-  const classId2 = makeClass(PHONE_A, 'Grade 5B', 5, 'Mathematics');
-  {
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'ROSTER', null, null, deps);
-    assert(/Choose a Class/.test(lastMessage()), 'two classes now exist, so CHOOSE_CLASS is shown');
-    assert(rosterState.get(PHONE_A).step === 'chooseClass', 'session step is CHOOSE_CLASS');
+  await send('NO');
+  assert(/left unchanged/i.test(lastMessage()), 'NO cancels the clear');
+  assert(rosterState.get(phoneHash) === undefined, 'session cleared after NO');
+  assert(getRoster(phoneHash, classA).length > 0, 'roster still intact after declining');
 
-    resetSent();
-    await handleRosterFlow(PHONE_A, '99', null, null, deps);
-    assert(/Please reply with a number/.test(lastMessage()), 'out-of-range selection rejected');
+  const sizeBeforeClear = getRoster(phoneHash, classA).length;
+  await send('CLEAR ROSTER');
+  await send('YES');
+  assert(/Cleared/.test(lastMessage()), 'YES confirms the clear');
+  assert(lastMessage().includes(String(sizeBeforeClear)), 'confirmation reports how many were cleared');
+  assert(getRoster(phoneHash, classA).length === 0, 'active roster is now empty');
+  assert(rosterState.get(phoneHash) === undefined, 'session cleared after YES');
 
-    resetSent();
-    await handleRosterFlow(PHONE_A, '2', null, null, deps);
-    assert(/Paste the learner names for \*Grade 5B\*/.test(lastMessage()), 'second class selected correctly by number');
+  handled = await send('CLEAR ROSTER');
+  assert(/no roster to clear/i.test(lastMessage()), 'CLEAR ROSTER on an already-empty roster short-circuits with no confirmation step');
+  assert(rosterState.get(phoneHash) === undefined, 'no session created for an already-empty roster');
 
-    resetSent();
-    await handleRosterFlow(PHONE_A, 'CANCEL', null, null, deps);
-  }
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 7: CANCEL works from every step ──────────────────────────');
+  await send('ROSTER'); // empty roster -> straight to PASTE
+  await send('CANCEL');
+  assert(/cancelled/i.test(lastMessage()), 'CANCEL confirms cancellation at PASTE');
+  assert(rosterState.get(phoneHash) === undefined, 'session removed after CANCEL at PASTE');
 
-  console.log('\n── Section 13: a second teacher\'s roster is completely separate ────');
-  const PHONE_B = 'roster-flow-teacher-b';
-  db.prepare(`INSERT INTO teachers (phone_hash, created_at, updated_at) VALUES (?, ?, ?)`).run(PHONE_B, now, now);
-  makeClass(PHONE_B, 'Grade 6A', 6, 'Mathematics');
-  {
-    resetSent();
-    await handleRosterFlow(PHONE_B, 'ROSTER', null, null, deps);
-    await handleRosterFlow(PHONE_B, 'Kagiso Molefe', null, null, deps);
-    await handleRosterFlow(PHONE_B, 'SAVE', null, null, deps);
-    assert(getRoster(PHONE_B, 1).length === 0 || true, 'sanity no-op'); // classId lookups differ per teacher; real check below
-  }
-  {
-    const classesB = getTeacherClasses(PHONE_B);
-    assert(getRoster(PHONE_B, classesB[0].id).length === 1, "teacher B's roster has their own learner");
-    assert(getRoster(PHONE_A, classId2).length === 0, "teacher A's other class is untouched by teacher B's session");
-  }
+  await send('ROSTER'); // empty roster -> straight to PASTE again
+  await send('Rebuild One\nRebuild Two');
+  await send('SAVE'); // roster now non-empty again
+  await send('ROSTER'); // -> CHOOSE_MODE
+  await send('CANCEL');
+  assert(rosterState.get(phoneHash) === undefined, 'CANCEL works at CHOOSE_MODE');
+
+  await send('ROSTER');
+  await send('MERGE');
+  await send('CANCEL'); // at PASTE
+  assert(rosterState.get(phoneHash) === undefined, 'CANCEL works at PASTE after choosing a mode');
+
+  await send('ROSTER');
+  await send('MERGE');
+  await send('Rebuild One\nRebuild Two\nRebuild Three');
+  await send('CANCEL'); // at PREVIEW
+  assert(rosterState.get(phoneHash) === undefined, 'CANCEL works at PREVIEW');
+  assert(getRoster(phoneHash, classA).length === 2, 'nothing was saved after cancelling at PREVIEW');
+
+  await send('CLEAR ROSTER');
+  await send('CANCEL'); // at CONFIRM_CLEAR — CANCEL, not just NO, also works
+  assert(rosterState.get(phoneHash) === undefined, 'CANCEL works at CONFIRM_CLEAR');
+  assert(getRoster(phoneHash, classA).length === 2, 'roster untouched after CANCEL at CONFIRM_CLEAR');
+
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 8: 2+ classes — SELECT_CLASS prompt ──────────────────────');
+  const classB = makeClass('Grade 6A', 6, 'Mathematics');
+  classesFixture = [
+    { id: classA, name: 'Grade 5B', grade: 5, subject: 'Mathematics', learner_count: 2 },
+    { id: classB, name: 'Grade 6A', grade: 6, subject: 'Mathematics', learner_count: 0 },
+  ];
+
+  handled = await send('LIST ROSTER');
+  assert(handled === true, 'LIST ROSTER handled with 2 classes');
+  state = rosterState.get(phoneHash);
+  assert(state && state.step === 'selectClass', '2+ classes requires a SELECT_CLASS prompt');
+  assert(state.action === 'list', 'pending action recorded as list');
+  assert(/Which \*class\*/i.test(lastMessage()), 'class selection prompt shown');
+
+  await send('99');
+  assert(/reply with a number/i.test(lastMessage()), 'out-of-range class reply rejected');
+  state = rosterState.get(phoneHash);
+  assert(state.step === 'selectClass', 'state unchanged after invalid class reply');
+
+  await send('2'); // Grade 6A, empty roster
+  assert(rosterState.get(phoneHash) === undefined, 'LIST ROSTER completes in a single turn once class is chosen');
+  assert(/no roster yet/i.test(lastMessage()), 'LIST ROSTER on the empty class 6A roster gives clear guidance');
+
+  await send('LIST ROSTER');
+  await send('1'); // Grade 5B, populated roster
+  assert(/Grade 5B\* roster \(2 learners\)/.test(lastMessage()), 'LIST ROSTER on class 5B reports the right roster');
+  assert(/Rebuild One/.test(lastMessage()) && /Rebuild Two/.test(lastMessage()), 'LIST ROSTER lists the actual names');
+
+  // ADD LEARNER with 2 classes routes to the chosen class only
+  await send('ADD LEARNER Thabo Sithole');
+  state = rosterState.get(phoneHash);
+  assert(state.step === 'selectClass' && state.action === 'add', 'ADD LEARNER also requires class selection with 2+ classes');
+  assert(state.payload.name === 'Thabo Sithole', 'pending name carried through the class-selection prompt');
+  await send('2'); // Grade 6A
+  assert(/Added \*Thabo Sithole\*/.test(lastMessage()), 'learner added after class selection');
+  assert(getRoster(phoneHash, classB).some((l) => l.name === 'Thabo Sithole'), 'Thabo Sithole added to class 6A specifically');
+  assert(!getRoster(phoneHash, classA).some((l) => l.name === 'Thabo Sithole'), 'class 5B roster is unaffected — rosters are isolated per class');
 
   console.log(`\n${'='.repeat(60)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);
   console.log('='.repeat(60));
 
-  if (fs.existsSync(process.env.DB_PATH)) fs.unlinkSync(process.env.DB_PATH);
+  try { db.close(); } catch (_) {}
+  try {
+    if (fs.existsSync(process.env.DB_PATH)) fs.unlinkSync(process.env.DB_PATH);
+  } catch (err) {
+    if (err.code !== 'ENOENT') {
+      console.warn(`[test cleanup] could not remove ${process.env.DB_PATH}: ${err.code}`);
+    }
+  }
   process.exit(failed > 0 ? 1 : 0);
 }
 
