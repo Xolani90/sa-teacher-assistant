@@ -162,6 +162,7 @@ const dataAssessmentState     = new SessionStore('dataAssessment',     45 * 60 *
 const lastGeneratedState      = new SessionStore('lastGenerated',      30 * 60 * 1000); // SAVE command reads this
 const observationState        = new SessionStore('observation',        30 * 60 * 1000);
 const observationHistoryState = new SessionStore('observationHistory',  15 * 60 * 1000);
+const assessmentSessionState  = new SessionStore('assessmentSession',   24 * 60 * 60 * 1000); // ADR-006 — long TTL: a teacher may resume marks capture the next day
 const saveLock = new Set(); // B5-F1: per-phone SAVE in-flight lock (try/finally in SAVE handler)
 
 // ── Clear all session states for a teacher ─────────────────────────────────
@@ -225,6 +226,24 @@ function buildWorksheetDeps() {
 
 // ── Assessment flow module (extracted from this file) ──────────────────────
 const { handleAssessmentFlow } = require('../flows/assessmentFlow');
+
+// ── Assessment session flow module (ADR-006 — Blueprint Assessment Sessions) ──
+const { handleAssessmentSessionFlow } = require('../flows/assessmentSessionFlow');
+const { listBlueprints, getBlueprintById } = require('../services/blueprintRepository');
+const { getRoster: getClassRoster } = require('../services/learnerRosterService');
+
+function buildAssessmentSessionDeps() {
+  return Object.freeze({
+    hashPhone,
+    safeSendMessage,
+    assessmentSessionState,
+    listBlueprints,
+    getBlueprintById,
+    getTeacherClasses, // ADR-004: class-context resolution
+    processAssessmentData, // ADR-006 PR2: commits captured marks on completion
+    getClassRoster, // ADR-006 PR2.5: prefills learner names from the saved roster, if any
+  });
+}
 
 // ── Generation pipeline module (extracted from this file) ──────────────────
 const { triggerGeneration, buildPdfUrl } = require('../core/generationPipeline');
@@ -2379,7 +2398,8 @@ async function processMessage(message) {
     interventionPlanState.get(phoneHash) ||
     profileUpdateState.get(phoneHash) ||
     observationState.get(phoneHash) ||
-    observationHistoryState.get(phoneHash)
+    observationHistoryState.get(phoneHash) ||
+    assessmentSessionState.get(phoneHash)
   );
 
   if (alreadyMidFlow) {
@@ -2388,6 +2408,7 @@ async function processMessage(message) {
     // order below so behavior is identical to the classified path.
     if (await handleObservationFlow(from, text, null, buildObservationDeps())) return;
     if (await handleObservationHistoryFlow(from, text, null, buildObservationDeps())) return;
+    if (await handleAssessmentSessionFlow(from, text, message, null, buildAssessmentSessionDeps())) return;
     if (await handleReportCommentFlow(from, text)) return;
     if (await handleProfileUpdateFlow(from, text)) return;
     if (await handleParentMessageFlow(from, text)) return;
@@ -2443,6 +2464,16 @@ async function processMessage(message) {
   // ── Observation history multi-turn flow (list + numbered selection) ────
   const observationHistoryHandled = await handleObservationHistoryFlow(from, text, intent, buildObservationDeps());
   if (observationHistoryHandled) return;
+
+  // ── Assessment session multi-turn flow (ADR-006) ────────────────────
+  // Checked immediately after the observation flows and before every
+  // other flow / general command classification, for the same reason
+  // observation sessions are checked first: once a teacher is capturing
+  // marks (or picking a Blueprint/Class), a bare number like "4" must be
+  // treated as that session's input, not misrouted to another flow's
+  // classifier guess.
+  const assessmentSessionHandled = await handleAssessmentSessionFlow(from, text, message, intent, buildAssessmentSessionDeps());
+  if (assessmentSessionHandled) return;
 
   // ── Report comment multi-turn flow ─────────────────────────────
   const reportCommentHandled = await handleReportCommentFlow(from, text, intent);
