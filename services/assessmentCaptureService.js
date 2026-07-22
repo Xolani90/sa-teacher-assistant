@@ -16,8 +16,9 @@
  *
  * Scope for this PR (explicitly excluded, per the PR2 plan):
  *   - no analytics, no AI, no report generation
- *   - no bulk/paste entry, no correction/undo commands — single learner,
- *     single question at a time only
+ *   - no bulk/paste entry (added in ADR-006 PR4 — see submitBulkReply()
+ *     below), no correction/undo commands (deferred to PR5) — single
+ *     learner, single question at a time only
  *   - nothing is written to learner_results during capture. Marks are
  *     held in the session state (SessionStore already autosaves state
  *     after every turn — see sessionStore.js) and only committed via
@@ -36,6 +37,8 @@
  *
  * @see docs/adr/ADR-006 (Blueprint Assessment Sessions)
  */
+
+const { adaptParsedMarks } = require('./parsedMarksAdapter');
 
 const CAPTURE_STEP = {
   NAME: 'name',
@@ -263,6 +266,118 @@ function submitReply(state, rawText) {
 }
 
 /**
+ * Advances the state machine by applying a *pasted block* of marks in one
+ * go (ADR-006 PR4 — Bulk Capture), instead of one name/mark reply at a
+ * time via submitReply().
+ *
+ * Per ADR-006 §3.3, bulk paste is an *alternate input mechanism*, not an
+ * alternate persistence mechanism: this function normalizes the pasted
+ * text into the exact same `{ name, marks }` learner shape submitReply()
+ * already produces (via utils/marksParser.js + services/parsedMarksAdapter.js),
+ * fills as many of the *remaining* learner slots as the paste covers, and
+ * leaves the state machine in a shape indistinguishable from having
+ * reached the same point one submitReply() turn at a time. Every
+ * downstream consumer (formatCapturePrompt, formatStatus, isComplete,
+ * toLearnerResults, processAssessmentData) stays untouched.
+ *
+ * Slot-filling rule: pasted learners are applied in order to
+ * state.learnerIndex, state.learnerIndex + 1, ... — never to slots
+ * already completed. If the paste contains more valid learners than
+ * there are remaining slots, the extras are reported back as skipped
+ * rather than silently dropped or allowed to overflow learnerCount. If
+ * it contains fewer, the remaining slots are left exactly as
+ * submitReply()'s NAME/MARKS flow would leave them, so capture can
+ * continue turn-by-turn (or via another bulk paste) from there.
+ *
+ * Never throws: parser failures, per-learner validation failures, and
+ * slot-overflow are all returned as structured data in `result` for the
+ * caller (assessmentSessionFlow.js, once wired) to render — never as a
+ * flattened string.
+ *
+ * @param {Object} state - current ACTIVE-step state
+ * @param {string} rawText - the teacher's raw pasted block of marks
+ * @param {Object} [deps]
+ * @param {Function} [deps.parseMarks] - injected for testing; defaults to
+ *   utils/marksParser.js's parseMarks(). Required signature:
+ *   (text: string, format: 'text') => marksParser's parseMarks() return shape.
+ * @returns {{
+ *   ok: boolean,
+ *   state: Object,
+ *   result: { accepted: Array, skipped: Array, warnings: string[], errors: string[], appliedCount?: number }|null,
+ *   error?: string,
+ * }}
+ */
+function submitBulkReply(state, rawText, deps = {}) {
+  if (isComplete(state)) {
+    return { ok: false, state, result: null, error: 'This assessment session is already complete.' };
+  }
+
+  const parseMarksImpl = deps.parseMarks || require('../utils/marksParser').parseMarks;
+  const parsed = parseMarksImpl(rawText, 'text');
+  const { accepted, skipped, warnings, errors } = adaptParsedMarks(parsed, state.questions);
+
+  if (errors.length > 0) {
+    // Parser-level fatal error (e.g. no learner data found at all) —
+    // nothing to apply, state is untouched.
+    return { ok: false, state, result: { accepted: [], skipped, warnings, errors }, error: errors[0] };
+  }
+
+  if (accepted.length === 0) {
+    return {
+      ok: false,
+      state,
+      result: { accepted: [], skipped, warnings, errors },
+      error: 'No learners could be captured from that paste. Please check the format and try again.',
+    };
+  }
+
+  const remainingSlots = state.learnerCount - state.learnerIndex;
+  const toApply = accepted.slice(0, remainingSlots);
+  const overflow = accepted.slice(remainingSlots);
+
+  const learners = state.learners.slice();
+  for (let i = 0; i < toApply.length; i += 1) {
+    learners[state.learnerIndex + i] = toApply[i];
+  }
+
+  const learnerIndex = state.learnerIndex + toApply.length;
+  const learnersCompleted = state.progress.learnersCompleted + toApply.length;
+  const questionsAnswered = state.progress.questionsAnswered + toApply.length * state.questions.length;
+
+  const nextLearnerHasName = learnerIndex < state.learnerCount && learners[learnerIndex] && learners[learnerIndex].name;
+  const captureStep = nextLearnerHasName ? CAPTURE_STEP.MARKS : CAPTURE_STEP.NAME;
+
+  const overflowSkipped = overflow.map((learner) => ({
+    learnerName: learner.name,
+    reason: `Skipped "${learner.name}" — this class only has ${state.learnerCount} learner(s) and ${Math.max(remainingSlots, 0)} slot(s) remained.`,
+  }));
+
+  return {
+    ok: true,
+    state: {
+      ...state,
+      learners,
+      learnerIndex,
+      questionIndex: 0,
+      captureStep,
+      progress: {
+        learnersCompleted,
+        questionsAnswered,
+        totalQuestions: state.progress.totalQuestions,
+      },
+      lastActivity: Date.now(),
+    },
+    result: {
+      accepted: toApply,
+      skipped: skipped.concat(overflowSkipped),
+      warnings,
+      errors,
+      appliedCount: toApply.length,
+    },
+  };
+}
+
+/**
  * Formats the prompt for whatever the teacher needs to reply to next
  * (either "what's this learner's name" or "enter marks for question N").
  * Returns '' once capture is complete — callers check isComplete() first
@@ -338,6 +453,7 @@ module.exports = {
   isComplete,
   currentQuestion,
   submitReply,
+  submitBulkReply,
   formatCapturePrompt,
   formatStatus,
   toLearnerResults,
