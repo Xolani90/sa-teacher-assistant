@@ -353,6 +353,21 @@ function runMigrations() {
     // wrote," independent of any later revision to the same blueprint_id.
     `ALTER TABLE assessments ADD COLUMN blueprint_version INTEGER`,
 
+    // Migration 031: soft-delete marker for roster management (ADR-006
+    // PR3). Nullable and purely additive. Removing a learner from a
+    // class's roster (WhatsApp REMOVE LEARNER / CLEAR ROSTER) sets this
+    // instead of deleting the row or nulling class_id — learner_id is
+    // referenced by learner_results and observation_records (Migration
+    // 025) and must survive roster cleanup so past marks/observations
+    // stay attributable. Deliberately NOT modeled as class_id = NULL
+    // ("unclassed"): that would collide with
+    // idx_learners_identity_unclassed (Migration 026) the moment two
+    // different classes each remove a same-named learner. getRoster()
+    // (learnerRosterService.js) filters WHERE removed_at IS NULL; a
+    // later ADD LEARNER / ROSTER paste that identity-matches a removed
+    // learner un-removes them instead of creating a duplicate.
+    `ALTER TABLE learners ADD COLUMN removed_at TEXT`,
+
     // Migration 019 and Migration 021 (grade data-repair) were moved out of
     // this array — see dataRepairMigrations below. They are UPDATE
     // statements, not ALTER TABLEs, so they don't belong under this loop's

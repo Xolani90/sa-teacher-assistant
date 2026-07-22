@@ -163,6 +163,7 @@ const lastGeneratedState      = new SessionStore('lastGenerated',      30 * 60 *
 const observationState        = new SessionStore('observation',        30 * 60 * 1000);
 const observationHistoryState = new SessionStore('observationHistory',  15 * 60 * 1000);
 const assessmentSessionState  = new SessionStore('assessmentSession',   24 * 60 * 60 * 1000); // ADR-006 — long TTL: a teacher may resume marks capture the next day
+const rosterState             = new SessionStore('roster',              30 * 60 * 1000); // ADR-006 PR3 — ROSTER/ADD/REMOVE/CLEAR
 const saveLock = new Set(); // B5-F1: per-phone SAVE in-flight lock (try/finally in SAVE handler)
 
 // ── Clear all session states for a teacher ─────────────────────────────────
@@ -242,6 +243,20 @@ function buildAssessmentSessionDeps() {
     getTeacherClasses, // ADR-004: class-context resolution
     processAssessmentData, // ADR-006 PR2: commits captured marks on completion
     getClassRoster, // ADR-006 PR2.5: prefills learner names from the saved roster, if any
+  });
+}
+
+// ── Roster flow module (ADR-006 PR3 — ROSTER/ADD/REMOVE/CLEAR) ─────────────
+const { handleRosterFlow } = require('../flows/rosterFlow');
+
+function buildRosterDeps() {
+  return Object.freeze({
+    hashPhone,
+    safeSendMessage,
+    rosterState,
+    getTeacherClasses, // ADR-004: class-context resolution
+    formatClassSelectionPrompt,
+    matchClassSelection,
   });
 }
 
@@ -2399,7 +2414,8 @@ async function processMessage(message) {
     profileUpdateState.get(phoneHash) ||
     observationState.get(phoneHash) ||
     observationHistoryState.get(phoneHash) ||
-    assessmentSessionState.get(phoneHash)
+    assessmentSessionState.get(phoneHash) ||
+    rosterState.get(phoneHash)
   );
 
   if (alreadyMidFlow) {
@@ -2409,6 +2425,7 @@ async function processMessage(message) {
     if (await handleObservationFlow(from, text, null, buildObservationDeps())) return;
     if (await handleObservationHistoryFlow(from, text, null, buildObservationDeps())) return;
     if (await handleAssessmentSessionFlow(from, text, message, null, buildAssessmentSessionDeps())) return;
+    if (await handleRosterFlow(from, text, message, null, buildRosterDeps())) return;
     if (await handleReportCommentFlow(from, text)) return;
     if (await handleProfileUpdateFlow(from, text)) return;
     if (await handleParentMessageFlow(from, text)) return;
@@ -2474,6 +2491,14 @@ async function processMessage(message) {
   // classifier guess.
   const assessmentSessionHandled = await handleAssessmentSessionFlow(from, text, message, intent, buildAssessmentSessionDeps());
   if (assessmentSessionHandled) return;
+
+  // ── Roster multi-turn flow (ADR-006 PR3) ────────────────────────────
+  // Exact-command entry points (ROSTER/ADD LEARNER/etc.), checked right
+  // after the assessment session flow for the same reason: once a roster
+  // session is active, a bare reply like "REPLACE" or a pasted name list
+  // is that session's input, not a new intent to classify.
+  const rosterHandled = await handleRosterFlow(from, text, message, intent, buildRosterDeps());
+  if (rosterHandled) return;
 
   // ── Report comment multi-turn flow ─────────────────────────────
   const reportCommentHandled = await handleReportCommentFlow(from, text, intent);
