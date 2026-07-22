@@ -42,6 +42,7 @@ const { getBlueprintById } = require('./blueprintRepository');
  *   assessmentId: number,
  *   blueprintId: number,
  *   blueprintTitle: string,
+ *   blueprintVersion: number,
  *   totalMarks: number,
  *   learnerCount: number,
  *   classAverage: { mark: number, percentage: number },
@@ -176,6 +177,7 @@ function getBlueprintAssessmentAnalytics(assessmentId) {
     assessmentId,
     blueprintId: blueprint.id,
     blueprintTitle: blueprint.title,
+    blueprintVersion: blueprint.version,
     totalMarks: assessment.total_marks,
     learnerCount,
     classAverage: {

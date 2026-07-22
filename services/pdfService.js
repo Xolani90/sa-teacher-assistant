@@ -1629,4 +1629,183 @@ async function generateReportSummaryPdf(comments, metadata = {}) {
   });
 }
 
-module.exports = { generatePdf, getPdfPath, cleanupOldPdfs, generateReportSummaryPdf, sanitiseForPdf, formatMarkStr, formatGradeLabel };
+
+async function generateBlueprintAssessmentPdf(assessmentId) {
+  const { getBlueprintAssessmentAnalytics } = require('./blueprintAnalytics');
+  const { getDb } = require('../utils/database');
+
+  const analytics = getBlueprintAssessmentAnalytics(assessmentId);
+  if (analytics.error) {
+    return { error: analytics.error };
+  }
+
+  const db = getDb();
+  const assessment = db.prepare(`SELECT * FROM assessments WHERE id = ?`).get(assessmentId);
+  // Looked up directly rather than via usageTracker (which only exposes
+  // getTeacherByPhone, keyed by raw phone number, not phone_hash) — the
+  // assessment row only has phone_hash, so a direct keyed lookup is both
+  // simpler and avoids re-hashing anything.
+  const teacher = assessment
+    ? db.prepare(`SELECT * FROM teachers WHERE phone_hash = ?`).get(assessment.phone_hash)
+    : null;
+
+  const grade = formatGradeLabel(assessment && assessment.grade);
+  const subject = assessment && assessment.subject;
+  const school = teacher && teacher.school;
+  const teacherName = teacher && teacher.name;
+
+  ensurePdfDir();
+
+  const fileId = uuidv4();
+  const filename = `Blueprint_Report_${(analytics.blueprintTitle || 'Assessment').replace(/[^a-z0-9]+/gi, '_')}.pdf`;
+  const filePath = path.join(PDF_DIR, `${fileId}.pdf`);
+
+  // Same "wrap rendering in the Promise executor" pattern as
+  // generateReportSummaryPdf — a synchronous render error still needs the
+  // stream destroyed and the partial file unlinked immediately, not left
+  // for the next cleanupOldPdfs() sweep.
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: 'A4',
+      margins: { top: 110, bottom: 60, left: 50, right: 50 },
+      bufferPages: true,
+    });
+    makePdfTextSafe(doc);
+
+    const stream = fs.createWriteStream(filePath);
+    doc.pipe(stream);
+
+    stream.on('finish', () => resolve({ fileId, filename }));
+    stream.on('error', reject);
+
+    try {
+      const title = 'BLUEPRINT ASSESSMENT REPORT';
+      const headerMeta = { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA'), marks: analytics.totalMarks };
+
+      drawHeader(doc, headerMeta);
+      doc.on('pageAdded', () => {
+        drawHeader(doc, headerMeta);
+        drawFooter(doc, school);
+      });
+      drawFooter(doc, school);
+
+      const margin = 50;
+      const bodyWidth = doc.page.width - margin * 2;
+
+      // ── Cover / summary block ──────────────────────────────────────────
+      doc.font(FONTS.heading).fontSize(13).fillColor(COLORS.darkText).text(sanitiseForPdf(analytics.blueprintTitle || 'Assessment'));
+      doc.font(FONTS.body).fontSize(10).fillColor(COLORS.midGray)
+        .text(`Blueprint Version: v${analytics.blueprintVersion || 1}   |   Teacher: ${teacherName || '—'}   |   Learners: ${analytics.learnerCount}`);
+      doc.moveDown(1);
+
+      // ── Overall performance ──────────────────────────────────────────
+      doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text('Overall Performance', { underline: true });
+      doc.moveDown(0.4);
+
+      const passCount = analytics.learners.filter((l) => l.percentage >= 50).length;
+      const passRate = analytics.learnerCount > 0 ? (passCount / analytics.learnerCount) * 100 : 0;
+      const highest = Math.max(...analytics.learners.map((l) => l.percentage));
+      const lowest = Math.min(...analytics.learners.map((l) => l.percentage));
+
+      const statCells = [
+        `Average: ${analytics.classAverage.percentage.toFixed(0)}%`,
+        `Highest: ${highest.toFixed(0)}%`,
+        `Lowest: ${lowest.toFixed(0)}%`,
+        `Pass Rate: ${passRate.toFixed(0)}%`,
+      ];
+      doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText).text(statCells.join('     '));
+      doc.moveDown(1);
+
+      // ── Topic performance table ─────────────────────────────────────
+      doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text('Topic Performance', { underline: true });
+      doc.moveDown(0.4);
+
+      const topicColWidths = [bodyWidth * 0.4, bodyWidth * 0.2, bodyWidth * 0.2, bodyWidth * 0.2];
+      const HEADER_H = 20;
+      const MIN_ROW_H = 18;
+      ensureSpace(doc, HEADER_H + MIN_ROW_H);
+      drawTableHeaderRow(doc, ['Topic', 'Avg', 'Max', '%'], margin, topicColWidths, HEADER_H);
+      analytics.topics.forEach((t, i) => {
+        const cells = [sanitiseForPdf(t.topic), t.classAverageMark.toFixed(0), String(t.maxMarks), `${t.classAveragePercentage.toFixed(0)}%`];
+        const rowHeight = computeRowHeight(doc, cells, topicColWidths, MIN_ROW_H);
+        const yBefore = doc.y;
+        ensureSpace(doc, rowHeight);
+        if (doc.y !== yBefore) drawTableHeaderRow(doc, ['Topic', 'Avg', 'Max', '%'], margin, topicColWidths, HEADER_H);
+        drawTableDataRow(doc, cells, margin, topicColWidths, rowHeight, { striped: i % 2 === 1 });
+      });
+      doc.moveDown(1);
+
+      // ── Strongest / weakest topics ──────────────────────────────────
+      doc.font(FONTS.heading).fontSize(11).fillColor(COLORS.darkText).text('Strongest Topics', { underline: true });
+      doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText);
+      analytics.strongestTopics.forEach((t, i) => doc.text(`${i + 1}. ${sanitiseForPdf(t.topic)} — ${t.classAveragePercentage.toFixed(0)}%`));
+      doc.moveDown(0.6);
+
+      doc.font(FONTS.heading).fontSize(11).fillColor(COLORS.darkText).text('Weakest Topics', { underline: true });
+      doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText);
+      analytics.weakestTopics.forEach((t, i) => doc.text(`${i + 1}. ${sanitiseForPdf(t.topic)} — ${t.classAveragePercentage.toFixed(0)}%`));
+      doc.moveDown(1);
+
+      // ── Learner summary table ───────────────────────────────────────
+      doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text('Learner Summary', { underline: true });
+      doc.moveDown(0.4);
+
+      const learnerColWidths = [bodyWidth * 0.5, bodyWidth * 0.25, bodyWidth * 0.25];
+      ensureSpace(doc, HEADER_H + MIN_ROW_H);
+      drawTableHeaderRow(doc, ['Learner', 'Total', '%'], margin, learnerColWidths, HEADER_H);
+      const sortedLearners = [...analytics.learners].sort((a, b) => b.percentage - a.percentage);
+      sortedLearners.forEach((l, i) => {
+        const cells = [sanitiseForPdf(l.learnerName), `${l.mark}/${l.totalMarks}`, `${l.percentage.toFixed(0)}%`];
+        const rowHeight = computeRowHeight(doc, cells, learnerColWidths, MIN_ROW_H);
+        const yBefore = doc.y;
+        ensureSpace(doc, rowHeight);
+        if (doc.y !== yBefore) drawTableHeaderRow(doc, ['Learner', 'Total', '%'], margin, learnerColWidths, HEADER_H);
+        drawTableDataRow(doc, cells, margin, learnerColWidths, rowHeight, { striped: i % 2 === 1 });
+      });
+      doc.moveDown(1);
+
+      // ── Learners needing support (below 40%) ────────────────────────
+      const strugglingLearners = analytics.learners.filter((l) => l.percentage < 40);
+      if (strugglingLearners.length > 0) {
+        ensureSpace(doc, 60);
+        doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text('Learners Needing Support (Below 40%)', { underline: true });
+        doc.moveDown(0.3);
+        doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText);
+        strugglingLearners.forEach((l) => doc.text(`- ${sanitiseForPdf(l.learnerName)} (${l.percentage.toFixed(0)}%)`));
+        doc.moveDown(0.4);
+        const weakestTopicNames = analytics.weakestTopics.map((t) => t.topic).join(' and ');
+        doc.font(FONTS.italic).fontSize(9).fillColor(COLORS.midGray)
+          .text(`Recommendation: Schedule intervention focused on ${sanitiseForPdf(weakestTopicNames)}.`);
+        doc.moveDown(1);
+      }
+
+      // ── Appendix: per-learner topic breakdown ───────────────────────
+      doc.addPage();
+      doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText).text('Appendix: Per-Topic Learner Detail', { underline: true });
+      doc.moveDown(0.4);
+
+      const topicNames = analytics.topics.map((t) => t.topic);
+      const appendixColWidths = [bodyWidth * 0.3, ...topicNames.map(() => (bodyWidth * 0.7) / topicNames.length)];
+      const appendixHeader = ['Learner', ...topicNames];
+      ensureSpace(doc, HEADER_H + MIN_ROW_H);
+      drawTableHeaderRow(doc, appendixHeader, margin, appendixColWidths, HEADER_H);
+      sortedLearners.forEach((l, i) => {
+        const cells = [sanitiseForPdf(l.learnerName), ...l.topics.map((t) => `${t.percentage.toFixed(0)}%`)];
+        const rowHeight = computeRowHeight(doc, cells, appendixColWidths, MIN_ROW_H);
+        const yBefore = doc.y;
+        ensureSpace(doc, rowHeight);
+        if (doc.y !== yBefore) drawTableHeaderRow(doc, appendixHeader, margin, appendixColWidths, HEADER_H);
+        drawTableDataRow(doc, cells, margin, appendixColWidths, rowHeight, { striped: i % 2 === 1 });
+      });
+
+      stampPageNumbers(doc);
+      doc.end();
+    } catch (renderErr) {
+      stream.destroy();
+      fs.unlink(filePath, () => {});
+      reject(renderErr);
+    }
+  });
+}
+
+module.exports = { generatePdf, getPdfPath, cleanupOldPdfs, generateReportSummaryPdf, generateBlueprintAssessmentPdf, sanitiseForPdf, formatMarkStr, formatGradeLabel };
