@@ -1,0 +1,683 @@
+diff --git a/flows/assessmentSessionFlow.js b/flows/assessmentSessionFlow.js
+index eb298f9..85b9258 100644
+--- a/flows/assessmentSessionFlow.js
++++ b/flows/assessmentSessionFlow.js
+@@ -40,6 +40,7 @@ const {
+   isComplete,
+   submitReply,
+   submitBulkReply,
++  submitUndo,
+   formatCapturePrompt,
+   formatStatus,
+   toLearnerResults,
+@@ -269,8 +270,26 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
+     return true;
+   }
+ 
+-  // ── ACTIVE - marks capture (ADR-006 PR2 interactive, PR4 bulk paste) ──
++  // ── ACTIVE - marks capture (ADR-006 PR2 interactive, PR4 bulk paste, ──
++  // PR5 Phase 1a corrections/undo) ───────────────────────────────────────
+   if (state.step === STEP.ACTIVE) {
++    // UNDO/BACK (aliases) revert the most recent successful turn — a
++    // single name, a single mark, or one whole bulk paste, whichever was
++    // last applied. Checked before the bulk-paste/interactive dispatch so
++    // a teacher can never accidentally have "UNDO" parsed as a name or a
++    // mark value.
++    if (upper === 'UNDO' || upper === 'BACK') {
++      const undoResult = submitUndo(state);
++      if (!undoResult.ok) {
++        await safeSendMessage(from, undoResult.error);
++        return true;
++      }
++
++      assessmentSessionState.set(phoneHash, undoResult.state);
++      await safeSendMessage(from, `↩️ Undone.\n\n${formatCapturePrompt(undoResult.state)}`);
++      return true;
++    }
++
+     const isBulk = looksLikeBulkPaste(trimmed);
+     const result = isBulk
+       ? submitBulkReply(state, trimmed, { parseMarks })
+diff --git a/services/assessmentCaptureService.js b/services/assessmentCaptureService.js
+index 3b5d829..eed5bc7 100644
+--- a/services/assessmentCaptureService.js
++++ b/services/assessmentCaptureService.js
+@@ -17,8 +17,16 @@
+  * Scope for this PR (explicitly excluded, per the PR2 plan):
+  *   - no analytics, no AI, no report generation
+  *   - no bulk/paste entry (added in ADR-006 PR4 — see submitBulkReply()
+- *     below), no correction/undo commands (deferred to PR5) — single
+- *     learner, single question at a time only
++ *     below); single learner, single question at a time only
++ *
++ * ADR-006 PR5 Phase 1a (Corrections/Undo) is implemented below via
++ * submitUndo() — a capped history stack of pre-mutation snapshots, pushed
++ * by every successful submitReply()/submitBulkReply() call and popped by
++ * submitUndo(). One bulk paste is a single history entry (UNDO reverts the
++ * whole paste as one unit, not learner-by-learner). Phase 1b (EDIT
++ * <learner> — jumping back to re-edit an already-completed learner
++ * mid-session) is still deferred; it needs its own return-pointer
++ * bookkeeping and is intentionally not built on top of this stack.
+  *   - nothing is written to learner_results during capture. Marks are
+  *     held in the session state (SessionStore already autosaves state
+  *     after every turn — see sessionStore.js) and only committed via
+@@ -45,6 +53,34 @@ const CAPTURE_STEP = {
+   MARKS: 'marks',
+ };
+ 
++// ADR-006 PR5 Phase 1a — capped undo history. A snapshot is pushed onto
++// state.history immediately before each mutating submitReply()/
++// submitBulkReply() call succeeds, so submitUndo() can restore exactly
++// the state the teacher was looking at before that turn. Capped rather
++// than unbounded so a very long capture session (many learners x many
++// questions) doesn't grow the persisted SessionStore row without bound —
++// 20 steps is far more than a teacher would plausibly want to walk back
++// in one sitting.
++const MAX_HISTORY = 20;
++
++// Snapshot of exactly the fields a turn can mutate — deliberately not the
++// whole state object (blueprint/question/class metadata never changes
++// mid-session, so there's no need to duplicate it on every turn).
++function snapshotOf(state) {
++  return {
++    learners: state.learners,
++    learnerIndex: state.learnerIndex,
++    questionIndex: state.questionIndex,
++    captureStep: state.captureStep,
++    progress: state.progress,
++  };
++}
++
++function pushHistory(state) {
++  const history = (state.history || []).concat([snapshotOf(state)]);
++  return history.length > MAX_HISTORY ? history.slice(history.length - MAX_HISTORY) : history;
++}
++
+ /**
+  * Builds the initial ACTIVE-step capture state once a Blueprint and Class
+  * have been chosen (called from the SELECT_CLASS -> ACTIVE transition).
+@@ -103,6 +139,7 @@ function initCapture({ blueprint, classId, className, learnerCount, roster = []
+     questionIndex: 0,
+     captureStep: firstLearnerHasName ? CAPTURE_STEP.MARKS : CAPTURE_STEP.NAME,
+     learners,
++    history: [], // ADR-006 PR5 Phase 1a — undo stack, see pushHistory()
+     progress: {
+       learnersCompleted: 0,
+       questionsAnswered: 0,
+@@ -202,6 +239,7 @@ function submitReply(state, rawText) {
+       ok: true,
+       state: {
+         ...state,
++        history: pushHistory(state),
+         learners,
+         captureStep: CAPTURE_STEP.MARKS,
+         questionIndex: 0,
+@@ -251,6 +289,7 @@ function submitReply(state, rawText) {
+     ok: true,
+     state: {
+       ...state,
++      history: pushHistory(state),
+       learners,
+       learnerIndex,
+       questionIndex,
+@@ -356,6 +395,7 @@ function submitBulkReply(state, rawText, deps = {}) {
+     ok: true,
+     state: {
+       ...state,
++      history: pushHistory(state),
+       learners,
+       learnerIndex,
+       questionIndex: 0,
+@@ -377,6 +417,48 @@ function submitBulkReply(state, rawText, deps = {}) {
+   };
+ }
+ 
++/**
++ * Reverts the state machine to its shape immediately before the most
++ * recent successful submitReply()/submitBulkReply() call (ADR-006 PR5
++ * Phase 1a — UNDO/BACK). A bulk paste is a single history entry, so one
++ * UNDO reverts the whole paste at once, not learner-by-learner.
++ *
++ * Deliberately refuses on a completed session: by the time isComplete()
++ * is true, assessmentSessionFlow.js has already deleted the session and
++ * handed off to processAssessmentData() — there is nothing left in
++ * SessionStore for an UNDO to act on, so treat it the same as any other
++ * post-completion command for a consistent error message.
++ *
++ * Never throws: an empty history (nothing captured yet this session, or
++ * MAX_HISTORY already exhausted) is reported back as a structured
++ * failure, same convention as submitReply()/submitBulkReply().
++ *
++ * @param {Object} state - current ACTIVE-step state
++ * @returns {{ ok: boolean, state: Object, error?: string }}
++ */
++function submitUndo(state) {
++  if (isComplete(state)) {
++    return { ok: false, state, error: 'This assessment session is already complete.' };
++  }
++
++  const history = state.history || [];
++  if (history.length === 0) {
++    return { ok: false, state, error: 'Nothing to undo.' };
++  }
++
++  const snapshot = history[history.length - 1];
++
++  return {
++    ok: true,
++    state: {
++      ...state,
++      ...snapshot,
++      history: history.slice(0, -1),
++      lastActivity: Date.now(),
++    },
++  };
++}
++
+ /**
+  * Formats the prompt for whatever the teacher needs to reply to next
+  * (either "what's this learner's name" or "enter marks for question N").
+@@ -454,6 +536,7 @@ module.exports = {
+   currentQuestion,
+   submitReply,
+   submitBulkReply,
++  submitUndo,
+   formatCapturePrompt,
+   formatStatus,
+   toLearnerResults,
+diff --git a/tests/assessment-capture-undo.test.js b/tests/assessment-capture-undo.test.js
+new file mode 100644
+index 0000000..f8dc282
+--- /dev/null
++++ b/tests/assessment-capture-undo.test.js
+@@ -0,0 +1,216 @@
++'use strict';
++/**
++ * AssessmentCaptureService — submitUndo() tests (ADR-006 PR5 Phase 1a).
++ *
++ * Pure state-machine logic, no DB/WhatsApp involved — same convention as
++ * tests/assessment-capture-service.test.js. Covers:
++ *   1. UNDO after a single mark reverts to the prompt for that same mark.
++ *   2. UNDO after a name entry reverts to asking for the name again.
++ *   3. Consecutive UNDOs walk back multiple turns, one at a time.
++ *   4. UNDO with no history yet returns a "Nothing to undo." error and
++ *      leaves state untouched.
++ *   5. UNDO on an already-complete session is refused (matches the
++ *      "session already deleted" real-world case).
++ *   6. UNDO after a bulk paste reverts the *whole paste* as one unit, not
++ *      learner-by-learner.
++ *   7. History is capped at MAX_HISTORY — walking back further than the
++ *      cap runs out of history even though more turns happened.
++ *
++ * Run individually: node tests/assessment-capture-undo.test.js
++ * Run via npm:       npm test
++ */
++
++const {
++  initCapture,
++  isComplete,
++  submitReply,
++  submitBulkReply,
++  submitUndo,
++  formatCapturePrompt,
++} = require('../services/assessmentCaptureService');
++
++let passed = 0;
++let failed = 0;
++
++function assert(condition, label) {
++  if (condition) {
++    console.log(`  ✅ ${label}`);
++    passed++;
++  } else {
++    console.error(`  ❌ FAIL: ${label}`);
++    failed++;
++  }
++}
++
++const BLUEPRINT = {
++  id: 42,
++  title: 'Term 3 Fractions Test',
++  totalMarks: 15,
++  version: 1,
++  grade: 5,
++  subject: 'Mathematics',
++  term: 3,
++  questions: [
++    { questionNumber: 1, topic: 'Fractions', maxMarks: 5 },
++    { questionNumber: 2, topic: 'Decimals', maxMarks: 10 },
++  ],
++};
++
++function freshState(learnerCount = 2) {
++  return initCapture({ blueprint: BLUEPRINT, classId: 7, className: '5B', learnerCount });
++}
++
++// ═══════════════════════════════════════════════════════════════════
++console.log('\n── Section 1: UNDO after a single mark reverts that one mark ──────');
++{
++  let state = freshState(2);
++  state = submitReply(state, 'Sipho Dlamini').state; // name
++  state = submitReply(state, '4').state; // Q1 = 4 (should be 9, typo)
++
++  assert(state.learners[0].marks[1] === 4, 'mark 4 was recorded for Q1 before undo');
++  assert(state.questionIndex === 1, 'advanced to Q2 after the mistaken entry');
++
++  const undone = submitUndo(state);
++  assert(undone.ok === true, 'undo succeeds');
++  assert(undone.state.questionIndex === 0, 'back on Q1');
++  assert(undone.state.learners[0].marks[1] === undefined, 'the mistaken Q1 mark is gone');
++  assert(undone.state.learners[0].name === 'Sipho Dlamini', 'name entry itself is untouched by this single undo');
++
++  // Re-enter the correct mark (Q1's max is 5) and confirm capture
++  // continues normally.
++  const corrected = submitReply(undone.state, '5').state;
++  assert(corrected.learners[0].marks[1] === 5, 'corrected mark recorded after undo + re-entry');
++}
++
++// ═══════════════════════════════════════════════════════════════════
++console.log('\n── Section 2: UNDO after a name entry reverts to asking for the name ─');
++{
++  let state = freshState(2);
++  state = submitReply(state, 'Wrong Name').state;
++  assert(state.captureStep === 'marks', 'advanced to marks after the name reply');
++
++  const undone = submitUndo(state);
++  assert(undone.ok === true, 'undo succeeds');
++  assert(undone.state.captureStep === 'name', 'back to asking for learner 1\'s name');
++  assert(formatCapturePrompt(undone.state).includes('What is their name?'), 'prompt reflects the reverted step');
++  assert(undone.state.learners.length === 0 || !undone.state.learners[0], 'the wrong name was discarded');
++}
++
++// ═══════════════════════════════════════════════════════════════════
++console.log('\n── Section 3: consecutive UNDOs walk back one turn at a time ──────');
++{
++  let state = freshState(2);
++  state = submitReply(state, 'Learner One').state; // turn 1: name
++  state = submitReply(state, '3').state; // turn 2: Q1 = 3
++  state = submitReply(state, '7').state; // turn 3: Q2 = 7 -> rolls to learner 2, name step
++
++  assert(state.learnerIndex === 1, 'rolled over to learner 2');
++  assert(state.captureStep === 'name', 'learner 2 asked for a name');
++
++  let step = submitUndo(state);
++  assert(step.ok === true, 'undo #1 succeeds');
++  assert(step.state.learnerIndex === 0 && step.state.questionIndex === 1, 'undo #1 reverts the Q2=7 turn, back on learner 1 Q2');
++
++  step = submitUndo(step.state);
++  assert(step.ok === true, 'undo #2 succeeds');
++  assert(step.state.questionIndex === 0, 'undo #2 reverts the Q1=3 turn, back on learner 1 Q1');
++
++  step = submitUndo(step.state);
++  assert(step.ok === true, 'undo #3 succeeds');
++  assert(step.state.captureStep === 'name', 'undo #3 reverts the name turn, back to asking for a name');
++
++  step = submitUndo(step.state);
++  assert(step.ok === false, 'undo #4 has nothing left to revert');
++  assert(step.error === 'Nothing to undo.', 'correct error message once history is exhausted');
++}
++
++// ═══════════════════════════════════════════════════════════════════
++console.log('\n── Section 4: UNDO with empty history is refused, state untouched ─');
++{
++  const state = freshState(2);
++  const result = submitUndo(state);
++  assert(result.ok === false, 'fresh session has nothing to undo');
++  assert(result.error === 'Nothing to undo.', 'correct error message');
++  assert(result.state === state, 'same state reference returned on failure (no-op, per submitReply()/submitBulkReply() convention)');
++}
++
++// ═══════════════════════════════════════════════════════════════════
++console.log('\n── Section 5: UNDO on an already-complete session is refused ──────');
++{
++  let state = freshState(1); // 1 learner, easiest to drive to completion
++  state = submitReply(state, 'Only Learner').state;
++  state = submitReply(state, '5').state;
++  state = submitReply(state, '10').state;
++  assert(isComplete(state), 'session is complete after the last mark');
++
++  const result = submitUndo(state);
++  assert(result.ok === false, 'undo refused on a completed session');
++  assert(result.error === 'This assessment session is already complete.', 'matches submitReply()/submitBulkReply()\'s completion error');
++}
++
++// ═══════════════════════════════════════════════════════════════════
++console.log('\n── Section 6: UNDO after a bulk paste reverts the whole paste ─────');
++{
++  let state = freshState(3);
++
++  const fakeParseMarks = () => ({
++    learners: [
++      { learnerName: 'Sipho Dlamini', questionData: { 1: { mark: 4, maxMark: 5 }, 2: { mark: 8, maxMark: 10 } } },
++      { learnerName: 'Lebo Molefe', questionData: { 1: { mark: 5, maxMark: 5 }, 2: { mark: 9, maxMark: 10 } } },
++    ],
++    totalMark: 0,
++    questionCount: 2,
++    questionMaxMarks: {},
++    questionTopics: {},
++    warnings: [],
++    errors: [],
++  });
++
++  const bulk = submitBulkReply(state, 'Sipho Dlamini 4 8\nLebo Molefe 5 9', { parseMarks: fakeParseMarks });
++  assert(bulk.ok === true, 'bulk paste applied');
++  assert(bulk.state.learnerIndex === 2, 'both learners from the paste were applied');
++
++  const undone = submitUndo(bulk.state);
++  assert(undone.ok === true, 'undo succeeds after a bulk paste');
++  assert(undone.state.learnerIndex === 0, 'undo reverts the ENTIRE paste at once (back to learner 1), not one learner at a time');
++  assert(undone.state.learners.length === 0 || !undone.state.learners[0], 'both pasted learners are gone after a single undo');
++  assert(undone.state.history.length === 0, 'history is empty again — the whole paste was exactly one entry');
++}
++
++// ═══════════════════════════════════════════════════════════════════
++console.log('\n── Section 7: history is capped — walking back further runs out ───');
++{
++  // MAX_HISTORY is an internal constant (20). Drive well past it with a
++  // large class so there are more real turns than the cap allows, then
++  // confirm undo eventually reports "Nothing to undo." despite additional
++  // turns having genuinely happened earlier in the session.
++  // Stops one learner short of completion — submitUndo() refuses outright
++  // on an already-complete session (Section 5), so a completed session
++  // here would make every undo fail for that reason instead of the cap.
++  const BIG_BLUEPRINT = { ...BLUEPRINT, questions: [{ questionNumber: 1, topic: 'Fractions', maxMarks: 5 }] };
++  let state = initCapture({ blueprint: BIG_BLUEPRINT, classId: 7, className: 'Big', learnerCount: 25 });
++
++  for (let i = 0; i < 24; i += 1) {
++    state = submitReply(state, `Learner ${i}`).state;
++    state = submitReply(state, '3').state;
++  }
++  state = submitReply(state, 'Learner 24').state; // final learner's name only — session stays open
++  const totalTurns = 24 * 2 + 1; // 49 real turns, well past the cap
++  assert(isComplete(state) === false, 'session still open (one learner short of completion)');
++
++  let cursor = state;
++  let undoCount = 0;
++  for (let i = 0; i < totalTurns + 5; i += 1) { // +5 margin past the real turn count
++    const result = submitUndo(cursor);
++    if (!result.ok) break;
++    cursor = result.state;
++    undoCount += 1;
++  }
++  assert(undoCount <= 20, `history cap held — could not undo more than MAX_HISTORY turns (undid ${undoCount} of ${totalTurns} real turns)`);
++  assert(undoCount > 0, 'at least some undos succeeded before the cap was hit');
++}
++
++console.log(`\n${'='.repeat(60)}`);
++console.log(`Results: ${passed} passed, ${failed} failed`);
++console.log('='.repeat(60));
++process.exit(failed > 0 ? 1 : 0);
+diff --git a/tests/assessment-session-undo-dispatch.test.js b/tests/assessment-session-undo-dispatch.test.js
+new file mode 100644
+index 0000000..6283a2e
+--- /dev/null
++++ b/tests/assessment-session-undo-dispatch.test.js
+@@ -0,0 +1,268 @@
++'use strict';
++/**
++ * Assessment Session Flow — UNDO/BACK dispatch tests (ADR-006 PR5 Phase 1a).
++ *
++ * Covers the ACTIVE-step dispatch branch added in Phase 1a:
++ *   1. UNDO reverts the most recent interactive reply and re-renders the
++ *      prompt for the reverted step (prefixed with an "Undone." notice).
++ *   2. BACK is a working alias for UNDO.
++ *   3. UNDO reverts a whole bulk paste as one unit, same as the
++ *      service-level guarantee, end-to-end through the flow.
++ *   4. UNDO with nothing to undo yet reports the error and does not
++ *      touch the session state.
++ *   5. UNDO is a no-op on other session steps (SELECT_BLUEPRINT /
++ *      SELECT_CLASS) — it isn't a global command, only ACTIVE-step
++ *      capture has a history to walk back.
++ *   6. "UNDO"/"BACK" are never mistaken for a bulk paste or misrouted
++ *      into submitReply()/submitBulkReply() as a name or mark value.
++ *
++ * Run individually: node tests/assessment-session-undo-dispatch.test.js
++ * Run via npm:       npm test
++ */
++
++const Module = require('module');
++const { DatabaseSync } = require('node:sqlite');
++const path = require('path');
++
++let _db = null;
++const dbPath = path.resolve(__dirname, '../utils/database');
++
++const _origResolve = Module._resolveFilename.bind(Module);
++Module._resolveFilename = function (request, parent, isMain, opts) {
++  if (request === 'better-sqlite3') return request;
++  if (request === '../utils/database' || request === './database') return dbPath;
++  return _origResolve(request, parent, isMain, opts);
++};
++
++require.cache['better-sqlite3'] = {
++  id: 'better-sqlite3',
++  filename: 'better-sqlite3',
++  loaded: true,
++  exports: function Database() {
++    if (!_db.pragma) _db.pragma = () => {};
++    return _db;
++  },
++};
++
++require.cache[dbPath] = {
++  id: dbPath,
++  filename: dbPath,
++  loaded: true,
++  exports: { getDb: () => _db },
++};
++
++// ── Helpers ───────────────────────────────────────────────────────────────
++let passed = 0;
++let failed = 0;
++
++function assert(condition, label) {
++  if (condition) {
++    console.log(`  ✅ ${label}`);
++    passed++;
++  } else {
++    console.error(`  ❌ FAIL: ${label}`);
++    failed++;
++  }
++}
++
++function buildSchema(db) {
++  db.exec(`
++    CREATE TABLE IF NOT EXISTS sessions (
++      phone_hash    TEXT    NOT NULL,
++      session_type  TEXT    NOT NULL,
++      state         TEXT    NOT NULL,
++      updated_at    REAL    NOT NULL,
++      PRIMARY KEY (phone_hash, session_type)
++    );
++  `);
++}
++
++function fakeParseMarks({ learners = [], warnings = [], errors = [] } = {}) {
++  return () => ({ learners, totalMark: 0, questionCount: 2, questionMaxMarks: {}, questionTopics: {}, warnings, errors });
++}
++
++function learnerRecord(name, q1, q2) {
++  return { learnerName: name, questionData: { 1: { mark: q1, maxMark: 5 }, 2: { mark: q2, maxMark: 10 } } };
++}
++
++async function run() {
++  _db = new DatabaseSync(':memory:');
++  buildSchema(_db);
++
++  const { SessionStore } = require('../utils/sessionStore');
++  const { handleAssessmentSessionFlow } = require('../flows/assessmentSessionFlow');
++
++  const PHONE = '+27831234567';
++  const hashPhone = (p) => `hash_${p}`;
++  const phoneHash = hashPhone(PHONE);
++
++  const blueprintsFixture = [
++    { id: 1, title: 'Term 3 Fractions Test', grade: 5, subject: 'Mathematics', total_marks: 15, question_count: 2 },
++  ];
++  const classesFixture = [
++    { id: 9, name: 'Grade 5B', grade: 5, subject: 'Mathematics', learner_count: 2 },
++  ];
++
++  const getBlueprintById = (id) => {
++    const summary = blueprintsFixture.find((b) => b.id === id);
++    if (!summary) return null;
++    return {
++      id: summary.id,
++      title: summary.title,
++      grade: summary.grade,
++      subject: summary.subject,
++      term: 3,
++      totalMarks: summary.total_marks,
++      version: 1,
++      questions: [
++        { questionNumber: 1, topic: 'Fractions', maxMarks: 5 },
++        { questionNumber: 2, topic: 'Decimals', maxMarks: 10 },
++      ],
++    };
++  };
++
++  const processAssessmentData = async () => ({ assessmentId: 999, teacherSummary: 'stub summary' });
++
++  let parseMarksImpl = fakeParseMarks();
++  const sentMessages = [];
++
++  function makeState() {
++    return new SessionStore('assessmentSessionUndoDispatch', 24 * 60 * 60 * 1000);
++  }
++
++  let assessmentSessionState = makeState();
++
++  function buildDeps() {
++    return {
++      hashPhone,
++      safeSendMessage: async (to, msg) => { sentMessages.push({ to, msg }); },
++      assessmentSessionState,
++      listBlueprints: () => blueprintsFixture,
++      getTeacherClasses: () => classesFixture,
++      getBlueprintById,
++      processAssessmentData,
++      parseMarks: (...args) => parseMarksImpl(...args),
++    };
++  }
++
++  function lastMessage() {
++    return sentMessages[sentMessages.length - 1]?.msg || '';
++  }
++
++  async function send(text) {
++    sentMessages.length = 0;
++    return handleAssessmentSessionFlow(PHONE, text, null, null, buildDeps());
++  }
++
++  async function enterActiveSession() {
++    assessmentSessionState = makeState();
++    // Sessions are rows in a shared SQLite table keyed by (phone_hash,
++    // session_type) — a "new" SessionStore instance does NOT give a blank
++    // slate on its own. A prior section can leave a session open (most
++    // sections here don't run it to completion/CANCEL), and NEW TEST
++    // refuses to clobber an in-progress session — so explicitly clear
++    // any leftover row first to guarantee each section starts fresh.
++    assessmentSessionState.delete(phoneHash);
++    await send('NEW TEST');
++    await send('1'); // blueprint
++    await send('1'); // class -> ACTIVE
++  }
++
++  // ═══════════════════════════════════════════════════════════════════
++  console.log('\n── Section 1: UNDO reverts the last interactive reply ──────────────');
++  await enterActiveSession();
++  await send('Sipho Dlamini'); // name
++  await send('4'); // Q1 = 4 (typo, should be 9)
++
++  let state = assessmentSessionState.get(phoneHash);
++  assert(state.learners[0].marks[1] === 4, 'mistaken mark recorded before undo');
++
++  let handled = await send('UNDO');
++  assert(handled === true, 'UNDO is handled by the ACTIVE dispatch');
++  assert(/Undone/i.test(lastMessage()), 'reply confirms the undo');
++  assert(/Question 1/.test(lastMessage()), 'reply re-renders the prompt for the reverted step (back on Q1)');
++
++  state = assessmentSessionState.get(phoneHash);
++  assert(state.learners[0].marks[1] === undefined, 'the mistaken mark is gone from persisted session state');
++
++  await send('5'); // correct entry (Q1's max is 5)
++  state = assessmentSessionState.get(phoneHash);
++  assert(state.learners[0].marks[1] === 5, 'corrected mark saved and capture continues normally after undo');
++
++  // ═══════════════════════════════════════════════════════════════════
++  console.log('\n── Section 2: BACK is a working alias for UNDO ─────────────────────');
++  await enterActiveSession();
++  await send('Sipho Dlamini');
++  await send('4');
++
++  handled = await send('BACK');
++  assert(handled === true, 'BACK is handled by the ACTIVE dispatch');
++  assert(/Undone/i.test(lastMessage()), 'BACK produces the same undo confirmation as UNDO');
++  state = assessmentSessionState.get(phoneHash);
++  assert(state.learners[0].marks[1] === undefined, 'BACK reverted the mistaken mark exactly like UNDO');
++
++  // ═══════════════════════════════════════════════════════════════════
++  console.log('\n── Section 3: UNDO reverts an entire bulk paste as one unit ───────');
++  // A 2-learner bulk paste would complete the session outright (learnerCount
++  // is 2), leaving nothing for UNDO to act on — use a 3-learner class so the
++  // paste fills 2 of 3 slots and the session stays open.
++  classesFixture[0].learner_count = 3;
++  await enterActiveSession();
++  parseMarksImpl = fakeParseMarks({
++    learners: [learnerRecord('Sipho Dlamini', 4, 8), learnerRecord('Lebo Molefe', 5, 9)],
++  });
++  await send('Sipho Dlamini 4 8\nLebo Molefe 5 9');
++  state = assessmentSessionState.get(phoneHash);
++  assert(state.learnerIndex === 2, 'bulk paste applied to 2 of 3 learner slots, session still open');
++
++  handled = await send('UNDO');
++  assert(handled === true, 'UNDO handled after a bulk paste');
++  state = assessmentSessionState.get(phoneHash);
++  assert(state.learnerIndex === 0, 'UNDO reverted the whole paste at once — back to learner 1, not learner 2');
++  assert(!state.learners[0] || !state.learners[0].name, 'both pasted learners are gone after a single undo');
++  classesFixture[0].learner_count = 2; // restore fixture for subsequent sections
++
++  // ═══════════════════════════════════════════════════════════════════
++  console.log('\n── Section 4: UNDO with nothing to undo reports the error ─────────');
++  await enterActiveSession();
++  const before = assessmentSessionState.get(phoneHash);
++
++  handled = await send('UNDO');
++  assert(handled === true, 'UNDO is still handled even when there is nothing to revert');
++  assert(/Nothing to undo/i.test(lastMessage()), 'correct "nothing to undo" message on a fresh session');
++  const after = assessmentSessionState.get(phoneHash);
++  assert(JSON.stringify(after) === JSON.stringify(before), 'session state is completely untouched by a no-op UNDO');
++
++  // ═══════════════════════════════════════════════════════════════════
++  console.log('\n── Section 5: UNDO is not a global command outside ACTIVE ─────────');
++  assessmentSessionState = makeState();
++  assessmentSessionState.delete(phoneHash);
++  await send('NEW TEST'); // -> SELECT_BLUEPRINT step, no capture history yet
++  state = assessmentSessionState.get(phoneHash);
++  assert(state.step === 'selectBlueprint', 'session is in SELECT_BLUEPRINT, not yet ACTIVE');
++
++  handled = await send('UNDO');
++  assert(handled === true, 'UNDO on a non-ACTIVE step still returns true (falls through to list-selection parsing)');
++  assert(/Please reply with a number/i.test(lastMessage()), 'UNDO is treated as an invalid blueprint selection, not a global undo, outside ACTIVE');
++
++  // ═══════════════════════════════════════════════════════════════════
++  console.log('\n── Section 6: UNDO/BACK are never misrouted as a name or mark ─────');
++  await enterActiveSession();
++  // Learner 1's name step: sending "UNDO" here must trigger the undo
++  // handler (a no-op, since there's no history yet), never be recorded
++  // as a literal learner name.
++  handled = await send('UNDO');
++  assert(handled === true, 'UNDO handled during the NAME step');
++  assert(/Nothing to undo/i.test(lastMessage()), 'UNDO during NAME step is treated as the undo command, not a name');
++  state = assessmentSessionState.get(phoneHash);
++  assert(!state.learners[0] || state.learners[0].name !== 'UNDO', '"UNDO" was never recorded as a literal learner name');
++
++  console.log(`\n${'─'.repeat(60)}`);
++  console.log(`Assessment Session Undo Dispatch Results: ${passed} passed, ${failed} failed`);
++  process.exit(failed > 0 ? 1 : 0);
++}
++
++run().catch((err) => {
++  console.error('Test run threw:', err);
++  process.exit(1);
++});

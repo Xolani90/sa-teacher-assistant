@@ -40,6 +40,7 @@ const {
   isComplete,
   submitReply,
   submitBulkReply,
+  submitUndo,
   formatCapturePrompt,
   formatStatus,
   toLearnerResults,
@@ -271,6 +272,21 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
 
   // ── ACTIVE - marks capture (ADR-006 PR2 interactive, PR4 bulk paste) ──
   if (state.step === STEP.ACTIVE) {
+    // ADR-006 PR5 Phase 1a: UNDO/BACK. Checked first, before the
+    // bulk/interactive branch, so it can never be mistaken for a learner
+    // name or a mark value (e.g. during the NAME step).
+    if (upper === 'UNDO' || upper === 'BACK') {
+      const undoResult = submitUndo(state);
+      if (!undoResult.ok) {
+        await safeSendMessage(from, undoResult.error);
+        return true;
+      }
+
+      assessmentSessionState.set(phoneHash, undoResult.state);
+      await safeSendMessage(from, `↩️ Undone.\n\n${formatCapturePrompt(undoResult.state)}`);
+      return true;
+    }
+
     const isBulk = looksLikeBulkPaste(trimmed);
     const result = isBulk
       ? submitBulkReply(state, trimmed, { parseMarks })

@@ -45,6 +45,31 @@ const CAPTURE_STEP = {
   MARKS: 'marks',
 };
 
+// ADR-006 PR5 Phase 1a — Undo/Back.
+// History is a stack of pre-mutation snapshots of the mutable capture
+// fields (learners/learnerIndex/questionIndex/captureStep/progress).
+// Each successful submitReply() turn (name OR mark) pushes exactly one
+// entry; each successful submitBulkReply() paste pushes exactly one entry
+// for the WHOLE paste, so a single UNDO reverts the entire paste, not
+// learner-by-learner. Capped at MAX_HISTORY so a very long session can't
+// grow the persisted SessionStore row unboundedly.
+const MAX_HISTORY = 20;
+
+function snapshotOf(state) {
+  return {
+    learners: state.learners,
+    learnerIndex: state.learnerIndex,
+    questionIndex: state.questionIndex,
+    captureStep: state.captureStep,
+    progress: state.progress,
+  };
+}
+
+function pushHistory(history, snapshot) {
+  const next = (history || []).concat([snapshot]);
+  return next.length > MAX_HISTORY ? next.slice(next.length - MAX_HISTORY) : next;
+}
+
 /**
  * Builds the initial ACTIVE-step capture state once a Blueprint and Class
  * have been chosen (called from the SELECT_CLASS -> ACTIVE transition).
@@ -108,6 +133,7 @@ function initCapture({ blueprint, classId, className, learnerCount, roster = [] 
       questionsAnswered: 0,
       totalQuestions: learnerCount * questions.length,
     },
+    history: [],
     lastActivity: Date.now(),
   };
 }
@@ -195,6 +221,7 @@ function submitReply(state, rawText) {
       return { ok: false, state, error: result.error };
     }
 
+    const snapshot = snapshotOf(state);
     const learners = state.learners.slice();
     learners[state.learnerIndex] = { name: result.name, marks: {} };
 
@@ -205,6 +232,7 @@ function submitReply(state, rawText) {
         learners,
         captureStep: CAPTURE_STEP.MARKS,
         questionIndex: 0,
+        history: pushHistory(state.history, snapshot),
         lastActivity: Date.now(),
       },
     };
@@ -222,6 +250,7 @@ function submitReply(state, rawText) {
     return { ok: false, state, error: result.error };
   }
 
+  const snapshot = snapshotOf(state);
   const learners = state.learners.slice();
   const currentLearner = learners[state.learnerIndex];
   learners[state.learnerIndex] = {
@@ -260,6 +289,7 @@ function submitReply(state, rawText) {
         questionsAnswered: state.progress.questionsAnswered + 1,
         totalQuestions: state.progress.totalQuestions,
       },
+      history: pushHistory(state.history, snapshot),
       lastActivity: Date.now(),
     },
   };
@@ -335,6 +365,9 @@ function submitBulkReply(state, rawText, deps = {}) {
   const toApply = accepted.slice(0, remainingSlots);
   const overflow = accepted.slice(remainingSlots);
 
+  // One history entry for the WHOLE paste — a single UNDO reverts every
+  // learner this paste applied, not one learner at a time.
+  const snapshot = snapshotOf(state);
   const learners = state.learners.slice();
   for (let i = 0; i < toApply.length; i += 1) {
     learners[state.learnerIndex + i] = toApply[i];
@@ -365,6 +398,7 @@ function submitBulkReply(state, rawText, deps = {}) {
         questionsAnswered,
         totalQuestions: state.progress.totalQuestions,
       },
+      history: pushHistory(state.history, snapshot),
       lastActivity: Date.now(),
     },
     result: {
@@ -373,6 +407,41 @@ function submitBulkReply(state, rawText, deps = {}) {
       warnings,
       errors,
       appliedCount: toApply.length,
+    },
+  };
+}
+
+/**
+ * Reverts the most recent submitReply()/submitBulkReply() turn (ADR-006
+ * PR5 Phase 1a). A bulk paste was pushed as a single history entry, so
+ * one UNDO reverts the whole paste, not learner-by-learner. Never
+ * mutates the input state; returns the same reference on failure so
+ * callers can persist unconditionally, matching submitReply()'s
+ * no-op-on-failure convention.
+ *
+ * @param {Object} state - current ACTIVE-step state
+ * @returns {{ ok: boolean, state: Object, error?: string }}
+ */
+function submitUndo(state) {
+  if (isComplete(state)) {
+    return { ok: false, state, error: 'This assessment session is already complete.' };
+  }
+
+  const history = state.history || [];
+  if (history.length === 0) {
+    return { ok: false, state, error: 'Nothing to undo.' };
+  }
+
+  const snapshot = history[history.length - 1];
+  const newHistory = history.slice(0, -1);
+
+  return {
+    ok: true,
+    state: {
+      ...state,
+      ...snapshot,
+      history: newHistory,
+      lastActivity: Date.now(),
     },
   };
 }
@@ -454,6 +523,7 @@ module.exports = {
   currentQuestion,
   submitReply,
   submitBulkReply,
+  submitUndo,
   formatCapturePrompt,
   formatStatus,
   toLearnerResults,
