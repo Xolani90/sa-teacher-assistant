@@ -243,6 +243,7 @@ function buildAssessmentSessionDeps() {
     getTeacherClasses, // ADR-004: class-context resolution
     processAssessmentData, // ADR-006 PR2: commits captured marks on completion
     getClassRoster, // ADR-006 PR2.5: prefills learner names from the saved roster, if any
+    parseMarks, // ADR-006 PR4 Phase 3: bulk-paste capture via submitBulkReply()
   });
 }
 

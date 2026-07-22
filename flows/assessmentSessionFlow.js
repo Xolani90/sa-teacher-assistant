@@ -39,6 +39,7 @@ const {
   initCapture,
   isComplete,
   submitReply,
+  submitBulkReply,
   formatCapturePrompt,
   formatStatus,
   toLearnerResults,
@@ -74,6 +75,37 @@ function parseListSelection(text, listLength) {
   return n - 1;
 }
 
+// ADR-006 PR4 Phase 3: a conservative first-pass detector for bulk-pasted
+// marks vs. a single interactive reply (a name, or one mark). A bare
+// multi-line reply is virtually never a valid single-field answer, so
+// newline presence is a safe, cheap signal. Expand this (CSV, comma lists,
+// etc.) without touching the dispatch logic below if that's ever needed.
+function looksLikeBulkPaste(text) {
+  return text.includes('\n');
+}
+
+// Builds a short "what happened" summary for a bulk paste that had
+// skipped learners and/or warnings, per the "only speak up if something
+// needs attention" rule — a clean bulk paste gets no extra noise.
+function formatBulkResultNotice(result) {
+  if (!result) return '';
+
+  const parts = [];
+
+  if (result.skipped && result.skipped.length > 0) {
+    const lines = result.skipped.map((s) => `• ${s.learnerName} — ${s.reason}`);
+    parts.push(`⚠️ ${result.skipped.length} learner${result.skipped.length === 1 ? '' : 's'} skipped:\n${lines.join('\n')}`);
+  }
+
+  if (result.warnings && result.warnings.length > 0) {
+    parts.push(`⚠️ Warnings:\n${result.warnings.map((w) => `• ${w}`).join('\n')}`);
+  }
+
+  if (parts.length === 0) return '';
+
+  return `✅ Applied marks for ${result.appliedCount} learner${result.appliedCount === 1 ? '' : 's'}.\n\n${parts.join('\n\n')}`;
+}
+
 async function handleAssessmentSessionFlow(from, text, message = null, preClassifiedIntent = null, deps) {
   const {
     hashPhone,
@@ -84,6 +116,7 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
     getBlueprintById,
     processAssessmentData,
     getClassRoster, // ADR-006 PR2.5: prefills learner names from the saved roster, if any
+    parseMarks, // ADR-006 PR4 Phase 3: bulk-paste capture via submitBulkReply()
   } = deps;
 
   const phoneHash = hashPhone(from);
@@ -236,20 +269,29 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
     return true;
   }
 
-  // ── ACTIVE - marks capture (ADR-006 PR2) ────────────────────────────
+  // ── ACTIVE - marks capture (ADR-006 PR2 interactive, PR4 bulk paste) ──
   if (state.step === STEP.ACTIVE) {
-    const result = submitReply(state, trimmed);
+    const isBulk = looksLikeBulkPaste(trimmed);
+    const result = isBulk
+      ? submitBulkReply(state, trimmed, { parseMarks })
+      : submitReply(state, trimmed);
 
     if (!result.ok) {
       await safeSendMessage(from, result.error);
       return true;
     }
 
+    // Bulk paste only: tell the teacher about anything that needed their
+    // attention (skipped learners, warnings) before moving on. A clean
+    // paste with nothing skipped stays silent — see formatBulkResultNotice.
+    const bulkNotice = isBulk ? formatBulkResultNotice(result.result) : '';
+
     if (isComplete(result.state)) {
       assessmentSessionState.delete(phoneHash);
 
+      const completionPrefix = bulkNotice ? `${bulkNotice}\n\n` : '';
       await safeSendMessage(from,
-        `Capture complete.\n\n${result.state.learnerCount} learners\n${result.state.questions.length} questions\n\nGenerating assessment...`
+        `${completionPrefix}Capture complete.\n\n${result.state.learnerCount} learners\n${result.state.questions.length} questions\n\nGenerating assessment...`
       );
 
       const diagnostic = await processAssessmentData(phoneHash, {
@@ -277,7 +319,8 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
     }
 
     assessmentSessionState.set(phoneHash, result.state);
-    await safeSendMessage(from, formatCapturePrompt(result.state));
+    const prompt = formatCapturePrompt(result.state);
+    await safeSendMessage(from, bulkNotice ? `${bulkNotice}\n\n${prompt}` : prompt);
     return true;
   }
 
