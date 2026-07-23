@@ -1603,6 +1603,17 @@ async function handleCommand(from, text) {
 
   // ── Help menu ─────────────────────────────────────────────────
   if (upper === 'HELP' || upper === 'MENU' || upper === 'HI' || upper === 'HELLO') {
+    // MENU/HELP must behave like an implicit CANCEL for any in-progress flow.
+    // Previously this branch returned early without touching session state,
+    // so an abandoned flow (e.g. mid data-assessment) stayed alive. The next
+    // unrelated message (e.g. "Upload marks" sent again) would then either
+    // get swallowed by the stale flow's step handler, or — once that state
+    // finally expired/desynced — get misclassified by the generic intent
+    // parser (which has no notion of "was mid data-assessment"). Clearing
+    // sessions here, same as STOP already does, ensures MENU always returns
+    // the teacher to a clean slate.
+    clearAllSessions(from);
+
     const teacher = getTeacherByPhone(from);
     const name    = teacher?.name || 'there';
     await safeSendMessage(from,
@@ -1754,6 +1765,23 @@ async function handleCommand(from, text) {
   }
 
   if (await handleWorkspaceFlow(from, text, buildWorkspaceDeps())) return true;
+
+  // ── CANCEL a pending SAVE prompt ────────────────────────────────────────
+  // lastGeneratedState isn't in the `alreadyMidFlow` set (it's not a
+  // multi-step conversation, just a one-shot "reply SAVE to keep this")
+  // so a bare "Cancel" after generation previously fell straight through
+  // to generic classification, which has no idea a save prompt exists and
+  // responded with a confusing "did you mean to cancel something?" check-in.
+  // Recognize it explicitly here, same as every other CANCEL-able flow.
+  if (upper === 'CANCEL') {
+    const phoneHash = hashPhone(from);
+    const last = lastGeneratedState.get(phoneHash);
+    if (last && last.saveState === 'GENERATED') {
+      lastGeneratedState.delete(phoneHash);
+      await safeSendMessage(from, `👍 No problem — not saved. What else can I help you with?`);
+      return true;
+    }
+  }
 
   const isWorkspaceCmd =
     upper === 'MY RESOURCES' ||
