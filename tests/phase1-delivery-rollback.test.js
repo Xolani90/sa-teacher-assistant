@@ -51,6 +51,7 @@ function buildDb() {
       pro_expires TEXT,
       phone_enc TEXT,
       opted_out INTEGER NOT NULL DEFAULT 0,
+      last_intent TEXT,
       last_assessment_id INTEGER,
       renewal_reminder_sent_at TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
