@@ -309,6 +309,10 @@ app.post('/payment/webhook', async (req, res) => {
       console.warn('[YOCO-WEBHOOK] YOCO_WEBHOOK_SECRET not set — rejecting event');
       return;
     }
+    if (!webhookSecret.startsWith('whsec_')) {
+      console.error('[YOCO-WEBHOOK] YOCO_WEBHOOK_SECRET is malformed (missing whsec_ prefix) — rejecting event. Check Render env vars.');
+      return;
+    }
     if (!webhookId || !webhookTimestamp || !webhookSignature) {
       console.warn('[YOCO-WEBHOOK] Missing webhook-id/timestamp/signature headers — ignored');
       return;
@@ -323,7 +327,12 @@ app.post('/payment/webhook', async (req, res) => {
 
     // Signed content per Yoco docs: `${id}.${timestamp}.${rawBody}`
     const signedContent = `${webhookId}.${webhookTimestamp}.${rawBodyStr}`;
-    const secretBytes   = Buffer.from(webhookSecret.split('_')[1], 'base64');
+    const encodedSecret = webhookSecret.slice('whsec_'.length);
+    const secretBytes   = Buffer.from(encodedSecret, 'base64');
+    if (secretBytes.length === 0) {
+      console.error('[YOCO-WEBHOOK] YOCO_WEBHOOK_SECRET decodes to empty bytes — rejecting event. Check Render env vars.');
+      return;
+    }
     const expectedSig   = crypto
       .createHmac('sha256', secretBytes)
       .update(signedContent)

@@ -39,6 +39,37 @@ function validateEnv() {
     warnings.push(`[ENV]    See portal.yoco.com → Developers → API Keys & Webhooks`);
   }
 
+  // ── Yoco webhook secret: conditional + format validation ──────────────
+  // If YOCO_SECRET_KEY is configured, the app is expected to accept live
+  // payments, so a missing or malformed YOCO_WEBHOOK_SECRET is a hard error
+  // (not just a warning) — otherwise webhooks are silently dropped forever
+  // with no crash and no alert. Dev environments without Yoco at all are
+  // unaffected, since this block only runs when YOCO_SECRET_KEY is present.
+  const yocoApiKey       = process.env.YOCO_SECRET_KEY;
+  const yocoWebhookSecret = process.env.YOCO_WEBHOOK_SECRET;
+
+  if (yocoApiKey && !yocoWebhookSecret) {
+    errors.push(
+      '  ✗ YOCO_SECRET_KEY is configured but YOCO_WEBHOOK_SECRET is missing\n' +
+      '    → Payment webhooks cannot be verified — see portal.yoco.com → Developers → Webhooks'
+    );
+  } else if (yocoWebhookSecret) {
+    if (!yocoWebhookSecret.startsWith('whsec_')) {
+      errors.push(`  ✗ YOCO_WEBHOOK_SECRET must start with 'whsec_'\n    → Copy the value exactly from portal.yoco.com → Developers → Webhooks`);
+    } else {
+      const encoded = yocoWebhookSecret.slice('whsec_'.length);
+      let decoded;
+      try {
+        decoded = Buffer.from(encoded, 'base64');
+      } catch (e) {
+        decoded = Buffer.alloc(0);
+      }
+      if (decoded.length === 0) {
+        errors.push(`  ✗ YOCO_WEBHOOK_SECRET contains an invalid Base64 payload\n    → Re-copy the value from portal.yoco.com → Developers → Webhooks`);
+      }
+    }
+  }
+
   warnings.forEach(w => console.warn(w));
 
   if (errors.length > 0) {
