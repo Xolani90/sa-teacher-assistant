@@ -2668,7 +2668,18 @@ function FREE_LIMIT_DISPLAY() {
 
 module.exports = router;
 
-// Exposed for direct testing only (tests/phase1-delivery-rollback.test.js).
+// Exposed for direct testing only (tests/phase1-delivery-rollback.test.js,
+// tests/menu-help-session-reset.test.js, tests/cancel-pending-save.test.js).
 // Not part of the public route surface — do not depend on this from
 // application code.
-module.exports.__testExports = { triggerGeneration, buildGenerationDeps, buildAssessmentDeps, rollbackUsage };
+module.exports.__testExports = {
+  triggerGeneration,
+  buildGenerationDeps,
+  buildAssessmentDeps,
+  rollbackUsage,
+  handleCommand,
+  hashPhone,
+  assessmentSessionState,
+  dataAssessmentState,
+  lastGeneratedState,
+};
