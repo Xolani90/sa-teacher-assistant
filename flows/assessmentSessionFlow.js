@@ -40,6 +40,7 @@ const {
   isComplete,
   submitReply,
   submitBulkReply,
+  submitEdit,
   submitUndo,
   formatCapturePrompt,
   formatStatus,
@@ -284,6 +285,23 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
 
       assessmentSessionState.set(phoneHash, undoResult.state);
       await safeSendMessage(from, `↩️ Undone.\n\n${formatCapturePrompt(undoResult.state)}`);
+      return true;
+    }
+
+    // ADR-006 PR5 Phase 1b: EDIT <learner> — jump back to a
+    // already-captured learner to re-enter their marks. Checked before
+    // the bulk/interactive branch for the same reason as UNDO/BACK: it
+    // must never be mistaken for a learner name or a mark value.
+    if (upper.startsWith('EDIT ') || upper === 'EDIT') {
+      const query = trimmed.slice(4).trim(); // preserve original case for error messages
+      const editResult = submitEdit(state, query);
+      if (!editResult.ok) {
+        await safeSendMessage(from, editResult.error);
+        return true;
+      }
+
+      assessmentSessionState.set(phoneHash, editResult.state);
+      await safeSendMessage(from, `✏️ ${formatCapturePrompt(editResult.state)}`);
       return true;
     }
 

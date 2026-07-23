@@ -62,6 +62,7 @@ function snapshotOf(state) {
     questionIndex: state.questionIndex,
     captureStep: state.captureStep,
     progress: state.progress,
+    editing: state.editing || null,
   };
 }
 
@@ -134,6 +135,7 @@ function initCapture({ blueprint, classId, className, learnerCount, roster = [] 
       totalQuestions: learnerCount * questions.length,
     },
     history: [],
+    editing: null,
     lastActivity: Date.now(),
   };
 }
@@ -262,18 +264,38 @@ function submitReply(state, rawText) {
   let questionIndex = state.questionIndex + 1;
   let captureStep = CAPTURE_STEP.MARKS;
   let learnersCompleted = state.progress.learnersCompleted;
+  let editing = state.editing;
+
+  // ADR-006 PR5 Phase 1b — EDIT. If this reply is completing a re-answer
+  // of a learner that EDIT jumped us to (state.editing.learnerIndex ===
+  // the learner we're currently on), re-marking already-counted
+  // questions must NOT bump progress a second time — only fresh,
+  // never-before-answered questions do that.
+  const isEditingThisLearner = !!(state.editing && state.editing.learnerIndex === state.learnerIndex);
+  const questionsAnswered = state.progress.questionsAnswered + (isEditingThisLearner ? 0 : 1);
 
   if (questionIndex >= state.questions.length) {
-    // Finished this learner's questions — advance to the next learner.
     questionIndex = 0;
-    learnerIndex += 1;
-    learnersCompleted += 1;
-    // ADR-006 PR2.5: if the next learner was already prefilled from the
-    // roster (initCapture's `roster` param), skip straight to MARKS
-    // instead of asking for a name we already have.
-    captureStep = learners[learnerIndex] && learners[learnerIndex].name
-      ? CAPTURE_STEP.MARKS
-      : CAPTURE_STEP.NAME;
+
+    if (isEditingThisLearner) {
+      // Finished re-answering the edited learner — jump back to exactly
+      // where the teacher was before EDIT was sent, rather than
+      // advancing forward past learners not yet reached.
+      learnerIndex = state.editing.returnLearnerIndex;
+      questionIndex = state.editing.returnQuestionIndex;
+      captureStep = state.editing.returnCaptureStep;
+      editing = null;
+    } else {
+      // Finished this learner's questions — advance to the next learner.
+      learnerIndex += 1;
+      learnersCompleted += 1;
+      // ADR-006 PR2.5: if the next learner was already prefilled from the
+      // roster (initCapture's `roster` param), skip straight to MARKS
+      // instead of asking for a name we already have.
+      captureStep = learners[learnerIndex] && learners[learnerIndex].name
+        ? CAPTURE_STEP.MARKS
+        : CAPTURE_STEP.NAME;
+    }
   }
 
   return {
@@ -284,9 +306,10 @@ function submitReply(state, rawText) {
       learnerIndex,
       questionIndex,
       captureStep,
+      editing,
       progress: {
         learnersCompleted,
-        questionsAnswered: state.progress.questionsAnswered + 1,
+        questionsAnswered,
         totalQuestions: state.progress.totalQuestions,
       },
       history: pushHistory(state.history, snapshot),
@@ -412,7 +435,94 @@ function submitBulkReply(state, rawText, deps = {}) {
 }
 
 /**
- * Reverts the most recent submitReply()/submitBulkReply() turn (ADR-006
+ * Jumps the capture cursor to an already-captured learner so the teacher
+ * can re-enter their marks from question 1 (ADR-006 PR5 Phase 1b — EDIT).
+ *
+ * Unlike UNDO (which unwinds the most recent turn), EDIT is a *forward*
+ * operation: the teacher keeps going as normal afterwards, and once the
+ * re-answered learner's last question is submitted, capture returns to
+ * exactly the learner/question/step it was at before EDIT was sent — it
+ * never rewinds progress or re-asks for learners that come after the
+ * edited one. Only one learner can be edited at a time; a second EDIT
+ * sent mid-edit is rejected rather than nesting jumps.
+ *
+ * The jump itself is pushed as a single history entry (via snapshotOf,
+ * which now also captures `editing`), so a single UNDO sent immediately
+ * after EDIT cancels the jump and returns the teacher to where they were,
+ * without needing any special-casing in submitUndo().
+ *
+ * @param {Object} state - current ACTIVE-step state
+ * @param {string} query - free-text name (or partial name) to match
+ *   against already-captured learners
+ * @returns {{ ok: boolean, state: Object, error?: string }}
+ */
+function submitEdit(state, query) {
+  if (isComplete(state)) {
+    return { ok: false, state, error: 'This assessment session is already complete.' };
+  }
+
+  if (state.editing) {
+    return {
+      ok: false,
+      state,
+      error: `You're already editing ${state.learners[state.learnerIndex].name}'s marks. Finish entering them before starting another edit.`,
+    };
+  }
+
+  const trimmedQuery = String(query || '').trim();
+  if (trimmedQuery.length === 0) {
+    return { ok: false, state, error: 'Please specify which learner to edit, e.g. *EDIT Sipho*.' };
+  }
+
+  // Only learners who already have a name captured can be targeted:
+  // everything up to (and including, if named) the current learner.
+  const needle = trimmedQuery.toLowerCase();
+  const candidates = [];
+  for (let i = 0; i <= state.learnerIndex && i < state.learners.length; i += 1) {
+    const learner = state.learners[i];
+    if (learner && learner.name && learner.name.toLowerCase().includes(needle)) {
+      candidates.push(i);
+    }
+  }
+
+  if (candidates.length === 0) {
+    return { ok: false, state, error: `No captured learner matches "${trimmedQuery}". Check the spelling and try again.` };
+  }
+
+  if (candidates.length > 1) {
+    const names = candidates.map((i) => state.learners[i].name).join(', ');
+    return {
+      ok: false,
+      state,
+      error: `More than one learner matches "${trimmedQuery}": ${names}. Please be more specific.`,
+    };
+  }
+
+  const targetIndex = candidates[0];
+  const snapshot = snapshotOf(state);
+
+  return {
+    ok: true,
+    state: {
+      ...state,
+      learnerIndex: targetIndex,
+      questionIndex: 0,
+      captureStep: CAPTURE_STEP.MARKS,
+      editing: {
+        learnerIndex: targetIndex,
+        returnLearnerIndex: state.learnerIndex,
+        returnQuestionIndex: state.questionIndex,
+        returnCaptureStep: state.captureStep,
+      },
+      history: pushHistory(state.history, snapshot),
+      lastActivity: Date.now(),
+    },
+  };
+}
+
+/**
+ * Reverts the most recent submitReply()/submitBulkReply()/submitEdit()
+ * turn (ADR-006
  * PR5 Phase 1a). A bulk paste was pushed as a single history entry, so
  * one UNDO reverts the whole paste, not learner-by-learner. Never
  * mutates the input state; returns the same reference on failure so
@@ -466,8 +576,10 @@ function formatCapturePrompt(state) {
 
   const question = currentQuestion(state);
   const learner = state.learners[state.learnerIndex];
+  const isEditingThisLearner = !!(state.editing && state.editing.learnerIndex === state.learnerIndex);
+  const editPrefix = isEditingThisLearner ? '✏️ Editing — ' : '';
   return (
-    `Learner ${learnerNumber}/${state.learnerCount}: ${learner.name}\n` +
+    `${editPrefix}Learner ${learnerNumber}/${state.learnerCount}: ${learner.name}\n` +
     `Question ${question.questionNumber}/${state.questions.length} (Max: ${question.maxMarks})\n\n` +
     `Reply with marks.`
   );
@@ -523,6 +635,7 @@ module.exports = {
   currentQuestion,
   submitReply,
   submitBulkReply,
+  submitEdit,
   submitUndo,
   formatCapturePrompt,
   formatStatus,
