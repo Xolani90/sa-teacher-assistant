@@ -38,8 +38,14 @@ function assert(cond, label) {
   }
 }
 
+// The dispatch chains (and the handleCommand() call site) asserted below
+// live in processMessage(), which was extracted from routes/webhook.js
+// into core/messageProcessor.js. The handleCommand() function definition
+// itself was not moved and still lives in routes/webhook.js.
 const WEBHOOK_PATH = path.join(__dirname, '..', 'routes', 'webhook.js');
-const source = fs.readFileSync(WEBHOOK_PATH, 'utf8');
+const MESSAGE_PROCESSOR_PATH = path.join(__dirname, '..', 'core', 'messageProcessor.js');
+const webhookSource = fs.readFileSync(WEBHOOK_PATH, 'utf8');
+const source = fs.readFileSync(MESSAGE_PROCESSOR_PATH, 'utf8');
 
 // Flows that have no session of their own and fall through to fresh intent
 // classification -- an assessment session must be checked before all of
@@ -113,11 +119,11 @@ console.log('='.repeat(75));
 
 // ── STOP must remain the global opt-out command, untouched by ADR-006 ──
 {
-  const commandFnStart = source.indexOf('async function handleCommand(from, text)');
-  const commandFnEnd = source.indexOf('\nasync function ', commandFnStart + 1);
-  assert(commandFnStart !== -1 && commandFnEnd !== -1, 'handleCommand() function located');
+  const commandFnStart = webhookSource.indexOf('async function handleCommand(from, text)');
+  const commandFnEnd = webhookSource.indexOf('// ── Webhook verification', commandFnStart + 1);
+  assert(commandFnStart !== -1, 'handleCommand() function located');
 
-  const commandFnBody = source.slice(commandFnStart, commandFnEnd === -1 ? undefined : commandFnEnd);
+  const commandFnBody = webhookSource.slice(commandFnStart, commandFnEnd === -1 ? undefined : commandFnEnd);
   assert(
     commandFnBody.includes("upper === 'STOP'"),
     'handleCommand() still owns the global STOP opt-out branch'
@@ -130,7 +136,7 @@ console.log('='.repeat(75));
   // handleCommand() must run before either assessment-session dispatch call,
   // since it's what lets STOP short-circuit the whole message before any
   // flow (including this one) ever sees it.
-  const commandCallSite = source.indexOf('const commandHandled = await handleCommand(from, text)');
+  const commandCallSite = source.indexOf('const commandHandled = await deps.handleCommand(from, text)');
   const firstAssessmentSessionCall = indexOfFirst(source, ASSESSMENT_SESSION_CALLS, 0);
   assert(
     commandCallSite !== -1 && firstAssessmentSessionCall !== -1 && commandCallSite < firstAssessmentSessionCall,

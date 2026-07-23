@@ -46,7 +46,10 @@ function assert(cond, label) {
   }
 }
 
-const WEBHOOK_PATH = path.join(__dirname, '..', 'routes', 'webhook.js');
+// The dispatch chains asserted below live in processMessage(), which was
+// extracted from routes/webhook.js into core/messageProcessor.js — read
+// from its new location.
+const WEBHOOK_PATH = path.join(__dirname, '..', 'core', 'messageProcessor.js');
 const source = fs.readFileSync(WEBHOOK_PATH, 'utf8');
 
 // The seven flows that must never be checked before the observation
