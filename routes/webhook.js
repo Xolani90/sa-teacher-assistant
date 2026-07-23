@@ -40,7 +40,6 @@ const { getTeacherClasses } = require('../services/teacherWorkspaceService');
 const { formatClassSelectionPrompt, matchClassSelection } = require('../utils/classContext');
 const {
   rollbackUsage,
-  checkAndRecordRateLimit,
   isAiRateLimited,
   isClassifierRateLimited,
   clearAllSessions,
@@ -279,61 +278,22 @@ function buildParentMessageDeps() {
  * @param {object|null} preClassifiedIntent
  * @returns {Promise<boolean>}
  */
+// ── Intervention output parser (extracted to utils/interventionParser.js) ──
+const { parseInterventionSections } = require('../utils/interventionParser');
+
+// ── Curriculum Query Flow (extracted to flows/curriculumQueryFlow.js) ──────
+const { handleCurriculumQueryFlow } = require('../flows/curriculumQueryFlow');
+
 /**
- * Parses the AI intervention response into step sections.
- * @param {string} text
- * @returns {{ step6, step7, step8, step9, step10 }}
+ * Dependencies for the extracted curriculum query flow
+ * (flows/curriculumQueryFlow.js).
  */
-function parseInterventionSections(text) {
-  const result = {};
-  const delimiters = {
-    step6:  /===\s*STEP\s*6[^=]*===/i,
-    step7:  /===\s*STEP\s*7[^=]*===/i,
-    step8:  /===\s*STEP\s*8[^=]*===/i,
-    step9:  /===\s*STEP\s*9[^=]*===/i,
-    step10: /===\s*STEP\s*10[^=]*===/i,
-  };
-  const keys = ['step6', 'step7', 'step8', 'step9', 'step10'];
-
-  // Find positions of each delimiter
-  const positions = [];
-  for (const key of keys) {
-    const match = text.match(delimiters[key]);
-    if (match) {
-      positions.push({ key, index: text.indexOf(match[0]), length: match[0].length });
-    }
-  }
-  positions.sort((a, b) => a.index - b.index);
-
-  for (let i = 0; i < positions.length; i++) {
-    const { key, index, length } = positions[i];
-    const start = index + length;
-    const end = i + 1 < positions.length ? positions[i + 1].index : text.length;
-    result[key] = text.slice(start, end).trim();
-  }
-
-  return result;
-}
-
-// ── Curriculum Query Flow Handler ─────────────────────────────────────────────
-/**
- * Handles teacher questions about curriculum position, ATP topics, coverage, pacing.
- * Uses curriculumIntelligenceService for local (instant) responses.
- * Returns true if handled.
- *
- * @param {string} from
- * @param {string} text
- * @param {Object} intent
- * @returns {Promise<boolean>}
- */
-async function handleCurriculumQueryFlow(from, text, intent) {
-  if (!intent || intent.type !== 'curriculumQuery') return false;
-
-  const profile = getTeacherByPhone(from) || {};
-  const response = handleCurriculumQuery(text, profile);
-
-  await safeSendMessage(from, response);
-  return true;
+function buildCurriculumQueryDeps() {
+  return Object.freeze({
+    getTeacherByPhone,
+    handleCurriculumQuery,
+    safeSendMessage,
+  });
 }
 const { handleAssessmentAnalysisFlow } = require('../flows/assessmentAnalysisFlow');
 
@@ -458,6 +418,7 @@ function buildProcessMessageDeps() {
     handleAssessmentAnalysisFlow,
     buildAssessmentAnalysisDeps,
     handleCurriculumQueryFlow,
+    buildCurriculumQueryDeps,
     handleInterventionPlanFlow,
     buildInterventionPlanDeps,
     isConversationalIntent,

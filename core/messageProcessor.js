@@ -256,7 +256,7 @@ async function processMessage(message, deps) {
   if (assessmentAnalysisHandled) return;
 
   // ── Curriculum intelligence query (instant, no quota) ────────────────
-  const curriculumHandled = await deps.handleCurriculumQueryFlow(from, text, intent);
+  const curriculumHandled = await deps.handleCurriculumQueryFlow(from, text, intent, deps.buildCurriculumQueryDeps());
   if (curriculumHandled) return;
 
   // ── Intervention plan / SBA support multi-turn flow (Pro) ───────────
