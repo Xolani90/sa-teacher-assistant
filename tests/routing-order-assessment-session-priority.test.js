@@ -44,8 +44,10 @@ function assert(cond, label) {
 // itself was not moved and still lives in routes/webhook.js.
 const WEBHOOK_PATH = path.join(__dirname, '..', 'routes', 'webhook.js');
 const MESSAGE_PROCESSOR_PATH = path.join(__dirname, '..', 'core', 'messageProcessor.js');
+const COMMAND_HANDLER_PATH = path.join(__dirname, '..', 'core', 'commandHandler.js');
 const webhookSource = fs.readFileSync(WEBHOOK_PATH, 'utf8');
 const source = fs.readFileSync(MESSAGE_PROCESSOR_PATH, 'utf8');
+const commandHandlerSource = fs.readFileSync(COMMAND_HANDLER_PATH, 'utf8');
 
 // Flows that have no session of their own and fall through to fresh intent
 // classification -- an assessment session must be checked before all of
@@ -119,11 +121,10 @@ console.log('='.repeat(75));
 
 // ── STOP must remain the global opt-out command, untouched by ADR-006 ──
 {
-  const commandFnStart = webhookSource.indexOf('async function handleCommand(from, text)');
-  const commandFnEnd = webhookSource.indexOf('// ── Webhook verification', commandFnStart + 1);
+  const commandFnStart = commandHandlerSource.indexOf('async function handleCommand(from, text, deps)');
   assert(commandFnStart !== -1, 'handleCommand() function located');
 
-  const commandFnBody = webhookSource.slice(commandFnStart, commandFnEnd === -1 ? undefined : commandFnEnd);
+  const commandFnBody = commandHandlerSource.slice(commandFnStart);
   assert(
     commandFnBody.includes("upper === 'STOP'"),
     'handleCommand() still owns the global STOP opt-out branch'
