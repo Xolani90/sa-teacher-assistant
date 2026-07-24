@@ -1,6 +1,6 @@
 # SA Teacher Assistant – Project Status
 
-_Last updated: 2026-07-17_
+_Last updated: 2026-07-24_
 
 ## Repository
 - **Canonical repo:** `~/Downloads/sa-teacher-assistant`
@@ -9,27 +9,33 @@ _Last updated: 2026-07-17_
 - **Old repos** (`sa-teacher-assistant-archive/`, `sa-teacher-assistant-archive-stale/`, and the various dated `.zip`/`.tar.gz` snapshots in `~/Downloads`) are **retired** — read-only backups only. Do not develop in them.
 
 ## Current Health
-Stable. `git status` clean, in sync with `origin/main`. 29/30 test suites passing as of last full run. The 1 remaining failure is `phase-classifier-disambiguation.test.js` — not a code bug, blocked on Anthropic API credit balance (see Blockers below).
+Stable. 61/61 fast test suites passing as of last full run (`node tests/run-all.js`), plus an optional smoke test (`RUN_SMOKE_TESTS=1 node tests/payment-webhook-smoke.test.js`) not counted in that figure. `phase-classifier-disambiguation.test.js` depends on live Anthropic API credit and may fail independently of code changes — not a regression signal on its own.
 
 ## Recently Completed
-- `rollbackUsage()` shared helper for quota rollback consistency (`bcbaff3`, 2026-07-13)
-- SQLite-backed rate limiting, replacing in-memory Maps that reset on Render restart (`00d65d5`)
-- Delivery rollback feature + regression test rewrite (`c705c1b`, `aa04b94`)
-- `buildPdfUrl()` consolidation of PDF signing logic (`1a37d97`)
-- Observation workflow (OBSERVATION intent, submission flow, MY OBSERVATIONS command)
-- `parseSqliteUtc()` UTC timestamp fix + documented invariant (`9e62f70`)
-- Subscription renewal stacking fix, `markUserAsPro()` fix, `/admin/grant-pro` fix
-- PDF rendering fixes: bullet bold-span rendering, page-total footer, number line realignment
-- Duplicate `parseSqliteUtc` declarations removed from `tests/phase-d-payment-renewal.test.js` and `tests/phase-d-replay-stress.test.js`
+- ✅ **Architecture modularisation complete** — `routes/webhook.js` reduced from ~3390 to a thin routing/orchestration layer via extracted flow modules (`observationFlow`, `workspaceFlow`, `worksheetFlow`, `assessmentFlow`, `assessmentSessionFlow`, `rosterFlow`, `reportCommentFlow`, `interventionPlanFlow`, `assessmentAnalysisFlow`, `parentMessageFlow`, `curriculumQueryFlow`) plus shared infrastructure (`core/generationPipeline.js`, `core/messageProcessor.js`, `core/commandHandler.js`, `utils/webhookHelpers.js`, `utils/interventionParser.js`)
+- ✅ Yoco webhook signature verifier extracted to `utils/yocoWebhookVerifier.js` — pure, unit-tested (9/9), wired into `server.js`'s `/payment/webhook` route with unchanged log semantics; end-to-end smoke test added (`tests/payment-webhook-smoke.test.js`, gated behind `RUN_SMOKE_TESTS=1`)
+- ✅ Startup validation: `YOCO_SECRET_KEY` requires a matching, well-formed `YOCO_WEBHOOK_SECRET` or the server fails fast rather than silently accepting unverifiable webhooks
+- ✅ ADR-005A: blueprint assessment analytics PDF (`generateBlueprintAssessmentPdf()`) wired into `assessmentSessionFlow.js` — previously implemented and tested but unreachable from any WhatsApp command; now generated and delivered via `sendDocument()` automatically when marks capture completes, with a best-effort failure path that never loses already-committed marks
+- ✅ ADR-006 PR1–PR5: full Assessment Session Engine (blueprint→class→capture state machine, bulk-paste capture, UNDO/BACK, EDIT `<learner>`, roster prefill)
+- ✅ ADR-005 (PR1–PR5 equivalent): Assessment Blueprint lifecycle (draft/publish/archive/versioning), CAPS topic validation, marks-import against a published blueprint, per-topic/per-learner analytics
+- ✅ 61/61 test suites passing, up from ~29/30 several sessions ago
 
 ## Outstanding Work
 
+### Current milestone: ADR-005 PDF parity (reframed into 3 parts after code inspection)
+Original framing ("make blueprint PDFs look like regular PDFs") turned out to undersell the actual gap. Split into:
+- ✅ **ADR-005A — Expose blueprint analytics PDF through a teacher-facing workflow.** Done (see above).
+- ⬜ **ADR-005B — Printable blueprint assessment papers.** Regular AI-generated tests (`generatePdf()` with `isAssessment=true`) produce a blank question paper with a student-info box and instructions box, ready to hand to learners. Blueprints have no equivalent — only the after-the-fact analytics report exists. This is the more product-relevant gap: Create blueprint → **print assessment (missing)** → learners write → capture marks → analytics PDF.
+- ⬜ **ADR-005C — Unify layout, branding, filenames, metadata.** Once both PDF paths are in active use: shared `buildFilename()` (currently `generateBlueprintAssessmentPdf` builds its own filename inline, no date suffix), shared PDFDocument `info` metadata block, consistent fonts/margins/branding via shared components rather than duplicated per-generator logic.
+
 ### High Priority
+- ADR-005B (printable blueprint test papers, see above)
 - Worksheet/PDF branding and layout polish (`prompts/worksheet.js`)
-- Teacher analytics
+- Teacher analytics / longitudinal learner progress (ADR-003 groundwork already exists — `docs/adr/ADR-003-longitudinal-learner-progress.md`)
 
 ### Medium Priority
-- `routes/webhook.js` modularisation — currently ~3700 lines. First step: extract coherent handler blocks into a `flows/` directory (`worksheetFlow.js`, `testFlow.js`, `lessonPlanFlow.js`, `observationFlow.js`, `interventionFlow.js`, `pdfFlow.js`), leaving `webhook.js` as routing/orchestration only. Incremental, one flow at a time — no architecture redesign.
+- Assessment history & reporting UX (view past assessments, re-run diagnostics, compare two assessments)
+- Blueprint authoring UX improvements — deferred until teachers have used the feature enough to surface real pain points; lifecycle + test coverage are already functionally complete
 
 ## Modularisation Status
 
@@ -57,17 +63,7 @@ The original roadmap listed lessonPlanFlow and onboardingFlow as pending extract
 
 ### Remaining architectural work
 
-- ⬜ core/generationPipeline
-
-This is the one remaining major extraction and includes:
-- processGeneration() — shared generation orchestration
-- prompt dispatch across all resource types
-- PDF eligibility/delivery
-- SAVE lifecycle (B2–B5 state machine)
-- quota / usage rollback handling
-- generic resource-type disambiguation (WORKSHEET/TEST/LESSONPLAN/etc.)
-
-This is shared infrastructure used across all generation types, not another conversation flow — architecturally significant but a single focused piece of work rather than several unrelated extractions.
+- ✅ core/generationPipeline — done. `core/generationPipeline.js` now owns processGeneration()/triggerGeneration(), prompt dispatch, PDF eligibility/delivery, the SAVE lifecycle (B2–B5 state machine), quota/usage rollback handling, and generic resource-type disambiguation. `core/messageProcessor.js` and `core/commandHandler.js` were extracted alongside it. All planned architectural extractions are complete — see "Recently Completed" above.
 
 ### Other planned work (non-modularisation)
 - School administration features

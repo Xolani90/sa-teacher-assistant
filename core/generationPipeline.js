@@ -77,6 +77,7 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
     lastGeneratedState,
     recordWorksheetGeneration,
     buildWorksheetDeps,
+    updateTeacherProfile,
   } = deps;
 
   // Per-phone burst rate limit — prevents rapid-fire AI calls
@@ -86,6 +87,14 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
     );
     return;
   }
+
+  // Persist the generation intent for RETRY, exactly once, regardless of
+  // which caller (disambiguation follow-up, clarified-topic reply, or the
+  // main classification path) routed us here. This used to be duplicated
+  // at every call site in webhook.js; centralizing it here means every
+  // generation path updates last_intent exactly once, with no risk of a
+  // new call site forgetting to do it.
+  updateTeacherProfile(from, { last_intent: JSON.stringify(intent) });
 
   // ATP is a Pro-only feature — gate before quota deduction
   if (intent.type === 'atp') {
