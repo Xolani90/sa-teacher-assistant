@@ -301,57 +301,29 @@ app.post('/payment/webhook', async (req, res) => {
     // ── Signature verification ─────────────────────────────────
     // Use the raw buffer captured by express.raw() to avoid key-ordering
     // differences between JSON.stringify and what Yoco actually sent.
-    const rawBodyStr    = req.rawBody ? req.rawBody.toString() : JSON.stringify(event);
-    const crypto        = require('crypto');
+    const { verifyYocoWebhook } = require('./utils/yocoWebhookVerifier');
+    const rawBody       = req.rawBody || Buffer.from(JSON.stringify(event));
     const webhookSecret = process.env.YOCO_WEBHOOK_SECRET; // format: whsec_XXXXXXXX...
 
-    if (!webhookSecret) {
-      console.warn('[YOCO-WEBHOOK] YOCO_WEBHOOK_SECRET not set — rejecting event');
-      return;
-    }
-    if (!webhookSecret.startsWith('whsec_')) {
-      console.error('[YOCO-WEBHOOK] YOCO_WEBHOOK_SECRET is malformed (missing whsec_ prefix) — rejecting event. Check Render env vars.');
-      return;
-    }
-    if (!webhookId || !webhookTimestamp || !webhookSignature) {
-      console.warn('[YOCO-WEBHOOK] Missing webhook-id/timestamp/signature headers — ignored');
-      return;
-    }
-
-    // Replay protection — reject anything older than 3 minutes, per Yoco's guidance.
-    const tsSeconds = parseInt(webhookTimestamp, 10);
-    if (!Number.isFinite(tsSeconds) || Math.abs(Date.now() / 1000 - tsSeconds) > 180) {
-      console.warn('[YOCO-WEBHOOK] Timestamp outside acceptable window — ignored');
-      return;
-    }
-
-    // Signed content per Yoco docs: `${id}.${timestamp}.${rawBody}`
-    const signedContent = `${webhookId}.${webhookTimestamp}.${rawBodyStr}`;
-    const encodedSecret = webhookSecret.slice('whsec_'.length);
-    const secretBytes   = Buffer.from(encodedSecret, 'base64');
-    if (secretBytes.length === 0) {
-      console.error('[YOCO-WEBHOOK] YOCO_WEBHOOK_SECRET decodes to empty bytes — rejecting event. Check Render env vars.');
-      return;
-    }
-    const expectedSig   = crypto
-      .createHmac('sha256', secretBytes)
-      .update(signedContent)
-      .digest('base64');
-
-    // webhook-signature header can contain multiple space-separated "v1,<sig>" entries
-    const providedSigs = webhookSignature
-      .split(' ')
-      .map(s => s.split(',')[1])
-      .filter(Boolean);
-
-    const expectedBuf = Buffer.from(expectedSig);
-    const matched = providedSigs.some(sig => {
-      const sigBuf = Buffer.from(sig);
-      return sigBuf.length === expectedBuf.length && crypto.timingSafeEqual(sigBuf, expectedBuf);
+    const verdict = verifyYocoWebhook({
+      headers: {
+        'webhook-id': webhookId,
+        'webhook-timestamp': webhookTimestamp,
+        'webhook-signature': webhookSignature,
+      },
+      rawBody,
+      secret: webhookSecret,
     });
 
-    if (!matched) {
-      console.warn('[YOCO-WEBHOOK] Signature mismatch — ignored');
+    if (!verdict.valid) {
+      const reasonLog = {
+        missing_secret:    () => console.warn('[YOCO-WEBHOOK] reason=missing_secret — YOCO_WEBHOOK_SECRET not set — rejecting event'),
+        malformed_secret:  () => console.error('[YOCO-WEBHOOK] reason=malformed_secret — check whsec_ prefix / base64 body on Render env vars — rejecting event'),
+        missing_headers:   () => console.warn('[YOCO-WEBHOOK] reason=missing_headers — webhook-id/timestamp/signature absent — ignored'),
+        replay_attack:     () => console.warn('[YOCO-WEBHOOK] reason=replay_attack — timestamp outside acceptable window — ignored'),
+        invalid_signature: () => console.warn('[YOCO-WEBHOOK] reason=invalid_signature — signature mismatch — ignored'),
+      };
+      (reasonLog[verdict.reason] || (() => console.warn(`[YOCO-WEBHOOK] reason=${verdict.reason} — ignored`)))();
       return;
     }
 
