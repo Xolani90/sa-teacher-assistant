@@ -51,6 +51,12 @@ const STEP = {
   SELECT_BLUEPRINT: 'selectBlueprint',
   SELECT_CLASS: 'selectClass',
   ACTIVE: 'active',
+  // ADR-005B: a lightweight, single-purpose sub-flow for printing a blank
+  // blueprint question paper. Deliberately NOT reused with SELECT_BLUEPRINT
+  // above — that step always continues into SELECT_CLASS/ACTIVE capture,
+  // and conflating the two would mean a wrong keypress after "PRINT" could
+  // accidentally start (and silently abandon) a real marks-capture session.
+  SELECT_PRINT_BLUEPRINT: 'selectPrintBlueprint',
 };
 
 function formatBlueprintList(blueprints) {
@@ -108,6 +114,73 @@ function formatBulkResultNotice(result) {
   return `✅ Applied marks for ${result.appliedCount} learner${result.appliedCount === 1 ? '' : 's'}.\n\n${parts.join('\n\n')}`;
 }
 
+/**
+ * Generates and sends the blueprint assessment analytics PDF once marks
+ * capture completes and processAssessmentData() has stored the assessment.
+ * Internal helper — not part of the flow's public entry point, but
+ * exported for direct testing since it has its own failure path.
+ *
+ * PDF generation is best-effort: if it fails, the teacher still has the
+ * text summary already sent by the caller, so this only sends a follow-up
+ * apology rather than blocking or reversing anything already delivered.
+ *
+ * @param {string} from
+ * @param {number} assessmentId
+ * @param {object} deps
+ */
+async function generateAndSendBlueprintPdf(from, assessmentId, deps) {
+  const {
+    generateBlueprintAssessmentPdf,
+    buildPdfUrl,
+    sendDocument,
+    safeSendMessage,
+  } = deps;
+
+  try {
+    const { fileId, filename, error } = await generateBlueprintAssessmentPdf(assessmentId);
+    if (error) {
+      console.error('[ASSESSMENT_SESSION_FLOW] Blueprint PDF generation returned an error:', error);
+      await safeSendMessage(from, `⚠️ Marks were saved, but the analytics PDF couldn't be generated: ${error}`);
+      return;
+    }
+    const pdfUrl = buildPdfUrl(fileId);
+    await sendDocument(from, pdfUrl, filename, `📊 *Assessment report ready!*\n\nClass performance, topic breakdown, and per-learner detail are in the PDF above.`);
+  } catch (pdfErr) {
+    console.error('[ASSESSMENT_SESSION_FLOW] Blueprint PDF generation failed:', pdfErr.message);
+    await safeSendMessage(from, `⚠️ Marks were saved, but we couldn't generate the analytics PDF. You can still view the summary above.`);
+  }
+}
+
+/**
+ * ADR-005B: generates and sends the printable blank blueprint question
+ * paper (as opposed to generateAndSendBlueprintPdf() above, which sends
+ * the after-the-fact analytics report once marks are captured). This is
+ * a single-turn action — no marks capture, no assessment row, nothing to
+ * commit — so failure just means "tell the teacher and let them retry",
+ * with no state to roll back.
+ */
+async function generateAndSendPrintablePaper(from, blueprintId, deps) {
+  const {
+    generateBlueprintPaperPdf,
+    buildPdfUrl,
+    sendDocument,
+    safeSendMessage,
+  } = deps;
+
+  try {
+    const { fileId, filename, error } = await generateBlueprintPaperPdf(blueprintId);
+    if (error) {
+      await safeSendMessage(from, `⚠️ Couldn't generate the printable paper: ${error}`);
+      return;
+    }
+    const pdfUrl = buildPdfUrl(fileId);
+    await sendDocument(from, pdfUrl, filename, `🖨️ *Printable question paper ready!*\\n\\nHand this to learners, then capture their marks with *NEW TEST*.`);
+  } catch (pdfErr) {
+    console.error('[ASSESSMENT_SESSION_FLOW] Blueprint paper PDF generation failed:', pdfErr.message);
+    await safeSendMessage(from, `⚠️ Couldn't generate the printable paper right now. Please try again.`);
+  }
+}
+
 async function handleAssessmentSessionFlow(from, text, message = null, preClassifiedIntent = null, deps) {
   const {
     hashPhone,
@@ -153,6 +226,30 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
     if (upper === 'RESUME' || upper === 'STATUS') {
       await safeSendMessage(from,
         "No active assessment session found. Send *NEW TEST* to start one."
+      );
+      return true;
+    }
+
+    // ADR-005B: PRINT lists published blueprints and, on selection,
+    // generates a blank question paper — a separate, single-turn action
+    // from NEW TEST's capture session (see STEP.SELECT_PRINT_BLUEPRINT doc).
+    if (upper === 'PRINT') {
+      const blueprints = listBlueprints(phoneHash, { status: 'published' });
+      if (blueprints.length === 0) {
+        await safeSendMessage(from,
+          "You don't have any published Assessment Blueprints yet. Create and publish one first, then send *PRINT* to get a printable question paper."
+        );
+        return true;
+      }
+
+      assessmentSessionState.set(phoneHash, {
+        step: STEP.SELECT_PRINT_BLUEPRINT,
+        blueprints,
+        lastActivity: Date.now(),
+      });
+
+      await safeSendMessage(from,
+        `🖨️ *Print a Question Paper*\n\nChoose a Blueprint:\n\n${formatBlueprintList(blueprints)}\n\nReply with a number.`
       );
       return true;
     }
@@ -219,6 +316,24 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
     await safeSendMessage(from,
       `Blueprint: *${chosenBlueprint.title}*\n\nChoose a Class:\n\n${formatClassList(classes)}\n\nReply with a number.`
     );
+    return true;
+  }
+
+  // ── SELECT_PRINT_BLUEPRINT (ADR-005B) ─────────────────────────────────
+  if (state.step === STEP.SELECT_PRINT_BLUEPRINT) {
+    const idx = parseListSelection(trimmed, state.blueprints.length);
+    if (idx === null) {
+      await safeSendMessage(from,
+        `Please reply with a number from 1 to ${state.blueprints.length}, or *CANCEL* to stop.`
+      );
+      return true;
+    }
+
+    const chosenBlueprint = state.blueprints[idx];
+    // Single-turn action: clear the session before generating, since
+    // there is no further capture state to track either way.
+    assessmentSessionState.delete(phoneHash);
+    await generateAndSendPrintablePaper(from, chosenBlueprint.id, deps);
     return true;
   }
 
@@ -349,6 +464,7 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
       }
 
       await safeSendMessage(from, diagnostic.teacherSummary);
+      await generateAndSendBlueprintPdf(from, diagnostic.assessmentId, deps);
       return true;
     }
 
@@ -369,6 +485,8 @@ function describeStatus(state) {
       return `Session status: Blueprint *${state.blueprintTitle}* selected. Choosing a Class.\n\n${formatClassList(state.classes)}`;
     case STEP.ACTIVE:
       return formatStatus(state);
+    case STEP.SELECT_PRINT_BLUEPRINT:
+      return `Session status: choosing a Blueprint to print.\n\n${formatBlueprintList(state.blueprints)}`;
     default:
       return 'Session status: unknown.';
   }
@@ -382,9 +500,11 @@ function currentPrompt(state) {
       return 'Reply with a number to choose a Class.';
     case STEP.ACTIVE:
       return formatCapturePrompt(state);
+    case STEP.SELECT_PRINT_BLUEPRINT:
+      return 'Reply with a number to choose which Blueprint to print.';
     default:
       return '';
   }
 }
 
-module.exports = { handleAssessmentSessionFlow, STEP };
+module.exports = { handleAssessmentSessionFlow, generateAndSendBlueprintPdf, generateAndSendPrintablePaper, STEP };

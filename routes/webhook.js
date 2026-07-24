@@ -22,7 +22,7 @@ const {
 } = require('../utils/usageTracker');
 const { isDuplicate }            = require('../utils/deduplication');
 const { handleOnboarding, needsOnboarding } = require('../services/onboardingService');
-const { generatePdf, generateReportSummaryPdf } = require('../services/pdfService');
+const { generatePdf, generateReportSummaryPdf, generateBlueprintAssessmentPdf, generateBlueprintPaperPdf } = require('../services/pdfService');
 const { getWorksheetTotalMarks } = require('../utils/capsPhase');
 const { buildPaymentUrl }        = require('../services/yocoService');
 const { encryptPhone }           = require('../utils/encryption');
@@ -137,6 +137,10 @@ function buildAssessmentSessionDeps() {
     processAssessmentData, // ADR-006 PR2: commits captured marks on completion
     getClassRoster, // ADR-006 PR2.5: prefills learner names from the saved roster, if any
     parseMarks, // ADR-006 PR4 Phase 3: bulk-paste capture via submitBulkReply()
+    generateBlueprintAssessmentPdf, // ADR-005A: analytics PDF sent on capture completion
+    generateBlueprintPaperPdf, // ADR-005B: printable blank question paper
+    buildPdfUrl,
+    sendDocument,
   });
 }
 
