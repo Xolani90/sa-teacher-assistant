@@ -16,6 +16,10 @@
  *      interactive path.
  *   6. A rejected bulk paste (parser fatal error) reports the error and
  *      does not advance state.
+ *   7. (ADR-005A) On completion, the blueprint analytics PDF is generated
+ *      and delivered via sendDocument(); a PDF failure is reported as a
+ *      follow-up message but never loses the already-committed marks or
+ *      throws out of the flow.
  *
  * utils/marksParser.js's parseMarks() is faked via dependency injection
  * (the same pattern as tests/assessment-bulk-capture.test.js) so this file
@@ -135,6 +139,18 @@ async function run() {
     return { assessmentId: 999, teacherSummary: 'stub summary' };
   };
 
+  // ADR-005A: PDF generation/delivery mocks for the completion path.
+  let pdfCalls = [];
+  let sendDocumentCalls = [];
+  let generateBlueprintAssessmentPdfImpl = async (assessmentId) => {
+    pdfCalls.push(assessmentId);
+    return { fileId: 'file-abc', filename: 'Blueprint_Report_Test.pdf' };
+  };
+  const buildPdfUrl = (fileId) => `https://example.test/pdf/${fileId}`;
+  const sendDocument = async (to, url, filename, caption) => {
+    sendDocumentCalls.push({ to, url, filename, caption });
+  };
+
   let parseMarksImpl = fakeParseMarks(); // overridden per section
   const sentMessages = [];
 
@@ -155,6 +171,9 @@ async function run() {
       getBlueprintById,
       processAssessmentData,
       parseMarks: (...args) => parseMarksImpl(...args),
+      generateBlueprintAssessmentPdf: (...args) => generateBlueprintAssessmentPdfImpl(...args),
+      buildPdfUrl,
+      sendDocument,
     };
   }
 
@@ -178,6 +197,8 @@ async function run() {
 
   async function enterActiveSession() {
     assessmentSessionState = makeState();
+    pdfCalls = [];
+    sendDocumentCalls = [];
     await send('NEW TEST');
     await send('1'); // blueprint
     await send('1'); // class -> ACTIVE, learnerCount 2
@@ -222,6 +243,27 @@ async function run() {
     lastDiagnosticCall.payload.learnerResults[0].learnerName === 'Sipho Dlamini',
     'learnerResults built via toLearnerResults() reach processAssessmentData() same as the interactive path'
   );
+  assert(pdfCalls.length === 1 && pdfCalls[0] === 999, 'ADR-005A: generateBlueprintAssessmentPdf() called once with the completed assessmentId');
+  assert(sendDocumentCalls.length === 1 && sendDocumentCalls[0].filename === 'Blueprint_Report_Test.pdf', 'ADR-005A: the analytics PDF is sent to the teacher via sendDocument()');
+  assert(/pdf\/file-abc/.test(sendDocumentCalls[0].url), 'ADR-005A: sendDocument() receives a URL built via buildPdfUrl(fileId)');
+
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 3b: PDF generation failure does not lose the marks or crash the flow ─');
+  await enterActiveSession();
+  parseMarksImpl = fakeParseMarks({
+    learners: [learnerRecord('Sipho Dlamini', 4, 8), learnerRecord('Lebo Molefe', 5, 9)],
+  });
+  generateBlueprintAssessmentPdfImpl = async () => { throw new Error('disk full'); };
+
+  const handledDespitePdfFailure = await send('Sipho Dlamini 4 8\nLebo Molefe 5 9');
+  assert(handledDespitePdfFailure === true, 'ADR-005A: a PDF generation failure does not throw out of the flow');
+  assert(assessmentSessionState.get(phoneHash) === undefined, 'ADR-005A: marks capture still completed and session still cleared despite the PDF failure');
+  assert(lastDiagnosticCall !== null && lastDiagnosticCall.payload.learnerResults.length === 2, 'ADR-005A: marks were still committed via processAssessmentData() despite the PDF failure');
+  assert(/couldn.t generate the analytics PDF/i.test(lastMessage()), 'ADR-005A: teacher is told the PDF failed, as a follow-up, not silently dropped');
+  generateBlueprintAssessmentPdfImpl = async (assessmentId) => {
+    pdfCalls.push(assessmentId);
+    return { fileId: 'file-abc', filename: 'Blueprint_Report_Test.pdf' };
+  };
 
   // ═══════════════════════════════════════════════════════════════════
   console.log('\n── Section 4: bulk paste with a skipped/overflow learner surfaces a notice ─');
