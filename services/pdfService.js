@@ -454,6 +454,81 @@ function drawSectionHeading(doc, heading, marks) {
 }
 
 /**
+ * Draws a single numbered question block: number, marks allocation,
+ * optional topic/subtopic labels, and ruled answer space.
+ *
+ * Deliberately source-agnostic — it knows nothing about blueprints,
+ * AI generation, or any other origin for the question. It only knows how
+ * to lay out a number + label metadata + answer lines. This lets it be
+ * reused for blueprint printable papers today, and for AI-generated
+ * assessments or imported question banks later, without duplicating the
+ * layout logic.
+ *
+ * @param {PDFDocument} doc
+ * @param {object} question
+ * @param {number} question.number - Question number to display (e.g. 1, 2, 3).
+ * @param {number} question.marks - Marks allocated to this question.
+ * @param {string} [question.topic] - Topic label, shown if provided.
+ * @param {string} [question.subtopic] - Subtopic label, shown if provided.
+ * @param {number} [question.answerLines=3] - Number of ruled answer lines to draw.
+ * @param {object} [opts]
+ * @param {boolean} [opts.showTopic=true] - Whether to render the topic/subtopic line.
+ */
+function drawQuestionBlock(doc, { number, marks, topic, subtopic, answerLines = 3 } = {}, opts = {}) {
+  const { showTopic = true } = opts;
+  const margin = 50;
+  const bodyWidth = doc.page.width - margin * 2;
+
+  const lineH = 12;
+  const answerLineH = 20;
+  let blockH = 4 + lineH; // question number + marks row
+  if (showTopic && (topic || subtopic)) blockH += lineH;
+  blockH += answerLines * answerLineH + 8;
+
+  ensureSpace(doc, blockH);
+
+  const top = doc.y;
+
+  // Question number + marks, on one row
+  doc
+    .font(FONTS.heading)
+    .fontSize(11)
+    .fillColor(COLORS.darkText)
+    .text(`Question ${number}`, margin, top, { continued: false, lineBreak: false });
+  doc
+    .font(FONTS.body)
+    .fontSize(10)
+    .fillColor(COLORS.accent)
+    .text(marks != null ? `[${marks} marks]` : '', margin, top, { width: bodyWidth, align: 'right' });
+
+  let cursorY = top + lineH + 4;
+
+  // Topic / subtopic labels, if present and requested
+  if (showTopic && (topic || subtopic)) {
+    const labelParts = [];
+    if (topic) labelParts.push(`Topic: ${sanitiseForPdf(topic)}`);
+    if (subtopic) labelParts.push(`Subtopic: ${sanitiseForPdf(subtopic)}`);
+    doc
+      .font(FONTS.italic)
+      .fontSize(9)
+      .fillColor(COLORS.midGray)
+      .text(labelParts.join('   |   '), margin, cursorY, { width: bodyWidth });
+    cursorY += lineH;
+  }
+
+  cursorY += 6;
+
+  // Ruled answer lines
+  doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText);
+  for (let i = 0; i < answerLines; i++) {
+    const lineY = cursorY + i * answerLineH + answerLineH - 6;
+    doc.moveTo(margin, lineY).lineTo(margin + bodyWidth, lineY).lineWidth(0.5).stroke(COLORS.border);
+  }
+
+  doc.y = cursorY + answerLines * answerLineH + 8;
+}
+
+/**
  * Draws the footer on each page.
  * Called automatically via the `pageAdded` event.
  *
@@ -1630,6 +1705,104 @@ async function generateReportSummaryPdf(comments, metadata = {}) {
 }
 
 
+/**
+ * Generates a printable blueprint assessment template: a paper with the
+ * blueprint's question numbers, topic/subtopic labels, marks allocation,
+ * and ruled answer space — for teachers to pair with their own question
+ * wording (blueprints store the marking spec, not question text; see
+ * ADR-005B scope notes).
+ *
+ * Deliberately reuses the same isAssessment scaffolding as generatePdf()
+ * (header, student info row, instructions box, footer, pagination) rather
+ * than duplicating it, plus drawQuestionBlock() for the question list —
+ * this is the fourth generator composing the shared primitive layer, not
+ * a parallel PDF system.
+ *
+ * @param {number} blueprintId
+ * @returns {Promise<{fileId: string, filename: string}|{error: string}>}
+ */
+async function generateBlueprintPaperPdf(blueprintId) {
+  const { getBlueprintById } = require('./blueprintRepository');
+  const { getDb } = require('../utils/database');
+
+  const blueprint = getBlueprintById(blueprintId);
+  if (!blueprint) {
+    return { error: 'Blueprint not found.' };
+  }
+  if (!blueprint.questions || blueprint.questions.length === 0) {
+    return { error: 'Blueprint has no questions to print.' };
+  }
+
+  const db = getDb();
+  const teacher = db.prepare(`SELECT * FROM teachers WHERE phone_hash = ?`).get(blueprint.phoneHash);
+  const school = teacher && teacher.school;
+
+  const grade = formatGradeLabel(blueprint.grade);
+  const subject = toTitleCase(blueprint.subject);
+
+  ensurePdfDir();
+
+  const fileId = uuidv4();
+  const filename = `Blueprint_Paper_${(blueprint.title || 'Assessment').replace(/[^a-z0-9]+/gi, '_')}.pdf`;
+  const filePath = path.join(PDF_DIR, `${fileId}.pdf`);
+
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: 'A4',
+      margins: { top: 110, bottom: 60, left: 50, right: 50 },
+      bufferPages: true,
+      info: {
+        Title:   blueprint.title,
+        Author:  'SA Teacher Assistant',
+        Subject: `${subject} — ${grade}`,
+        Creator: 'SA Teacher Assistant v2',
+      },
+    });
+    makePdfTextSafe(doc);
+
+    const stream = fs.createWriteStream(filePath);
+    doc.pipe(stream);
+
+    stream.on('finish', () => resolve({ fileId, filename }));
+    stream.on('error', reject);
+
+    try {
+      const title = sanitiseForPdf(blueprint.title || 'ASSESSMENT');
+      const headerMeta = { title, grade, subject, school, date: new Date().toLocaleDateString('en-ZA'), marks: blueprint.totalMarks };
+
+      drawHeader(doc, headerMeta);
+      doc.on('pageAdded', () => {
+        drawHeader(doc, headerMeta);
+        drawFooter(doc, school);
+      });
+      drawFooter(doc, school);
+
+      // Reuse the same learner info box + instructions treatment as
+      // generatePdf()'s isAssessment branch — a blueprint paper is exactly
+      // the kind of document a learner fills in by hand.
+      drawStudentInfoRow(doc, blueprint.totalMarks);
+      drawInstructionsBox(doc, { type: 'test', marks: blueprint.totalMarks });
+
+      blueprint.questions.forEach((q) => {
+        drawQuestionBlock(doc, {
+          number: q.questionNumber,
+          marks: q.maxMarks,
+          topic: q.topic,
+          subtopic: q.subtopic,
+          answerLines: 3,
+        });
+      });
+
+      stampPageNumbers(doc);
+      doc.end();
+    } catch (renderErr) {
+      stream.destroy();
+      fs.unlink(filePath, () => {});
+      reject(renderErr);
+    }
+  });
+}
+
 async function generateBlueprintAssessmentPdf(assessmentId) {
   const { getBlueprintAssessmentAnalytics } = require('./blueprintAnalytics');
   const { getDb } = require('../utils/database');
@@ -1808,4 +1981,4 @@ async function generateBlueprintAssessmentPdf(assessmentId) {
   });
 }
 
-module.exports = { generatePdf, getPdfPath, cleanupOldPdfs, generateReportSummaryPdf, generateBlueprintAssessmentPdf, sanitiseForPdf, formatMarkStr, formatGradeLabel };
+module.exports = { generatePdf, getPdfPath, cleanupOldPdfs, generateReportSummaryPdf, generateBlueprintAssessmentPdf, generateBlueprintPaperPdf, drawQuestionBlock, sanitiseForPdf, formatMarkStr, formatGradeLabel };
