@@ -79,6 +79,7 @@ const helmet    = require('helmet');
 const path      = require('path');
 
 const webhookRouter = require('./routes/webhook');
+const apiRouter     = require('./routes/api');
 
 const app = express();
 
@@ -99,34 +100,10 @@ app.get('/privacy', (req, res) => {
 app.use(helmet({ contentSecurityPolicy: false }));
 
 // ── Admin authentication middleware ─────────────────────────────────────────
-function requireAdminSecret(req, res, next) {
-  const authHeader = req.headers['authorization'];
-  const adminSecret = process.env.ADMIN_SECRET;
-
-  if (!adminSecret) {
-    console.warn('[ADMIN] ADMIN_SECRET not set in environment');
-    return res.status(500).json({ error: 'Server misconfiguration' });
-  }
-
-  if (!authHeader) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  // Timing-safe comparison prevents timing-based secret enumeration attacks.
-  // Both buffers must be the same byte length for timingSafeEqual to work.
-  const crypto = require('crypto');
-  const provided = Buffer.from(authHeader);
-  const expected = Buffer.from(adminSecret);
-
-  if (
-    provided.length !== expected.length ||
-    !crypto.timingSafeEqual(provided, expected)
-  ) {
-    return res.status(401).json({ error: 'Unauthorized' });
-  }
-
-  next();
-}
+// Extracted to utils/adminAuth.js (ADR-007 PR10) so routes/api.js can reuse
+// the identical check without requiring this file, which has module-load
+// side effects (migrations, cron intervals, app.listen) unsafe for tests.
+const { requireAdminSecret, adminLimiter } = require('./utils/adminAuth');
 
 // ── Rate limiting ──────────────────────────────────────────────────────────
 app.use(rateLimit({
@@ -145,15 +122,6 @@ const webhookLimiter = rateLimit({
   legacyHeaders: false,
   trustProxy: true,
   skip: (req) => req.method === 'GET',
-});
-
-const adminLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  trustProxy: true,
-  message: { error: 'Too many admin requests — please try again later.' },
 });
 
 // ── Body parsing ───────────────────────────────────────────────────────────
@@ -392,6 +360,13 @@ app.post('/admin/grant-pro', adminLimiter, requireAdminSecret, async (req, res) 
     res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// ── API: Learner intervention plan (ADR-007 PR10) ───────────────────────────
+// Third delivery surface for InterventionService's InterventionPlan[],
+// alongside WhatsApp (PR8) and PDF (PR9). Internal-only for now — see
+// routes/api.js and utils/adminAuth.js for why this is gated by
+// ADMIN_SECRET rather than per-teacher auth, which doesn't exist yet.
+app.use('/api', adminLimiter, requireAdminSecret, apiRouter);
 
 // ── Error handlers ─────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

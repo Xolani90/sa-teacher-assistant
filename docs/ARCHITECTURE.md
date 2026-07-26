@@ -7,9 +7,10 @@ behind any given layer, follow the links in the table below.
 ## Service dependency diagram
 
 ```
-Channels (WhatsApp / PDF / Dashboard)
+Channels (WhatsApp / PDF / API)
    WhatsApp: LEARNER PROGRESS <name>        (ADR-007 PR8, flows/workspaceFlow.js)
    PDF:      generateLearnerInterventionPdf (ADR-007 PR9, services/pdfService.js)
+   API:      GET /api/learners/:id/intervention-plan (ADR-007 PR10, routes/api.js)
                 │
                 ▼
       InterventionService       (ADR-007 PR7)
@@ -49,6 +50,7 @@ diagram clarity; see ADR-007 §3.2 for the full picture.
 | `InterventionService` | Composing `MasteryService` output into a per-subject `InterventionPlan` (`priority`, `focusTopics`, `recommendedActions`) via a fixed, deterministic rule table. | Its own database queries, its own trend/coverage/mastery math, AI-generated recommendations (future ADR would consume `InterventionPlan`, not replace this layer). |
 | `flows/workspaceFlow.js` (`LEARNER PROGRESS <name>`, ADR-007 PR8) | Formatting `InterventionPlan[]` (mastery + intervention sections) into a WhatsApp-friendly message. | Any priority/trend/mastery decision — it reads `plan.priority`, `plan.recommendedActions`, and `plan.evidence.mastery` as-is and computes nothing. |
 | `services/pdfService.js` (`generateLearnerInterventionPdf`, ADR-007 PR9) | Rendering the same `InterventionPlan[]` as a printable per-learner PDF (cover block, per-subject mastery + intervention sections). | Any priority/trend/mastery decision, same rule as `workspaceFlow.js` above — it is a second formatting consumer of `InterventionService`, not a second computation of mastery/intervention logic. |
+| `routes/api.js` (`GET /api/learners/:learnerId/intervention-plan`, ADR-007 PR10) | Serializing the same `InterventionPlan[]` as JSON, unchanged. Also owns request validation (`learnerId` shape) and HTTP status mapping (400/404/500) — concerns specific to being an HTTP surface, not domain logic. | Any priority/trend/mastery decision, same rule as `workspaceFlow.js`/`pdfService.js` above — a third formatting consumer of `InterventionService`, not a third computation of it. Also does not own teacher authentication/authorization — see note below. |
 
 ## Allowed dependencies
 
@@ -76,6 +78,26 @@ around a layer into raw storage:
   restriction as `workspaceFlow.js` above. PDF and WhatsApp are two
   independent consumers of the identical `InterventionPlan[]` call, not two
   computations of it.
+- `routes/api.js`'s `GET /api/learners/:learnerId/intervention-plan` →
+  `InterventionService` (via `getLearnerInterventionPlan`) and
+  `learnerRepository` (via `getLearnerById`, for the 404-vs-empty-plans
+  distinction) only — same restriction as `workspaceFlow.js` and
+  `pdfService.js` above. API, PDF, and WhatsApp are three independent
+  consumers of the identical `InterventionPlan[]` call, not three
+  computations of it.
+
+  **Authorization note (temporary):** this endpoint is gated by
+  `requireAdminSecret` (`utils/adminAuth.js`) — a single shared secret,
+  the same scheme already used by `/admin/stats` and `/admin/grant-pro`.
+  This is *not* per-teacher authentication; there is currently no
+  per-teacher HTTP identity anywhere in this codebase (WhatsApp
+  establishes identity via the sender's phone number; the PDF download
+  endpoint uses an unscoped per-file token). Until a dedicated ADR
+  defines real teacher auth and teacher→class→learner ownership checks,
+  this endpoint is for trusted internal clients only, not teachers. Only
+  the middleware at the mount point in `server.js` will need to change
+  when that lands — `routes/api.js` and everything beneath it stays the
+  same.
 - `InterventionService` → `MasteryService` only — no direct access to
   `ProgressService`, `CoverageService`, `learnerTimelineService`, or
   repository/SQL layers, even though that data is reachable through

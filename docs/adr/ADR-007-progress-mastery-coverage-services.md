@@ -2,10 +2,9 @@
 
 ## 1. Status
 
-**Accepted (implemented — PR4–PR9 merged to `main`; `d77a6c4` "feat: add
-generateLearnerInterventionPdf (ADR-007 PR9 — PDF parity)" is the latest of
-the series. This header previously read "Proposed... Nothing described here
-is implemented yet" and was stale relative to `main`.)**
+**Accepted (implemented — PR4–PR10 merged to `main`. This header previously
+read "Proposed... Nothing described here is implemented yet" and was stale
+relative to `main`.)**
 
 Implementation summary:
 - PR4 — `ProgressService` (`d3c90c7`)
@@ -14,6 +13,14 @@ Implementation summary:
 - PR7 — `InterventionService` (`8b56177`)
 - PR8 — Intervention section wired into `LEARNER PROGRESS <n>` WhatsApp reply (`a37655b`)
 - PR9 — `generateLearnerInterventionPdf()` PDF parity (`d77a6c4`)
+- PR10 — `GET /api/learners/:learnerId/intervention-plan` (`routes/api.js`),
+  third delivery surface for the same `InterventionPlan[]`. Gated by
+  `requireAdminSecret` (`utils/adminAuth.js`) as an internal-only
+  placeholder — there is no per-teacher HTTP authentication anywhere in
+  this codebase yet, so this endpoint is not exposed to teachers. Real
+  teacher auth (login/session/token issuance, teacher→class→learner
+  ownership checks) is deliberately scoped out as its own future ADR
+  rather than folded into this PR.
 
 See `docs/ARCHITECTURE.md` for the current layering diagram and allowed-deps
 table, and the corresponding test suites (`tests/routing-order-workspace-flow.test.js`,
