@@ -5,7 +5,17 @@
  *
  * Covers the read-only / class-management "Teacher Workspace" commands:
  *   NEW CLASS, MY CLASSES, MY ASSESSMENTS / MY ASSESSMENT HISTORY,
- *   MY PROGRESS / MY CURRICULUM PROGRESS, WORKSPACE.
+ *   MY PROGRESS / MY CURRICULUM PROGRESS, WORKSPACE, CLASS INTERVENTION.
+ *
+ * CLASS INTERVENTION [selector] (ADR-009, PR12) is a thin WhatsApp-facing
+ * wrapper around ClassInterventionService.getClassInterventionPlan() —
+ * this flow does no aggregation of its own. Class resolution reuses the
+ * same 0/1/2+ selector convention as LEARNER PROGRESS <name>: with one
+ * class it's used automatically, with zero the teacher is told to create
+ * one, and with 2+ the teacher must disambiguate in the same message
+ * (CLASS INTERVENTION 2 or CLASS INTERVENTION Grade 7A) — same stateless,
+ * single-message convention every other read-only workspace command uses
+ * here (no session state is introduced for this).
  *
  * Deliberately excludes SAVE and MY RESOURCES: those belong to the generic
  * 8-resource-type SAVE lifecycle infrastructure (teacherWorkspaceService's
@@ -36,6 +46,7 @@
  *                                // Each plan's evidence.mastery carries the full MasteryReport, so this
  *                                // single call supplies both the mastery summary and the intervention
  *                                // section below — workspaceFlow doesn't fetch MasteryReport separately.
+ *   getClassInterventionPlan,  // (phoneHash, classId) => ClassInterventionPlan (services/classInterventionService.js)
  * }
  */
 
@@ -62,6 +73,7 @@ async function handleWorkspaceFlow(from, text, deps) {
     calendarQuery,
     searchLearnersByName,
     getLearnerInterventionPlan,
+    getClassInterventionPlan,
   } = deps;
 
   const upper = text.trim().toUpperCase();
@@ -71,7 +83,8 @@ async function handleWorkspaceFlow(from, text, deps) {
     upper === 'MY ASSESSMENTS' || upper === 'MY ASSESSMENT HISTORY' ||
     upper === 'MY PROGRESS' || upper === 'MY CURRICULUM PROGRESS' ||
     upper.startsWith('LEARNER PROGRESS') ||
-    upper === 'WORKSPACE';
+    upper === 'WORKSPACE' ||
+    upper.startsWith('CLASS INTERVENTION');
 
   if (!isWorkspaceCmd) return false;
 
@@ -367,6 +380,54 @@ async function handleWorkspaceFlow(from, text, deps) {
     return true;
   }
 
+  // ── CLASS INTERVENTION [selector] ──
+  if (upper.startsWith('CLASS INTERVENTION')) {
+    const rawSelector = text.slice('CLASS INTERVENTION'.length).trim();
+
+    let classes = [];
+    try {
+      classes = getTeacherClasses(hash);
+    } catch (err) {
+      console.error('[Workspace] getTeacherClasses error:', err.message);
+      await safeSendMessage(from, `⚠️ Couldn't load your classes. Please try again.`);
+      return true;
+    }
+
+    if (classes.length === 0) {
+      await safeSendMessage(from,
+        `📚 *No classes yet*\\n\\nCreate one first:\\n*NEW CLASS [name] | [learner count]*\\n\\nExample:\\n_NEW CLASS Grade 8B Mathematics | 28_`
+      );
+      return true;
+    }
+
+    let chosenClass = null;
+
+    if (classes.length === 1) {
+      chosenClass = classes[0];
+    } else if (!rawSelector) {
+      await safeSendMessage(from, formatClassSelectionForIntervention(classes));
+      return true;
+    } else {
+      chosenClass = resolveClassSelector(rawSelector, classes);
+      if (!chosenClass) {
+        await safeSendMessage(from,
+          `⚠️ I couldn't match "${rawSelector}" to one of your classes.\\n\\n` +
+          formatClassSelectionForIntervention(classes)
+        );
+        return true;
+      }
+    }
+
+    try {
+      const plan = getClassInterventionPlan(hash, chosenClass.id);
+      await safeSendMessage(from, formatClassInterventionPlan(chosenClass, plan));
+    } catch (err) {
+      console.error('[Workspace] getClassInterventionPlan error:', err.message);
+      await safeSendMessage(from, `⚠️ Couldn't load the class intervention report. Please try again.`);
+    }
+    return true;
+  }
+
   // Shouldn't reach here given the isWorkspaceCmd guard, but be safe.
   return true;
 }
@@ -479,6 +540,106 @@ function formatIntervention(plan) {
   }
 
   return block;
+}
+
+// ── CLASS INTERVENTION formatting + class-selector helpers ──
+
+/**
+ * Builds the class list/usage prompt shown when CLASS INTERVENTION is sent
+ * with no selector and the teacher has 2+ classes. Mirrors
+ * utils/classContext.js's numbered-list convention, but CLASS INTERVENTION
+ * is stateless (single-message, like LEARNER PROGRESS <name>) rather than
+ * a multi-step session, so the teacher re-sends the command with the
+ * number or name rather than replying to a pending prompt.
+ *
+ * @param {Array<{id: number, name: string}>} classes
+ * @returns {string}
+ */
+function formatClassSelectionForIntervention(classes) {
+  let msg = `📚 *Which class?*\\n\\n`;
+  classes.forEach((c, i) => {
+    msg += `${i + 1}. ${c.name}\\n`;
+  });
+  msg += `\\n_Reply *CLASS INTERVENTION [number]* or *CLASS INTERVENTION [class name]*._`;
+  return msg;
+}
+
+/**
+ * Resolves a teacher-typed selector against their class list: a 1-based
+ * index into the same order getTeacherClasses() returned, or a
+ * case-insensitive substring match on the class name. Returns null when
+ * neither resolves so the caller can re-prompt rather than guess.
+ *
+ * @param {string} rawSelector
+ * @param {Array<{id: number, name: string}>} classes
+ * @returns {{id: number, name: string}|null}
+ */
+function resolveClassSelector(rawSelector, classes) {
+  const asIndex = parseInt(rawSelector, 10);
+  if (Number.isInteger(asIndex) && String(asIndex) === rawSelector.trim() && asIndex >= 1 && asIndex <= classes.length) {
+    return classes[asIndex - 1];
+  }
+  const needle = rawSelector.trim().toLowerCase();
+  const matches = classes.filter(c => (c.name || '').toLowerCase().includes(needle));
+  return matches.length === 1 ? matches[0] : null;
+}
+
+/**
+ * Renders a ClassInterventionPlan (services/classInterventionService.js)
+ * as a WhatsApp-friendly summary. Pure formatting — reads the plan's
+ * fields as-is, computes nothing (same discipline formatSubjectMastery()/
+ * formatIntervention() apply to their inputs per ADR-007 §3.3):
+ * ClassInterventionService already did every aggregation/priority/ranking
+ * decision reflected here.
+ *
+ * @param {{id: number, name: string}} cls
+ * @param {import('../services/classInterventionService').ClassInterventionPlan} plan
+ * @returns {string}
+ */
+function formatClassInterventionPlan(cls, plan) {
+  const { summary, priorityCounts, commonFocusTopics, priorityLearners } = plan;
+
+  if (summary.totalLearners === 0) {
+    return `🏫 *Class Intervention — ${cls.name}*\\n\\nThis class has no learners recorded yet.\\n\\n_Add learners before running a class intervention report._`;
+  }
+
+  let msg = `🏫 *Class Intervention — ${cls.name}*\\n\\n`;
+  msg += `👥 ${summary.totalLearners} learner(s) | ${summary.evaluatedLearners} evaluated | ${summary.insufficientData} awaiting data\\n`;
+  if (summary.erroredLearners > 0) {
+    msg += `⚠️ ${summary.erroredLearners} learner(s) couldn't be evaluated\\n`;
+  }
+  msg += `\\n`;
+
+  msg += `*Priority breakdown*\\n`;
+  msg += `${PRIORITY_EMOJI.high} High: ${priorityCounts.high}\\n`;
+  msg += `${PRIORITY_EMOJI.medium} Medium: ${priorityCounts.medium}\\n`;
+  msg += `${PRIORITY_EMOJI.low} Low: ${priorityCounts.low}\\n`;
+
+  const BUCKET_DISPLAY_CAP = 8;
+  for (const level of ['high', 'medium', 'low']) {
+    const learners = priorityLearners[level];
+    if (!learners || learners.length === 0) continue;
+    msg += `\\n${PRIORITY_EMOJI[level]} *${PRIORITY_LABELS[level]} priority*\\n`;
+    const shown = learners.slice(0, BUCKET_DISPLAY_CAP);
+    for (const l of shown) {
+      msg += `• ${l.learnerName}\\n`;
+    }
+    if (learners.length > shown.length) {
+      msg += `_...and ${learners.length - shown.length} more_\\n`;
+    }
+  }
+
+  if (commonFocusTopics.length > 0) {
+    const TOPIC_DISPLAY_CAP = 5;
+    const sorted = [...commonFocusTopics].sort((a, b) => b.percentage - a.percentage);
+    msg += `\\n*Common focus topics*\\n`;
+    for (const t of sorted.slice(0, TOPIC_DISPLAY_CAP)) {
+      msg += `• ${t.subject} — ${t.topic} (${Math.round(t.percentage * 100)}% of evaluated learners)\\n`;
+    }
+  }
+
+  msg += `\\n_Reply *LEARNER PROGRESS [name]* for a specific learner's full breakdown._`;
+  return msg;
 }
 
 module.exports = {

@@ -226,6 +226,7 @@ async function handleCommand(from, text, deps) {
   // MY ASSESSMENTS — recent assessment history with class averages
   // MY PROGRESS  — curriculum coverage from real persisted data (or calendar estimate)
   // WORKSPACE   — brief summary combining all three
+  // CLASS INTERVENTION [selector] — class-level intervention rollup (ADR-009, PR12)
   //
   // These are read-only views of data that already exists in the DB (written by the
   // data-driven assessment flow). No Pro gate — useful to any registered teacher.
@@ -242,6 +243,7 @@ async function handleCommand(from, text, deps) {
     const { handleCurriculumQuery: calendarQuery } = require('../services/curriculumIntelligenceService');
     const { searchLearnersByName } = require('../services/learnerRepository');
     const { getLearnerInterventionPlan } = require('../services/interventionService');
+    const { getClassInterventionPlan } = require('../services/classInterventionService');
 
     return Object.freeze({
       hashPhone: deps.hashPhone,
@@ -256,6 +258,7 @@ async function handleCommand(from, text, deps) {
       calendarQuery,
       searchLearnersByName,
       getLearnerInterventionPlan,
+      getClassInterventionPlan,
     });
   }
 
