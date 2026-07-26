@@ -10,7 +10,7 @@ behind any given layer, follow the links in the table below.
 Channels (WhatsApp / PDF / Dashboard)
                 │
                 ▼
-        MasteryService          (planned — ADR-007)
+        MasteryService          (ADR-007)
                 │
        ┌────────┴────────┐
        ▼                 ▼
@@ -40,7 +40,7 @@ diagram clarity; see ADR-007 §3.2 for the full picture.
 | `learnerTimelineService` | Merging assessment + observation rows into one chronologically-sorted `TimelineEvent[]` stream, with a stable, documented shape (`eventKey`, `occurredAt`, `payload`, ...). | Filtering by type, computing trends, calling AI, mutating state. |
 | `ProgressService` | Percentage-bearing assessment trend analysis, strictly grouped per `(learnerId, subject)`. | CAPS expectations, mastery, cross-subject or cross-assessment-type aggregation. |
 | `CoverageService` | Comparing blueprint-backed assessment topics against CAPS expected-topic lists, per `(learnerId, subject, grade, term)`. | Trends, mastery, non-blueprint (free-form) assessment content. |
-| `MasteryService` (planned) | Composing `TimelineService` + `ProgressService` + `CoverageService` output into a mastery judgement. | Its own database queries, its own trend/coverage math. |
+| `MasteryService` | Composing `TimelineService` + `ProgressService` + `CoverageService` output into a per-subject mastery judgement (`masteryLevel`, `confidence`, `strengths`/`concerns`). | Its own database queries, its own trend/coverage math. |
 
 ## Allowed dependencies
 
