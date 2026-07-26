@@ -8,6 +8,7 @@ behind any given layer, follow the links in the table below.
 
 ```
 Channels (WhatsApp / PDF / Dashboard)
+   WhatsApp: LEARNER PROGRESS <name>   (ADR-007 PR8, flows/workspaceFlow.js)
                 │
                 ▼
       InterventionService       (ADR-007 PR7)
@@ -45,6 +46,7 @@ diagram clarity; see ADR-007 §3.2 for the full picture.
 | `CoverageService` | Comparing blueprint-backed assessment topics against CAPS expected-topic lists, per `(learnerId, subject, grade, term)`. | Trends, mastery, non-blueprint (free-form) assessment content. |
 | `MasteryService` | Composing `TimelineService` + `ProgressService` + `CoverageService` output into a per-subject mastery judgement (`masteryLevel`, `confidence`, `strengths`/`concerns`). | Its own database queries, its own trend/coverage math. |
 | `InterventionService` | Composing `MasteryService` output into a per-subject `InterventionPlan` (`priority`, `focusTopics`, `recommendedActions`) via a fixed, deterministic rule table. | Its own database queries, its own trend/coverage/mastery math, AI-generated recommendations (future ADR would consume `InterventionPlan`, not replace this layer). |
+| `flows/workspaceFlow.js` (`LEARNER PROGRESS <name>`, ADR-007 PR8) | Formatting `InterventionPlan[]` (mastery + intervention sections) into a WhatsApp-friendly message. | Any priority/trend/mastery decision — it reads `plan.priority`, `plan.recommendedActions`, and `plan.evidence.mastery` as-is and computes nothing. |
 
 ## Allowed dependencies
 
@@ -59,6 +61,13 @@ around a layer into raw storage:
   `curriculumCoverageService`.
 - `MasteryService` → `learnerTimelineService`, `ProgressService`,
   `CoverageService` only — no direct repository or SQL access.
+- `flows/workspaceFlow.js` → `InterventionService` only (via the
+  `getLearnerInterventionPlan` dep) — it does not call `MasteryService`
+  directly, even though `MasteryReport` is reachable through
+  `InterventionPlan.evidence.mastery`. This is the same "consume the
+  highest-level service that already composes what you need" rule as
+  `InterventionService` → `MasteryService` below, applied one layer up:
+  the delivery surface reaches past `InterventionService` for nothing.
 - `InterventionService` → `MasteryService` only — no direct access to
   `ProgressService`, `CoverageService`, `learnerTimelineService`, or
   repository/SQL layers, even though that data is reachable through

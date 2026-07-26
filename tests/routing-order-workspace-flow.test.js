@@ -133,14 +133,25 @@ async function runFunctional() {
     getTeacherProgressReport: () => ({ dataAvailable: false }),
     calendarQuery: async () => 'calendar summary',
     searchLearnersByName: () => ([{ id: 1, canonicalName: 'Sipho Dlamini' }]),
-    getLearnerMastery: () => ([{
+    getLearnerInterventionPlan: () => ([{
       learnerId: 1,
       subject: 'Mathematics',
-      masteryLevel: 'developing',
-      confidence: 0.6,
-      evidence: { progress: { trend: 'rising' }, coverage: { dataAvailable: true, averagePercentage: 72 }, timeline: { eventCount: 5 } },
-      strengths: ['Number Patterns'],
-      concerns: ['Geometry'],
+      priority: 'medium',
+      focusTopics: ['Fractions'],
+      recommendedActions: ['Continue monitoring — performance is developing steadily.'],
+      evidence: {
+        mastery: {
+          learnerId: 1,
+          subject: 'Mathematics',
+          masteryLevel: 'developing',
+          confidence: 0.6,
+          evidence: { progress: { trend: 'rising' }, coverage: { dataAvailable: true, averagePercentage: 72 }, timeline: { eventCount: 5 } },
+          strengths: ['Number Patterns'],
+          concerns: ['Geometry'],
+        },
+        progress: { trend: 'rising' },
+        coverage: { dataAvailable: true, averagePercentage: 72 },
+      },
     }]),
   };
 
@@ -215,11 +226,33 @@ async function runFunctional() {
     assert(sent[0].text.includes('72%'), 'reply includes the coverage percentage');
     assert(sent[0].text.includes('Number Patterns'), 'reply includes strengths');
     assert(sent[0].text.includes('Geometry'), 'reply includes concerns/focus areas');
+    assert(sent[0].text.includes('Intervention'), 'reply includes the new Intervention section');
+    assert(sent[0].text.includes('Priority: Medium'), 'reply includes the intervention priority');
+    assert(sent[0].text.includes('Continue monitoring — performance is developing steadily.'), 'reply includes the recommended action(s)');
 
     sent = [];
-    const noEvidenceDeps = { ...deps, getLearnerMastery: () => ([]) };
+    const noEvidenceDeps = { ...deps, getLearnerInterventionPlan: () => ([]) };
     await handleWorkspaceFlow(PHONE, 'LEARNER PROGRESS Sipho Dlamini', noEvidenceDeps);
-    assert(sent.length > 0 && /No assessment or observation data/.test(sent[0].text), 'a resolved learner with zero MasteryReports gets a graceful message, not a crash');
+    assert(sent.length > 0 && /No assessment or observation data/.test(sent[0].text), 'a resolved learner with zero InterventionPlans gets a graceful message, not a crash');
+
+    sent = [];
+    const insufficientDataDeps = {
+      ...deps,
+      getLearnerInterventionPlan: () => ([{
+        learnerId: 1,
+        subject: 'Mathematics',
+        priority: 'medium',
+        focusTopics: [],
+        recommendedActions: ['Gather more assessment or observation evidence before planning an intervention.'],
+        evidence: {
+          mastery: { learnerId: 1, subject: 'Mathematics', masteryLevel: 'insufficient-data', confidence: 0, evidence: {}, strengths: [], concerns: [] },
+          progress: {},
+          coverage: { dataAvailable: false, averagePercentage: null },
+        },
+      }]),
+    };
+    await handleWorkspaceFlow(PHONE, 'LEARNER PROGRESS Sipho Dlamini', insufficientDataDeps);
+    assert(sent.length > 0 && !sent[0].text.includes('Intervention'), 'an insufficient-data subject shows no redundant Intervention block');
   }
 
   console.log(`\n${'─'.repeat(60)}\nWorkspace Flow Routing Results: ${passed} passed, ${failed} failed`);

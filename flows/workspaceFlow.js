@@ -32,7 +32,10 @@
  *   getTeacherProgressReport, // (hash) => progress | { error }
  *   calendarQuery,            // async (query, teacher) => string  (aliased handleCurriculumQuery)
  *   searchLearnersByName,     // (name, {phoneHash}) => Learner[]  (services/learnerRepository.js)
- *   getLearnerMastery,        // (learnerId) => MasteryReport[]    (services/masteryService.js)
+ *   getLearnerInterventionPlan, // (learnerId) => InterventionPlan[] (services/interventionService.js)
+ *                                // Each plan's evidence.mastery carries the full MasteryReport, so this
+ *                                // single call supplies both the mastery summary and the intervention
+ *                                // section below — workspaceFlow doesn't fetch MasteryReport separately.
  * }
  */
 
@@ -58,7 +61,7 @@ async function handleWorkspaceFlow(from, text, deps) {
     getTeacherProgressReport,
     calendarQuery,
     searchLearnersByName,
-    getLearnerMastery,
+    getLearnerInterventionPlan,
   } = deps;
 
   const upper = text.trim().toUpperCase();
@@ -283,9 +286,14 @@ async function handleWorkspaceFlow(from, text, deps) {
       }
 
       const learner = matches[0];
-      const reports = getLearnerMastery(learner.id);
+      // One call supplies both mastery and intervention data: each
+      // InterventionPlan's evidence.mastery is the full MasteryReport, so
+      // workspaceFlow never fetches MasteryService directly (per ADR-007,
+      // delivery surfaces consume the highest-level service that already
+      // composes what they need — InterventionService, not MasteryService).
+      const plans = getLearnerInterventionPlan(learner.id);
 
-      if (!reports || reports.length === 0) {
+      if (!plans || plans.length === 0) {
         await safeSendMessage(from,
           `📈 *${learner.canonicalName}*\n\nNo assessment or observation data recorded for this learner yet.`
         );
@@ -294,14 +302,15 @@ async function handleWorkspaceFlow(from, text, deps) {
 
       let msg = `📈 *${learner.canonicalName} — Mastery Overview*\n\n`;
       // Prioritise subjects with real evidence over insufficient-data ones.
-      const sorted = [...reports].sort((a, b) => {
-        const aReady = a.masteryLevel !== 'insufficient-data';
-        const bReady = b.masteryLevel !== 'insufficient-data';
+      const sorted = [...plans].sort((a, b) => {
+        const aReady = a.evidence.mastery.masteryLevel !== 'insufficient-data';
+        const bReady = b.evidence.mastery.masteryLevel !== 'insufficient-data';
         if (aReady === bReady) return a.subject.localeCompare(b.subject);
         return aReady ? -1 : 1;
       });
-      for (const report of sorted) {
-        msg += formatSubjectMastery(report);
+      for (const plan of sorted) {
+        msg += formatSubjectMastery(plan.evidence.mastery);
+        msg += formatIntervention(plan);
         msg += `\n`;
       }
       msg += `_Reply *MY PROGRESS* for your whole-class curriculum coverage._`;
@@ -421,6 +430,52 @@ function formatSubjectMastery(report) {
 
   if (report.concerns && report.concerns.length > 0) {
     block += `Focus areas: ${report.concerns.slice(0, 3).join(', ')}\n`;
+  }
+
+  return block;
+}
+
+const PRIORITY_LABELS = {
+  low: 'Low',
+  medium: 'Medium',
+  high: 'High',
+};
+
+const PRIORITY_EMOJI = {
+  low: '🟢',
+  medium: '🟠',
+  high: '🔴',
+};
+
+/**
+ * Renders a single subject's InterventionPlan (services/interventionService.js)
+ * as a short WhatsApp-friendly block, appended directly under that subject's
+ * formatSubjectMastery() block. Pure formatting — reads the plan's priority
+ * and recommendedActions as-is, computes nothing (per ADR-007 §3.3,
+ * InterventionService already did the rule/judgement work).
+ *
+ * Skips insufficient-data subjects: formatSubjectMastery() already tells the
+ * teacher there's no data for that subject, so an "insufficient-data ->
+ * medium priority, gather more evidence" block underneath would be
+ * redundant rather than additive.
+ *
+ * @param {import('../services/interventionService').InterventionPlan} plan
+ * @returns {string}
+ */
+function formatIntervention(plan) {
+  if (plan.evidence.mastery.masteryLevel === 'insufficient-data') return '';
+
+  const emoji = PRIORITY_EMOJI[plan.priority] || '🟠';
+  const label = PRIORITY_LABELS[plan.priority] || plan.priority;
+
+  let block = `\n${emoji} *Intervention*\n`;
+  block += `Priority: ${label}\n`;
+
+  if (plan.recommendedActions && plan.recommendedActions.length > 0) {
+    block += `\nRecommended actions\n`;
+    for (const action of plan.recommendedActions) {
+      block += `• ${action}\n`;
+    }
   }
 
   return block;
