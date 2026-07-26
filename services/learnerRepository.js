@@ -101,7 +101,9 @@ function getAssessmentHistory(learnerId) {
         a.grade           AS grade,
         a.subject         AS subject,
         a.term            AS term,
-        a.assessment_type AS assessment_type
+        a.assessment_type AS assessment_type,
+        a.blueprint_id    AS blueprint_id,
+        a.blueprint_version AS blueprint_version
       FROM learner_results lr
       JOIN assessments a ON a.id = lr.assessment_id
       WHERE lr.learner_id = ?
@@ -123,6 +125,14 @@ function getAssessmentHistory(learnerId) {
       mark: row.mark,
       totalMarks: row.total_marks,
       percentage: row.percentage,
+      // Additive (non-breaking) field, added alongside CoverageService
+      // (ADR-007 §3.2): lets downstream services resolve which CAPS
+      // topics an assessment actually covered via
+      // blueprintRepository.getBlueprintById(). NULL for assessments not
+      // backed by a blueprint — that's a valid, expected state, not an
+      // error; such events simply carry no topic-level detail.
+      blueprintId: row.blueprint_id,
+      blueprintVersion: row.blueprint_version,
     }));
   } catch (err) {
     logger.error('Failed to fetch assessment history', { learnerId, error: err.message });

@@ -72,6 +72,9 @@ const learnerRepository = require('./learnerRepository');
  * Source-specific data, passed through unmodified from the repository.
  * Treated as immutable by convention — normalizers do not mutate the
  * repository row, and callers should not mutate the returned payload.
+ * For assessment events, payload.blueprintId/blueprintVersion (added
+ * alongside ADR-007 CoverageService) are null for assessments not backed
+ * by a blueprint — a valid, expected state, not an error.
  */
 
 /**
@@ -100,6 +103,10 @@ function normalizeAssessment(row) {
       mark: row.mark,
       totalMarks: row.totalMarks,
       percentage: row.percentage,
+      // Added alongside CoverageService (ADR-007 §3.2) — null for
+      // non-blueprint assessments, which is expected, not an error.
+      blueprintId: row.blueprintId,
+      blueprintVersion: row.blueprintVersion,
     },
   };
 }

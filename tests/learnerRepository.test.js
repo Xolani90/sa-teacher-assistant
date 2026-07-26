@@ -134,6 +134,8 @@ function buildSchema(db) {
       term              INTEGER NOT NULL,
       assessment_type   TEXT    NOT NULL,
       total_marks       INTEGER NOT NULL,
+      blueprint_id      INTEGER,
+      blueprint_version INTEGER,
       created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
     );
@@ -190,11 +192,11 @@ function insertLearner(db, { phoneHash, classId = null, name }) {
   return info.lastInsertRowid;
 }
 
-function insertAssessment(db, { phoneHash, title = 'Test Assessment', grade = 7, subject = 'Mathematics', term = 1, assessmentType = 'test', totalMarks = 20 }) {
+function insertAssessment(db, { phoneHash, title = 'Test Assessment', grade = 7, subject = 'Mathematics', term = 1, assessmentType = 'test', totalMarks = 20, blueprintId = null, blueprintVersion = null }) {
   const info = db.prepare(`
-    INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(phoneHash, title, grade, subject, term, assessmentType, totalMarks);
+    INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks, blueprint_id, blueprint_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(phoneHash, title, grade, subject, term, assessmentType, totalMarks, blueprintId, blueprintVersion);
   return info.lastInsertRowid;
 }
 
@@ -289,6 +291,19 @@ async function run() {
   assertEq(assessHistory[0].title, 'Term 2 Test', 'newest (Term 2) is first');
   assertEq(assessHistory[1].title, 'Term 1 Test', 'oldest (Term 1) is second');
   assertEq(assessHistory[0].type, 'assessment', 'event type is "assessment"');
+  assertEq(assessHistory[0].blueprintId, null, 'blueprintId is null for a non-blueprint assessment');
+  assertEq(assessHistory[0].blueprintVersion, null, 'blueprintVersion is null for a non-blueprint assessment');
+
+  // Dedicated learner (not `sipho`) so this fixture doesn't perturb the
+  // assessment counts LR-11/LR-12 rely on later in this file.
+  const blueprintTestLearner = insertLearner(_db, { phoneHash: TEACHER_A, classId: classA, name: 'BlueprintFixtureLearner' });
+  const blueprintBackedAssessmentId = insertAssessment(_db, {
+    phoneHash: TEACHER_A, title: 'Blueprint Test', term: 2, blueprintId: 42, blueprintVersion: 2,
+  });
+  insertResult(_db, { assessmentId: blueprintBackedAssessmentId, learnerId: blueprintTestLearner, learnerName: 'BlueprintFixtureLearner', mark: 18, totalMarks: 20, createdAt: '2026-05-01 09:00:00' });
+  const blueprintRow = getAssessmentHistory(blueprintTestLearner).find((e) => e.title === 'Blueprint Test');
+  assertEq(blueprintRow.blueprintId, 42, 'blueprintId passes through when the assessment is blueprint-backed');
+  assertEq(blueprintRow.blueprintVersion, 2, 'blueprintVersion passes through when the assessment is blueprint-backed');
 
   const obsAssessment1 = insertObsAssessment(_db, { phoneHash: TEACHER_A, assessmentName: 'Jan Observation' });
   const obsAssessment2 = insertObsAssessment(_db, { phoneHash: TEACHER_A, assessmentName: 'Feb Observation' });

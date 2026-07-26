@@ -67,6 +67,8 @@ function assessmentRow(overrides = {}) {
     mark: 34,
     totalMarks: 50,
     percentage: 68,
+    blueprintId: null,
+    blueprintVersion: null,
     ...overrides,
   };
 }
@@ -190,6 +192,8 @@ console.log('\n── Section 4: assessment normalization ───────�
     totalMarks: 50,
     percentage: 80,
     learnerName: 'Ayanda Nkosi',
+    blueprintId: 7,
+    blueprintVersion: 2,
   });
 
   const event = timelineService.normalizeAssessment(row);
@@ -209,6 +213,8 @@ console.log('\n── Section 4: assessment normalization ───────�
   assert(event.payload.mark === 40, 'payload.mark preserved');
   assert(event.payload.totalMarks === 50, 'payload.totalMarks preserved');
   assert(event.payload.percentage === 80, 'payload.percentage preserved');
+  assert(event.payload.blueprintId === 7, 'payload.blueprintId preserved (added for CoverageService, ADR-007)');
+  assert(event.payload.blueprintVersion === 2, 'payload.blueprintVersion preserved (added for CoverageService, ADR-007)');
 }
 
 // ── Section 5: observation normalization ─────────────────────────────────
