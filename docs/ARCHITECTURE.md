@@ -10,6 +10,9 @@ behind any given layer, follow the links in the table below.
 Channels (WhatsApp / PDF / Dashboard)
                 │
                 ▼
+      InterventionService       (ADR-007 PR7)
+                │
+                ▼
         MasteryService          (ADR-007)
                 │
        ┌────────┴────────┐
@@ -41,6 +44,7 @@ diagram clarity; see ADR-007 §3.2 for the full picture.
 | `ProgressService` | Percentage-bearing assessment trend analysis, strictly grouped per `(learnerId, subject)`. | CAPS expectations, mastery, cross-subject or cross-assessment-type aggregation. |
 | `CoverageService` | Comparing blueprint-backed assessment topics against CAPS expected-topic lists, per `(learnerId, subject, grade, term)`. | Trends, mastery, non-blueprint (free-form) assessment content. |
 | `MasteryService` | Composing `TimelineService` + `ProgressService` + `CoverageService` output into a per-subject mastery judgement (`masteryLevel`, `confidence`, `strengths`/`concerns`). | Its own database queries, its own trend/coverage math. |
+| `InterventionService` | Composing `MasteryService` output into a per-subject `InterventionPlan` (`priority`, `focusTopics`, `recommendedActions`) via a fixed, deterministic rule table. | Its own database queries, its own trend/coverage/mastery math, AI-generated recommendations (future ADR would consume `InterventionPlan`, not replace this layer). |
 
 ## Allowed dependencies
 
@@ -55,6 +59,11 @@ around a layer into raw storage:
   `curriculumCoverageService`.
 - `MasteryService` → `learnerTimelineService`, `ProgressService`,
   `CoverageService` only — no direct repository or SQL access.
+- `InterventionService` → `MasteryService` only — no direct access to
+  `ProgressService`, `CoverageService`, `learnerTimelineService`, or
+  repository/SQL layers, even though that data is reachable through
+  `MasteryReport.evidence`. Reaching past `MasteryService` for "just one
+  more field" defeats the point of freezing `MasteryReport` as a contract.
 
 This is the "services consume contracts, not storage" rule from ADR-007
 §3.4: a change to a table's columns should only ever require a change in
@@ -67,6 +76,7 @@ Each layer's unit tests mock the layer(s) immediately beneath it, rather
 than exercising a real database through several layers at once:
 
 ```
+InterventionService     tests mock MasteryService
 MasteryService         tests mock TimelineService, ProgressService,
                         CoverageService independently
 ProgressService         tests mock learnerTimelineService
