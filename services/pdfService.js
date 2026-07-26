@@ -2142,4 +2142,156 @@ async function generateLearnerInterventionPdf(learnerId) {
   });
 }
 
-module.exports = { generatePdf, getPdfPath, cleanupOldPdfs, generateReportSummaryPdf, generateBlueprintAssessmentPdf, generateBlueprintPaperPdf, generateLearnerInterventionPdf, drawQuestionBlock, sanitiseForPdf, formatMarkStr, formatGradeLabel };
+/**
+ * Generates a printable Class Intervention Report (ADR-009 PR13). Renders
+ * the `ClassInterventionPlan` produced by
+ * `classInterventionService.getClassInterventionPlan()` — the same call
+ * `flows/workspaceFlow.js` uses for the `CLASS INTERVENTION [selector]`
+ * WhatsApp command — as a standalone downloadable document.
+ *
+ * Deliberately does NOT call learnerRosterService, interventionService,
+ * masteryService, progressService, or coverageService directly, and
+ * computes no aggregation, ranking, or threshold judgement of its own:
+ * every fact printed here (summary counts, priorityCounts,
+ * priorityLearners, commonFocusTopics) is read verbatim off the
+ * ClassInterventionPlan object, mirroring the same "delivery surfaces
+ * format, they don't decide" rule already applied by
+ * generateLearnerInterventionPdf() (PR9) and formatClassInterventionPlan()
+ * in workspaceFlow.js. This keeps WhatsApp and PDF presenting identical
+ * educational conclusions from one shared computation, per ADR-009's
+ * layering rule.
+ *
+ * Unlike generateLearnerInterventionPdf(learnerId) — which can resolve a
+ * teacher entirely from the learner row — a class has no such self-
+ * contained lookup, so this takes the same (phoneHash, classId) pair
+ * classInterventionService.getClassInterventionPlan() itself requires;
+ * getClass(classId, phoneHash) enforces the same ownership scoping
+ * used everywhere else a class is read.
+ *
+ * @param {string} phoneHash
+ * @param {number} classId
+ * @returns {Promise<{fileId: string, filename: string}|{error: string}>}
+ */
+async function generateClassInterventionPdf(phoneHash, classId) {
+  const { getClass } = require('./teacherWorkspaceService');
+  const { getClassInterventionPlan } = require('./classInterventionService');
+  const { getDb } = require('../utils/database');
+
+  const cls = getClass(classId, phoneHash);
+  if (!cls) {
+    return { error: 'Class not found.' };
+  }
+
+  const plan = getClassInterventionPlan(phoneHash, classId);
+  if (!plan.summary.totalLearners || plan.summary.totalLearners === 0) {
+    return { error: 'This class has no learners yet.' };
+  }
+
+  const db = getDb();
+  const teacher = db.prepare(`SELECT * FROM teachers WHERE phone_hash = ?`).get(phoneHash);
+  const school = teacher && teacher.school;
+  const teacherName = teacher && teacher.name;
+
+  ensurePdfDir();
+
+  const fileId = uuidv4();
+  const filename = `Class_Intervention_Report_${(cls.name || 'Class').replace(/[^a-z0-9]+/gi, '_')}.pdf`;
+  const filePath = path.join(PDF_DIR, `${fileId}.pdf`);
+
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: 'A4',
+      margins: { top: 110, bottom: 60, left: 50, right: 50 },
+      bufferPages: true,
+    });
+    makePdfTextSafe(doc);
+
+    const stream = fs.createWriteStream(filePath);
+    doc.pipe(stream);
+
+    stream.on('finish', () => resolve({ fileId, filename }));
+    stream.on('error', reject);
+
+    try {
+      const title = 'CLASS INTERVENTION REPORT';
+      const headerMeta = { title, school, date: new Date().toLocaleDateString('en-ZA') };
+
+      drawHeader(doc, headerMeta);
+      doc.on('pageAdded', () => {
+        drawHeader(doc, headerMeta);
+        drawFooter(doc, school);
+      });
+      drawFooter(doc, school);
+
+      const { summary, priorityCounts, priorityLearners, commonFocusTopics } = plan;
+
+      doc.font(FONTS.heading).fontSize(13).fillColor(COLORS.darkText).text(sanitiseForPdf(cls.name || 'Class'));
+      const gradeLabel = formatGradeLabel(cls.grade);
+      const subtitleParts = [teacherName ? `Teacher: ${teacherName}` : null, gradeLabel || null, cls.subject || null].filter(Boolean);
+      doc.font(FONTS.body).fontSize(10).fillColor(COLORS.midGray).text(subtitleParts.join('   |   '));
+      doc.moveDown(1);
+
+      doc.font(FONTS.heading).fontSize(11).fillColor(COLORS.darkText).text('Class Summary');
+      doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText)
+        .text(`Total learners: ${summary.totalLearners}`);
+      doc.text(`Evaluated: ${summary.evaluatedLearners}   |   Insufficient data: ${summary.insufficientData}`
+        + (summary.erroredLearners ? `   |   Errors: ${summary.erroredLearners}` : ''));
+      doc.moveDown(0.3);
+      doc.text(`Priority breakdown:  High: ${priorityCounts.high}   Medium: ${priorityCounts.medium}   Low: ${priorityCounts.low}`);
+      doc.moveDown(1);
+
+      const PRIORITY_SECTIONS = [
+        { key: 'high', label: 'High Priority Learners' },
+        { key: 'medium', label: 'Medium Priority Learners' },
+        { key: 'low', label: 'Low Priority Learners' },
+      ];
+
+      PRIORITY_SECTIONS.forEach(({ key, label }) => {
+        const learners = priorityLearners[key];
+        if (!learners || learners.length === 0) return;
+
+        ensureSpace(doc, 60);
+        doc.font(FONTS.heading).fontSize(11).fillColor(COLORS.darkText).text(`${label} (${learners.length})`);
+        doc.moveDown(0.2);
+
+        learners.forEach((learner) => {
+          ensureSpace(doc, 40);
+          doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText).text(sanitiseForPdf(learner.learnerName));
+
+          const evaluatedSubjects = learner.subjectPlans.filter(
+            (p) => p.evidence.mastery.masteryLevel !== 'insufficient-data'
+          );
+          if (evaluatedSubjects.length > 0) {
+            const subjectText = evaluatedSubjects.map((p) => `${p.subject} (${p.priority})`).join(', ');
+            doc.font(FONTS.italic).fontSize(9).fillColor(COLORS.midGray).text(sanitiseForPdf(subjectText));
+          }
+          doc.moveDown(0.3);
+        });
+
+        doc.moveDown(0.5);
+      });
+
+      if (commonFocusTopics.length > 0) {
+        ensureSpace(doc, 60);
+        doc.font(FONTS.heading).fontSize(11).fillColor(COLORS.darkText).text('Common Focus Topics');
+        doc.moveDown(0.2);
+
+        const sortedTopics = [...commonFocusTopics].sort((a, b) => b.percentage - a.percentage);
+        sortedTopics.forEach((t) => {
+          ensureSpace(doc, 20);
+          doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText)
+            .text(`- ${sanitiseForPdf(t.subject)}: ${sanitiseForPdf(t.topic)} (${Math.round(t.percentage * 100)}% of evaluated learners)`);
+        });
+      }
+
+      stampPageNumbers(doc);
+      doc.end();
+    } catch (renderErr) {
+      stream.destroy();
+      fs.unlink(filePath, () => {});
+      reject(renderErr);
+    }
+  });
+}
+
+module.exports = { generatePdf, getPdfPath, cleanupOldPdfs, generateReportSummaryPdf, generateBlueprintAssessmentPdf, generateBlueprintPaperPdf, generateLearnerInterventionPdf, generateClassInterventionPdf, drawQuestionBlock, sanitiseForPdf, formatMarkStr, formatGradeLabel };
