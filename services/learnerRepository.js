@@ -417,6 +417,67 @@ function getClassHistory(classId, options = {}) {
   }
 }
 
+/**
+ * Searches learners by (partial, case-insensitive) name, optionally scoped
+ * to a phone hash and/or class. Matches against normalized_name, which is
+ * always lowercase, so the search term is lowercased before matching. Used
+ * by the teacher-facing "LEARNER PROGRESS <name>" workspace command to
+ * resolve free text into a learner_id before calling into the timeline/
+ * progress/coverage/mastery stack — this function performs no analytics of
+ * its own, consistent with the rest of this module.
+ *
+ * @param {string} name - free-text search term (partial match)
+ * @param {Object} [options]
+ * @param {string} [options.phoneHash] - restrict results to this teacher
+ * @param {number} [options.classId] - restrict results to this class
+ * @param {number} [options.limit=10] - max results
+ * @returns {Array<{id:number, phoneHash:string, classId:number|null, canonicalName:string, normalizedName:string}>}
+ */
+function searchLearnersByName(name, options = {}) {
+  if (!name || !name.trim()) {
+    throw new Error('searchLearnersByName: name must not be null or empty');
+  }
+
+  const db = getDb();
+  const limit = options.limit || 10;
+  const term = `%${name.trim().toLowerCase()}%`;
+
+  try {
+    const conditions = ['normalized_name LIKE ?'];
+    const params = [term];
+
+    if (options.phoneHash) {
+      conditions.push('phone_hash = ?');
+      params.push(options.phoneHash);
+    }
+
+    if (options.classId) {
+      conditions.push('class_id = ?');
+      params.push(options.classId);
+    }
+
+    params.push(limit);
+
+    const rows = db.prepare(`
+      SELECT * FROM learners
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY canonical_name ASC
+      LIMIT ?
+    `).all(...params);
+
+    return rows.map((row) => ({
+      id: row.id,
+      phoneHash: row.phone_hash,
+      classId: row.class_id,
+      canonicalName: row.canonical_name,
+      normalizedName: row.normalized_name,
+    }));
+  } catch (err) {
+    logger.error('Failed to search learners by name', { name, error: err.message });
+    throw err;
+  }
+}
+
 module.exports = {
   getLearnerById,
   getAssessmentHistory,
@@ -424,4 +485,5 @@ module.exports = {
   getLearnerHistory,
   getRecentAssessments,
   getClassHistory,
+  searchLearnersByName,
 };

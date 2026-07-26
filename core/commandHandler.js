@@ -240,6 +240,8 @@ async function handleCommand(from, text, deps) {
     } = require('../services/teacherWorkspaceService');
     const { getTeacherProgressReport } = require('../services/curriculumCoverageService');
     const { handleCurriculumQuery: calendarQuery } = require('../services/curriculumIntelligenceService');
+    const { searchLearnersByName } = require('../services/learnerRepository');
+    const { getLearnerMastery } = require('../services/masteryService');
 
     return Object.freeze({
       hashPhone: deps.hashPhone,
@@ -252,6 +254,8 @@ async function handleCommand(from, text, deps) {
       validateNewClassInput,
       getTeacherProgressReport,
       calendarQuery,
+      searchLearnersByName,
+      getLearnerMastery,
     });
   }
 

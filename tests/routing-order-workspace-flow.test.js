@@ -132,10 +132,20 @@ async function runFunctional() {
     validateNewClassInput: () => ({ valid: true, name: 'New Class', count: 25 }),
     getTeacherProgressReport: () => ({ dataAvailable: false }),
     calendarQuery: async () => 'calendar summary',
+    searchLearnersByName: () => ([{ id: 1, canonicalName: 'Sipho Dlamini' }]),
+    getLearnerMastery: () => ([{
+      learnerId: 1,
+      subject: 'Mathematics',
+      masteryLevel: 'developing',
+      confidence: 0.6,
+      evidence: { progress: { trend: 'rising' }, coverage: { dataAvailable: true, averagePercentage: 72 }, timeline: { eventCount: 5 } },
+      strengths: ['Number Patterns'],
+      concerns: ['Geometry'],
+    }]),
   };
 
   console.log('\n── Section 1: each documented workspace command routes correctly ──');
-  const workspaceCommands = ['MY CLASSES', 'WORKSPACE', 'MY ASSESSMENTS', 'MY PROGRESS', 'NEW CLASS Test Class, 25'];
+  const workspaceCommands = ['MY CLASSES', 'WORKSPACE', 'MY ASSESSMENTS', 'MY PROGRESS', 'NEW CLASS Test Class, 25', 'LEARNER PROGRESS Sipho'];
   for (const cmd of workspaceCommands) {
     sent = [];
     const handled = await handleWorkspaceFlow(PHONE, cmd, deps);
@@ -177,6 +187,39 @@ async function runFunctional() {
       'the active observation session survives untouched underneath a workspace command'
     );
     observationState.delete(phoneHash);
+  }
+
+  console.log('\n── Section 5: LEARNER PROGRESS <name> branches ──');
+  {
+    sent = [];
+    await handleWorkspaceFlow(PHONE, 'LEARNER PROGRESS', deps);
+    assert(sent.length > 0 && /Format/.test(sent[0].text), 'bare "LEARNER PROGRESS" (no name) shows usage prompt');
+
+    sent = [];
+    const noMatchDeps = { ...deps, searchLearnersByName: () => ([]) };
+    await handleWorkspaceFlow(PHONE, 'LEARNER PROGRESS Zzz', noMatchDeps);
+    assert(sent.length > 0 && /No learner matching/.test(sent[0].text), 'no match tells the teacher rather than erroring');
+
+    sent = [];
+    const multiMatchDeps = { ...deps, searchLearnersByName: () => ([{ id: 1, canonicalName: 'Sipho Dlamini' }, { id: 2, canonicalName: 'Sipho Nkosi' }]) };
+    await handleWorkspaceFlow(PHONE, 'LEARNER PROGRESS Sipho', multiMatchDeps);
+    assert(sent.length > 0 && /Multiple learners match/.test(sent[0].text), 'multiple matches asks the teacher to narrow down');
+    assert(sent[0].text.includes('Sipho Dlamini') && sent[0].text.includes('Sipho Nkosi'), 'ambiguous-match reply lists both candidate names');
+
+    sent = [];
+    await handleWorkspaceFlow(PHONE, 'LEARNER PROGRESS Sipho Dlamini', deps);
+    assert(sent.length > 0 && sent[0].text.includes('Sipho Dlamini'), 'single match resolves and names the learner');
+    assert(sent[0].text.includes('Mathematics'), 'reply includes the subject from the MasteryReport');
+    assert(/Developing/.test(sent[0].text), 'reply includes the human-readable mastery level');
+    assert(sent[0].text.includes('Improving'), 'reply includes the progress trend label');
+    assert(sent[0].text.includes('72%'), 'reply includes the coverage percentage');
+    assert(sent[0].text.includes('Number Patterns'), 'reply includes strengths');
+    assert(sent[0].text.includes('Geometry'), 'reply includes concerns/focus areas');
+
+    sent = [];
+    const noEvidenceDeps = { ...deps, getLearnerMastery: () => ([]) };
+    await handleWorkspaceFlow(PHONE, 'LEARNER PROGRESS Sipho Dlamini', noEvidenceDeps);
+    assert(sent.length > 0 && /No assessment or observation data/.test(sent[0].text), 'a resolved learner with zero MasteryReports gets a graceful message, not a crash');
   }
 
   console.log(`\n${'─'.repeat(60)}\nWorkspace Flow Routing Results: ${passed} passed, ${failed} failed`);

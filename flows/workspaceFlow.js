@@ -31,6 +31,8 @@
  *   validateNewClassInput,    // (rawName, rawCount, existingClasses) => { valid, error?, name?, count? }
  *   getTeacherProgressReport, // (hash) => progress | { error }
  *   calendarQuery,            // async (query, teacher) => string  (aliased handleCurriculumQuery)
+ *   searchLearnersByName,     // (name, {phoneHash}) => Learner[]  (services/learnerRepository.js)
+ *   getLearnerMastery,        // (learnerId) => MasteryReport[]    (services/masteryService.js)
  * }
  */
 
@@ -55,6 +57,8 @@ async function handleWorkspaceFlow(from, text, deps) {
     validateNewClassInput,
     getTeacherProgressReport,
     calendarQuery,
+    searchLearnersByName,
+    getLearnerMastery,
   } = deps;
 
   const upper = text.trim().toUpperCase();
@@ -63,6 +67,7 @@ async function handleWorkspaceFlow(from, text, deps) {
     upper === 'MY CLASSES' || upper.startsWith('NEW CLASS') ||
     upper === 'MY ASSESSMENTS' || upper === 'MY ASSESSMENT HISTORY' ||
     upper === 'MY PROGRESS' || upper === 'MY CURRICULUM PROGRESS' ||
+    upper.startsWith('LEARNER PROGRESS') ||
     upper === 'WORKSPACE';
 
   if (!isWorkspaceCmd) return false;
@@ -246,6 +251,69 @@ async function handleWorkspaceFlow(from, text, deps) {
     return true;
   }
 
+  // ── LEARNER PROGRESS <name> ──
+  if (upper.startsWith('LEARNER PROGRESS')) {
+    const rawName = text.slice('LEARNER PROGRESS'.length).trim();
+
+    if (!rawName) {
+      await safeSendMessage(from,
+        `📈 *Look up a learner's progress*\n\nFormat:\n*LEARNER PROGRESS [name]*\n\nExample:\n_LEARNER PROGRESS Sipho_`
+      );
+      return true;
+    }
+
+    try {
+      const matches = searchLearnersByName(rawName, { phoneHash: hash, limit: 6 });
+
+      if (matches.length === 0) {
+        await safeSendMessage(from,
+          `⚠️ No learner matching "${rawName}" found in your classes.\n\n_Tip: try just their first name, or reply *MY CLASSES* to check spelling._`
+        );
+        return true;
+      }
+
+      if (matches.length > 1) {
+        let msg = `👥 *Multiple learners match "${rawName}"*\n\n`;
+        for (const m of matches) {
+          msg += `• ${m.canonicalName}\n`;
+        }
+        msg += `\n_Reply with a more specific name to narrow it down._`;
+        await safeSendMessage(from, msg);
+        return true;
+      }
+
+      const learner = matches[0];
+      const reports = getLearnerMastery(learner.id);
+
+      if (!reports || reports.length === 0) {
+        await safeSendMessage(from,
+          `📈 *${learner.canonicalName}*\n\nNo assessment or observation data recorded for this learner yet.`
+        );
+        return true;
+      }
+
+      let msg = `📈 *${learner.canonicalName} — Mastery Overview*\n\n`;
+      // Prioritise subjects with real evidence over insufficient-data ones.
+      const sorted = [...reports].sort((a, b) => {
+        const aReady = a.masteryLevel !== 'insufficient-data';
+        const bReady = b.masteryLevel !== 'insufficient-data';
+        if (aReady === bReady) return a.subject.localeCompare(b.subject);
+        return aReady ? -1 : 1;
+      });
+      for (const report of sorted) {
+        msg += formatSubjectMastery(report);
+        msg += `\n`;
+      }
+      msg += `_Reply *MY PROGRESS* for your whole-class curriculum coverage._`;
+
+      await safeSendMessage(from, msg);
+    } catch (err) {
+      console.error('[Workspace] LEARNER PROGRESS error:', err.message);
+      await safeSendMessage(from, `⚠️ Couldn't load that learner's progress. Please try again.`);
+    }
+    return true;
+  }
+
   // ── WORKSPACE summary ──
   if (upper === 'WORKSPACE') {
     try {
@@ -292,6 +360,70 @@ async function handleWorkspaceFlow(from, text, deps) {
 
   // Shouldn't reach here given the isWorkspaceCmd guard, but be safe.
   return true;
+}
+
+// ── LEARNER PROGRESS formatting helpers ──
+
+const MASTERY_LABELS = {
+  'insufficient-data': 'Not enough data yet',
+  'beginning': 'Beginning',
+  'developing': 'Developing',
+  'secure': 'Secure',
+  'advanced': 'Advanced',
+};
+
+const MASTERY_EMOJI = {
+  'insufficient-data': '❔',
+  'beginning': '🌱',
+  'developing': '📗',
+  'secure': '✅',
+  'advanced': '⭐',
+};
+
+const TREND_LABELS = {
+  'rising': '↗ Improving',
+  'falling': '↘ Declining',
+  'flat': '→ Stable',
+};
+
+/**
+ * Renders a single subject's MasteryReport (services/masteryService.js) as
+ * a short WhatsApp-friendly block. Pure formatting — reads the report's
+ * fields as-is, computes nothing (per ADR-007 §3.3, MasteryService already
+ * did the composition/judgement work).
+ *
+ * @param {import('../services/masteryService').MasteryReport} report
+ * @returns {string}
+ */
+function formatSubjectMastery(report) {
+  const emoji = MASTERY_EMOJI[report.masteryLevel] || '❔';
+  const label = MASTERY_LABELS[report.masteryLevel] || report.masteryLevel;
+
+  let block = `${emoji} *${report.subject}* — ${label}\n`;
+
+  if (report.masteryLevel === 'insufficient-data') {
+    block += `_No assessment or observation data recorded yet for this subject._\n`;
+    return block;
+  }
+
+  const trend = report.evidence?.progress?.trend;
+  if (trend && TREND_LABELS[trend]) {
+    block += `Progress: ${TREND_LABELS[trend]}\n`;
+  }
+
+  if (report.evidence?.coverage?.dataAvailable && report.evidence.coverage.averagePercentage != null) {
+    block += `Coverage: ${Math.round(report.evidence.coverage.averagePercentage)}% of expected CAPS topics\n`;
+  }
+
+  if (report.strengths && report.strengths.length > 0) {
+    block += `Strengths: ${report.strengths.slice(0, 3).join(', ')}\n`;
+  }
+
+  if (report.concerns && report.concerns.length > 0) {
+    block += `Focus areas: ${report.concerns.slice(0, 3).join(', ')}\n`;
+  }
+
+  return block;
 }
 
 module.exports = {

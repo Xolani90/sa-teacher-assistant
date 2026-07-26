@@ -246,6 +246,7 @@ async function run() {
     getLearnerHistory,
     getRecentAssessments,
     getClassHistory,
+    searchLearnersByName,
   } = require('../services/learnerRepository');
 
   const TEACHER_A = 'learner_repo_teacher_a';
@@ -402,6 +403,36 @@ async function run() {
   const teacherBLearner = insertLearner(_db, { phoneHash: TEACHER_B, classId: null, name: 'Nomvula' });
   assertEq(getAssessmentHistory(teacherBLearner), [], "TEACHER_B's learner has no assessment history");
   assertEq(getObservationHistory(teacherBLearner), [], "TEACHER_B's learner has no observation history");
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SECTION 6: searchLearnersByName
+  // ═══════════════════════════════════════════════════════════════════════
+  console.log('\n── Section 6: searchLearnersByName ────────────────────────────────────');
+
+  console.log('\nTest LR-18: partial, case-insensitive match finds the learner');
+  const thabo = insertLearner(_db, { phoneHash: TEACHER_A, classId: classA, name: 'Thabo Nkosi' });
+  const partialMatch = searchLearnersByName('thabo', { phoneHash: TEACHER_A });
+  assert(partialMatch.some(l => l.id === thabo), 'lowercase partial term matches "Thabo Nkosi"');
+
+  console.log('\nTest LR-19: search is scoped by phoneHash — TEACHER_B does not see TEACHER_A results');
+  const noCrossTeacher = searchLearnersByName('thabo', { phoneHash: TEACHER_B });
+  assertEq(noCrossTeacher, [], "TEACHER_B's search for TEACHER_A's learner returns []");
+
+  console.log('\nTest LR-20: search is scoped by classId when provided');
+  const classScoped = searchLearnersByName('sipho', { phoneHash: TEACHER_A, classId: classB });
+  assert(classScoped.every(l => l.id !== sipho), 'classId scoping excludes class A Sipho');
+  assert(classScoped.some(l => l.id === siphoClassB), 'classId scoping includes class B Sipho');
+
+  console.log('\nTest LR-21: no match returns an empty array, not a throw');
+  assertEq(searchLearnersByName('zzznomatch', { phoneHash: TEACHER_A }), [], 'no match returns []');
+
+  console.log('\nTest LR-22: respects limit');
+  const limitedSearch = searchLearnersByName('a', { phoneHash: TEACHER_A, limit: 1 });
+  assertEq(limitedSearch.length, 1, 'limit=1 returns exactly one row');
+
+  console.log('\nTest LR-23: throws on empty name');
+  assertThrows(() => searchLearnersByName(''), 'must not be null or empty', 'empty name throws');
+  assertThrows(() => searchLearnersByName('   '), 'must not be null or empty', 'whitespace-only name throws');
 
   // ── Summary ──────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);
