@@ -2,8 +2,23 @@
 
 ## 1. Status
 
-**Proposed.** This ADR is the design spec for PR4 (`ProgressService`) and the
-services that follow it. Nothing described here is implemented yet.
+**Accepted (implemented — PR4–PR9 merged to `main`; `d77a6c4` "feat: add
+generateLearnerInterventionPdf (ADR-007 PR9 — PDF parity)" is the latest of
+the series. This header previously read "Proposed... Nothing described here
+is implemented yet" and was stale relative to `main`.)**
+
+Implementation summary:
+- PR4 — `ProgressService` (`d3c90c7`)
+- PR5 — `CoverageService` (`a3f3de5`)
+- PR6 — `MasteryService` (`41bb1b6`), wired into `LEARNER PROGRESS <n>` (`efdd249`)
+- PR7 — `InterventionService` (`8b56177`)
+- PR8 — Intervention section wired into `LEARNER PROGRESS <n>` WhatsApp reply (`a37655b`)
+- PR9 — `generateLearnerInterventionPdf()` PDF parity (`d77a6c4`)
+
+See `docs/ARCHITECTURE.md` for the current layering diagram and allowed-deps
+table, and the corresponding test suites (`tests/routing-order-workspace-flow.test.js`,
+`tests/learner-intervention-pdf.test.js`, and this ADR's service-level tests)
+for regression coverage.
 
 Depends on: ADR-003 (learner identity), ADR-004 (class-aware identity),
 ADR-005 (assessment blueprints), and the `TimelineEvent` contract frozen by
