@@ -1981,4 +1981,165 @@ async function generateBlueprintAssessmentPdf(assessmentId) {
   });
 }
 
-module.exports = { generatePdf, getPdfPath, cleanupOldPdfs, generateReportSummaryPdf, generateBlueprintAssessmentPdf, generateBlueprintPaperPdf, drawQuestionBlock, sanitiseForPdf, formatMarkStr, formatGradeLabel };
+/**
+ * Generates a printable per-learner Mastery & Intervention report (ADR-007
+ * PR9). Renders `InterventionPlan[]` — as produced by
+ * `interventionService.getLearnerInterventionPlan()`, the same call
+ * `flows/workspaceFlow.js` uses for the `LEARNER PROGRESS <name>` WhatsApp
+ * command — one subject section per plan.
+ *
+ * Deliberately does NOT call masteryService, progressService,
+ * coverageService, or learnerTimelineService directly, and computes no
+ * mastery/priority/trend/coverage judgement of its own: every fact printed
+ * here (masteryLevel, trend, coveragePercentage, priority,
+ * recommendedActions, focusTopics) is read verbatim off the InterventionPlan
+ * objects, mirroring the same "delivery surfaces format, they don't decide"
+ * rule documented in docs/ARCHITECTURE.md for workspaceFlow. This keeps
+ * WhatsApp and PDF presenting identical educational conclusions from one
+ * shared computation, per ADR-007 PR9's success criteria.
+ *
+ * @param {number} learnerId
+ * @returns {Promise<{fileId: string, filename: string}|{error: string}>}
+ */
+async function generateLearnerInterventionPdf(learnerId) {
+  const { getLearnerById } = require('./learnerRepository');
+  const { getLearnerInterventionPlan } = require('./interventionService');
+  const { getDb } = require('../utils/database');
+
+  const learner = getLearnerById(learnerId);
+  if (!learner) {
+    return { error: 'Learner not found.' };
+  }
+
+  const plans = getLearnerInterventionPlan(learnerId);
+  if (!plans || plans.length === 0) {
+    return { error: 'No assessment or observation data recorded for this learner yet.' };
+  }
+
+  const db = getDb();
+  const teacher = learner.phoneHash
+    ? db.prepare(`SELECT * FROM teachers WHERE phone_hash = ?`).get(learner.phoneHash)
+    : null;
+  const school = teacher && teacher.school;
+  const teacherName = teacher && teacher.name;
+
+  ensurePdfDir();
+
+  const fileId = uuidv4();
+  const filename = `Mastery_Report_${(learner.canonicalName || 'Learner').replace(/[^a-z0-9]+/gi, '_')}.pdf`;
+  const filePath = path.join(PDF_DIR, `${fileId}.pdf`);
+
+  // Same "wrap rendering in the Promise executor" pattern as the other
+  // generators — a synchronous render error still needs the stream
+  // destroyed and the partial file unlinked immediately.
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({
+      size: 'A4',
+      margins: { top: 110, bottom: 60, left: 50, right: 50 },
+      bufferPages: true,
+    });
+    makePdfTextSafe(doc);
+
+    const stream = fs.createWriteStream(filePath);
+    doc.pipe(stream);
+
+    stream.on('finish', () => resolve({ fileId, filename }));
+    stream.on('error', reject);
+
+    try {
+      const title = 'LEARNER MASTERY & INTERVENTION REPORT';
+      const headerMeta = { title, school, date: new Date().toLocaleDateString('en-ZA') };
+
+      drawHeader(doc, headerMeta);
+      doc.on('pageAdded', () => {
+        drawHeader(doc, headerMeta);
+        drawFooter(doc, school);
+      });
+      drawFooter(doc, school);
+
+      // ── Cover block ────────────────────────────────────────────────
+      doc.font(FONTS.heading).fontSize(13).fillColor(COLORS.darkText).text(sanitiseForPdf(learner.canonicalName || 'Learner'));
+      doc.font(FONTS.body).fontSize(10).fillColor(COLORS.midGray)
+        .text(`Teacher: ${teacherName || '—'}   |   Subjects reported: ${plans.length}`);
+      doc.moveDown(1);
+
+      const MASTERY_LABELS = {
+        'insufficient-data': 'Not enough data yet',
+        'beginning': 'Beginning',
+        'developing': 'Developing',
+        'secure': 'Secure',
+        'advanced': 'Advanced',
+      };
+      const TREND_LABELS = { 'rising': 'Improving', 'falling': 'Declining', 'flat': 'Stable' };
+      const PRIORITY_LABELS = { low: 'Low', medium: 'Medium', high: 'High' };
+
+      // Subjects with real evidence first, same ordering rule workspaceFlow
+      // uses for the WhatsApp reply, so the two surfaces read consistently.
+      const sorted = [...plans].sort((a, b) => {
+        const aReady = a.evidence.mastery.masteryLevel !== 'insufficient-data';
+        const bReady = b.evidence.mastery.masteryLevel !== 'insufficient-data';
+        if (aReady === bReady) return a.subject.localeCompare(b.subject);
+        return aReady ? -1 : 1;
+      });
+
+      sorted.forEach((plan, i) => {
+        const mastery = plan.evidence.mastery;
+
+        if (i > 0) ensureSpace(doc, 140);
+
+        doc.font(FONTS.heading).fontSize(12).fillColor(COLORS.darkText)
+          .text(sanitiseForPdf(mastery.subject), { underline: true });
+        doc.moveDown(0.3);
+
+        const masteryLabel = MASTERY_LABELS[mastery.masteryLevel] || mastery.masteryLevel;
+        doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText).text(`Mastery: ${masteryLabel}`);
+
+        if (mastery.masteryLevel === 'insufficient-data') {
+          doc.font(FONTS.italic).fontSize(9).fillColor(COLORS.midGray)
+            .text('No assessment or observation data recorded yet for this subject.');
+          doc.moveDown(1);
+          return; // No Intervention block for insufficient-data — same rule as workspaceFlow.
+        }
+
+        const trend = mastery.evidence?.progress?.trend;
+        if (trend && TREND_LABELS[trend]) {
+          doc.text(`Trend: ${TREND_LABELS[trend]}`);
+        }
+        if (mastery.evidence?.coverage?.dataAvailable && mastery.evidence.coverage.averagePercentage != null) {
+          doc.text(`Coverage: ${Math.round(mastery.evidence.coverage.averagePercentage)}% of expected CAPS topics`);
+        }
+        if (mastery.strengths && mastery.strengths.length > 0) {
+          doc.text(`Strengths: ${sanitiseForPdf(mastery.strengths.join(', '))}`);
+        }
+        if (mastery.concerns && mastery.concerns.length > 0) {
+          doc.text(`Focus areas: ${sanitiseForPdf(mastery.concerns.join(', '))}`);
+        }
+        doc.moveDown(0.5);
+
+        const priorityLabel = PRIORITY_LABELS[plan.priority] || plan.priority;
+        doc.font(FONTS.heading).fontSize(10).fillColor(COLORS.darkText).text('Intervention');
+        doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText).text(`Priority: ${priorityLabel}`);
+
+        if (plan.focusTopics && plan.focusTopics.length > 0) {
+          doc.text(`Focus topics: ${sanitiseForPdf(plan.focusTopics.join(', '))}`);
+        }
+        if (plan.recommendedActions && plan.recommendedActions.length > 0) {
+          doc.moveDown(0.2);
+          doc.font(FONTS.body).fontSize(10).fillColor(COLORS.darkText).text('Recommended actions:');
+          plan.recommendedActions.forEach((action) => doc.text(`- ${sanitiseForPdf(action)}`));
+        }
+
+        doc.moveDown(1);
+      });
+
+      stampPageNumbers(doc);
+      doc.end();
+    } catch (renderErr) {
+      stream.destroy();
+      fs.unlink(filePath, () => {});
+      reject(renderErr);
+    }
+  });
+}
+
+module.exports = { generatePdf, getPdfPath, cleanupOldPdfs, generateReportSummaryPdf, generateBlueprintAssessmentPdf, generateBlueprintPaperPdf, generateLearnerInterventionPdf, drawQuestionBlock, sanitiseForPdf, formatMarkStr, formatGradeLabel };

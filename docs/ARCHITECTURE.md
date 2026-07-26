@@ -8,7 +8,8 @@ behind any given layer, follow the links in the table below.
 
 ```
 Channels (WhatsApp / PDF / Dashboard)
-   WhatsApp: LEARNER PROGRESS <name>   (ADR-007 PR8, flows/workspaceFlow.js)
+   WhatsApp: LEARNER PROGRESS <name>        (ADR-007 PR8, flows/workspaceFlow.js)
+   PDF:      generateLearnerInterventionPdf (ADR-007 PR9, services/pdfService.js)
                 │
                 ▼
       InterventionService       (ADR-007 PR7)
@@ -47,6 +48,7 @@ diagram clarity; see ADR-007 §3.2 for the full picture.
 | `MasteryService` | Composing `TimelineService` + `ProgressService` + `CoverageService` output into a per-subject mastery judgement (`masteryLevel`, `confidence`, `strengths`/`concerns`). | Its own database queries, its own trend/coverage math. |
 | `InterventionService` | Composing `MasteryService` output into a per-subject `InterventionPlan` (`priority`, `focusTopics`, `recommendedActions`) via a fixed, deterministic rule table. | Its own database queries, its own trend/coverage/mastery math, AI-generated recommendations (future ADR would consume `InterventionPlan`, not replace this layer). |
 | `flows/workspaceFlow.js` (`LEARNER PROGRESS <name>`, ADR-007 PR8) | Formatting `InterventionPlan[]` (mastery + intervention sections) into a WhatsApp-friendly message. | Any priority/trend/mastery decision — it reads `plan.priority`, `plan.recommendedActions`, and `plan.evidence.mastery` as-is and computes nothing. |
+| `services/pdfService.js` (`generateLearnerInterventionPdf`, ADR-007 PR9) | Rendering the same `InterventionPlan[]` as a printable per-learner PDF (cover block, per-subject mastery + intervention sections). | Any priority/trend/mastery decision, same rule as `workspaceFlow.js` above — it is a second formatting consumer of `InterventionService`, not a second computation of mastery/intervention logic. |
 
 ## Allowed dependencies
 
@@ -68,6 +70,12 @@ around a layer into raw storage:
   highest-level service that already composes what you need" rule as
   `InterventionService` → `MasteryService` below, applied one layer up:
   the delivery surface reaches past `InterventionService` for nothing.
+- `services/pdfService.js`'s `generateLearnerInterventionPdf` → `InterventionService`
+  (via `getLearnerInterventionPlan`) and `learnerRepository` (via
+  `getLearnerById`, for the cover block's name/phone-hash) only — same
+  restriction as `workspaceFlow.js` above. PDF and WhatsApp are two
+  independent consumers of the identical `InterventionPlan[]` call, not two
+  computations of it.
 - `InterventionService` → `MasteryService` only — no direct access to
   `ProgressService`, `CoverageService`, `learnerTimelineService`, or
   repository/SQL layers, even though that data is reachable through
