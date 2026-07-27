@@ -452,11 +452,29 @@ setInterval(sendRenewalReminders, 24 * 60 * 60 * 1000);
 
 // ── Start ──────────────────────────────────────────────────────────────────
 const PORT = parseInt(process.env.PORT || '3000', 10);
-const server = app.listen(PORT, () => {
-  console.log(`\n[SERVER] ✓ SA Teacher Assistant running on port ${PORT}`);
+const server = app.listen(PORT, '0.0.0.0', () => {
+  console.log(`\n[SERVER] ✓ SA Teacher Assistant running on 0.0.0.0:${PORT}`);
   console.log(`[SERVER]   WhatsApp webhook: POST /webhook`);
   console.log(`[SERVER]   Yoco webhook:     POST /payment/webhook`);
   console.log(`[SERVER]   Health:           GET  /\n`);
+});
+
+// ── Startup/shutdown diagnostics ────────────────────────────────────────────
+// Added to debug a Render deploy where the log showed a successful
+// app.listen() callback but Render's port-scan still reported "no open
+// ports detected" minutes later. These handlers make it visible if the
+// process exits, receives a signal, or hits an unhandled error/rejection
+// after startup, rather than the process just going silent.
+process.on('exit', (code) => {
+  console.log('[SERVER] Process exiting:', code);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('[SERVER] Uncaught exception:', err);
+});
+
+process.on('unhandledRejection', (err) => {
+  console.error('[SERVER] Unhandled rejection:', err);
 });
 
 // ── Graceful shutdown ───────────────────────────────────────────────────────
