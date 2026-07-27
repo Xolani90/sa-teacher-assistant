@@ -709,6 +709,52 @@ function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_assessments_blueprint
       ON assessments(blueprint_id);
   `);
+// ── Paste this block into utils/database.js ────────────────────────────────
+// Location: right before the final `console.log('[DB] Migrations complete');`
+// line at the end of runMigrations() (after the Migration 029 index block).
+  // Migration 032: WhatsApp OTP persistence (ADR-008 PR22A). Standalone
+  // table, not an ALTER — mirrors the rate_limit_events template
+  // (Migration 023) rather than the alterations[] array, since this is a
+  // brand-new table rather than a column added to an existing one.
+  //
+  // code_hash stores HMAC-SHA256(code, secret), not a plain SHA-256 of
+  // the 6-digit code. A bare hash of a 6-digit space (1,000,000
+  // possibilities) is brute-forceable offline from a stolen database
+  // alone; a keyed HMAC means the attacker also needs the server secret.
+  // See routes/auth.js (PR22B) for where that secret is supplied.
+  //
+  // expires_at / consumed_at / attempts model the full OTP lifecycle:
+  // - expires_at: 5-minute validity window, checked via
+  //   `expires_at > datetime('now')` directly in SQL (idx_auth_codes_lookup
+  //   below), sidestepping JS Date/timezone parsing entirely — consistent
+  //   with how other time-sensitive queries in this codebase work.
+  // - consumed_at: NULL until successfully verified once; verify-code
+  //   sets it, and getActiveAuthCode() only returns rows where this is
+  //   still NULL, which is what makes each code one-time-use (replay
+  //   protection).
+  // - attempts: incremented on each failed verify-code check against a
+  //   given code row; routes/auth.js (PR22B) enforces a max-attempts
+  //   cap before forcing the teacher to request a fresh code.
+  //
+  // phone_hash (not a raw phone number) matches the convention already
+  // used by rate_limit_events/learners/teachers — hashPhone() in
+  // utils/usageTracker.js is the single canonical normalizer, reused
+  // as-is with no new hashing logic introduced here.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS auth_codes (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash    TEXT    NOT NULL,
+      code_hash     TEXT    NOT NULL,
+      expires_at    TEXT    NOT NULL,
+      attempts      INTEGER NOT NULL DEFAULT 0,
+      consumed_at   TEXT,
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_auth_codes_phone
+      ON auth_codes(phone_hash);
+    CREATE INDEX IF NOT EXISTS idx_auth_codes_lookup
+      ON auth_codes(phone_hash, expires_at);
+  `);
 
   console.log('[DB] Migrations complete');
 }
