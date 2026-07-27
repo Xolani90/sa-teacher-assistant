@@ -61,8 +61,8 @@ function mockRes() {
   return res;
 }
 
-function mockReq(learnerIdParam) {
-  return { params: { learnerId: learnerIdParam } };
+function mockReq(learnerIdParam, phoneHash = 'hash_owner') {
+  return { params: { learnerId: learnerIdParam }, teacher: { id: 1, phoneHash } };
 }
 
 const samplePlans = [
@@ -79,7 +79,7 @@ const samplePlans = [
 console.log('\n── Section 1: success path ──────────────────────────────');
 {
   const handler = createGetInterventionPlanHandler({
-    getLearnerById: (id) => (id === 42 ? { id: 42, canonicalName: 'Sipho Dlamini' } : null),
+    getLearnerById: (id) => (id === 42 ? { id: 42, canonicalName: 'Sipho Dlamini', phoneHash: 'hash_owner' } : null),
     getLearnerInterventionPlan: (id) => (id === 42 ? samplePlans : []),
   });
 
@@ -117,7 +117,7 @@ console.log('\n── Section 2: unknown learner ──────────�
 console.log('\n── Section 3: resolved learner, zero InterventionPlans ──');
 {
   const handler = createGetInterventionPlanHandler({
-    getLearnerById: () => ({ id: 7, canonicalName: 'New Learner' }),
+    getLearnerById: () => ({ id: 7, canonicalName: 'New Learner', phoneHash: 'hash_owner' }),
     getLearnerInterventionPlan: () => [],
   });
 
@@ -167,13 +167,49 @@ console.log('\n── Section 5: dependency failures degrade to 500 ────
   });
 
   const handlerServiceFails = createGetInterventionPlanHandler({
-    getLearnerById: () => ({ id: 42, canonicalName: 'Sipho Dlamini' }),
+    getLearnerById: () => ({ id: 42, canonicalName: 'Sipho Dlamini', phoneHash: 'hash_owner' }),
     getLearnerInterventionPlan: () => { throw new Error('intervention service exploded'); },
   });
   const res2 = mockRes();
   handlerServiceFails(mockReq('42'), res2);
   test('getLearnerInterventionPlan throwing degrades to 500, not a crash', () => {
     assert.strictEqual(res2.statusCode, 500);
+  });
+}
+
+console.log('\n── Section 6: ownership (ADR-008 §8, PR17) ──────────────');
+{
+  const handler = createGetInterventionPlanHandler({
+    getLearnerById: (id) => (id === 42 ? { id: 42, canonicalName: 'Sipho Dlamini', phoneHash: 'hash_owner' } : null),
+    getLearnerInterventionPlan: () => {
+      throw new Error('should not be called when the requesting teacher does not own this learner');
+    },
+  });
+
+  const req = mockReq('42', 'hash_other_teacher');
+  const res = mockRes();
+  handler(req, res);
+
+  test('cross-teacher access responds 404 (not 403 — no existence oracle)', () => {
+    assert.strictEqual(res.statusCode, 404);
+  });
+  test('cross-teacher 404 body is identical in shape to the unknown-learner 404', () => {
+    assert.ok(res.body.error);
+  });
+
+  const handlerOwned = createGetInterventionPlanHandler({
+    getLearnerById: (id) => (id === 42 ? { id: 42, canonicalName: 'Sipho Dlamini', phoneHash: 'hash_owner' } : null),
+    getLearnerInterventionPlan: (id) => (id === 42 ? samplePlans : []),
+  });
+  const reqOwned = mockReq('42', 'hash_owner');
+  const resOwned = mockRes();
+  handlerOwned(reqOwned, resOwned);
+
+  test('owning teacher (matching phoneHash) still gets 200', () => {
+    assert.strictEqual(resOwned.statusCode, 200);
+  });
+  test('owning teacher still gets the plans', () => {
+    assert.deepStrictEqual(resOwned.body.plans, samplePlans);
   });
 }
 

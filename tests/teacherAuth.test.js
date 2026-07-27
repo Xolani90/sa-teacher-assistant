@@ -282,7 +282,7 @@ async function run() {
   {
     const mod = require(authPath);
     const exportedKeys = Object.keys(mod).sort();
-    assert(exportedKeys.join(',') === 'extractBearerToken,requireTeacherAuth,resolveTeacherById', 'module exports exactly the expected surface, nothing extra');
+    assert(exportedKeys.join(',') === 'apiLimiter,extractBearerToken,requireTeacherAuth,resolveTeacherById', 'module exports exactly the expected surface, nothing extra');
   }
 
   console.log('\n' + '='.repeat(75));

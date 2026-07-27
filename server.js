@@ -105,6 +105,11 @@ app.use(helmet({ contentSecurityPolicy: false }));
 // side effects (migrations, cron intervals, app.listen) unsafe for tests.
 const { requireAdminSecret, adminLimiter } = require('./utils/adminAuth');
 
+// ── Teacher authentication middleware (ADR-008, PR17) ───────────────────────
+// /api is now teacher-facing (requireTeacherAuth), not admin-facing.
+// /admin/stats and /admin/grant-pro remain on requireAdminSecret, unchanged.
+const { requireTeacherAuth, apiLimiter } = require('./utils/teacherAuth');
+
 // ── Rate limiting ──────────────────────────────────────────────────────────
 app.use(rateLimit({
   windowMs: 15 * 60 * 1000,
@@ -361,12 +366,12 @@ app.post('/admin/grant-pro', adminLimiter, requireAdminSecret, async (req, res) 
   }
 });
 
-// ── API: Learner intervention plan (ADR-007 PR10) ───────────────────────────
+// ── API: Learner intervention plan (ADR-007 PR10, teacher auth ADR-008 PR17) ─
 // Third delivery surface for InterventionService's InterventionPlan[],
-// alongside WhatsApp (PR8) and PDF (PR9). Internal-only for now — see
-// routes/api.js and utils/adminAuth.js for why this is gated by
-// ADMIN_SECRET rather than per-teacher auth, which doesn't exist yet.
-app.use('/api', adminLimiter, requireAdminSecret, apiRouter);
+// alongside WhatsApp (PR8) and PDF (PR9). Now gated by requireTeacherAuth
+// (per-teacher JWT) instead of the ADMIN_SECRET placeholder — see
+// utils/teacherAuth.js and docs/adr/ADR-008 for the authentication design.
+app.use('/api', apiLimiter, requireTeacherAuth, apiRouter);
 
 // ── Error handlers ─────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

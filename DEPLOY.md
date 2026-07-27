@@ -20,6 +20,7 @@
 | `PII_SECRET` | Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 | `ANTHROPIC_API_KEY` | console.anthropic.com |
 | `ADMIN_SECRET` | Any strong random string — used to authenticate admin endpoints |
+| `TEACHER_JWT_SECRET` | Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` — signs/verifies teacher JWTs for `/api/*` |
 | `APP_URL` | Your Render URL, e.g. `https://sa-teacher-assistant.onrender.com` |
 | `DB_PATH` | `/var/data/teacher_assistant.db` |
 | `YOCO_SECRET_KEY` | Yoco dashboard → Developers → API Keys |

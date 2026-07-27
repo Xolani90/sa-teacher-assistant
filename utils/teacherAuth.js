@@ -43,6 +43,7 @@
  */
 
 const jwt = require('jsonwebtoken');
+const rateLimit = require('express-rate-limit');
 const { getDb } = require('./database');
 
 /**
@@ -138,4 +139,21 @@ function requireTeacherAuth(req, res, next) {
   next();
 }
 
-module.exports = { requireTeacherAuth, extractBearerToken, resolveTeacherById };
+/**
+ * Rate limiter for the /api mount (PR17). adminLimiter (utils/adminAuth.js,
+ * 5 req/15min) is sized for a trusted-internal-client shared secret, not
+ * per-teacher traffic from many independent teachers — reusing it here
+ * would make normal dashboard/app usage trip the limit. 100 req/15min is
+ * generous enough for a single teacher's normal usage while still bounding
+ * abuse from a single compromised/misbehaving token.
+ */
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  trustProxy: true,
+  message: { error: 'Too many requests — please try again later.' },
+});
+
+module.exports = { requireTeacherAuth, extractBearerToken, resolveTeacherById, apiLimiter };

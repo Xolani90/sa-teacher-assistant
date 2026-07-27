@@ -13,19 +13,16 @@
  * JSON. It does not call MasteryService, ProgressService, CoverageService,
  * or the timeline directly.
  *
- * Authorization: gated (at mount time, in server.js) by requireAdminSecret
- * from utils/adminAuth.js — the same shared-secret scheme already used by
- * /admin/stats and /admin/grant-pro. This is a deliberate placeholder,
- * not a teacher-facing auth model. There is currently no per-teacher HTTP
- * identity anywhere in this codebase: WhatsApp establishes identity via
- * the sender's phone number (verified by Meta), and the PDF download
- * endpoint uses an unscoped per-file HMAC token, not a teacher identity.
- * This endpoint is for trusted internal clients only (dev tooling, an
- * admin-operated dashboard) until a dedicated ADR defines real teacher
- * authentication (login/session/token issuance, teacher -> class ->
- * learner ownership checks). When that lands, only the auth middleware
- * at the mount point in server.js needs to change — this handler and
- * everything it calls stays the same.
+ * Authorization: gated (at mount time, in server.js) by requireTeacherAuth
+ * from utils/teacherAuth.js (ADR-008, PR17) — per-teacher JWT, superseding
+ * the ADMIN_SECRET placeholder used through PR16. Per ADR-008 §5.1, no
+ * service (getLearnerById, getLearnerInterventionPlan, etc.) is aware
+ * that HTTP authentication exists; they keep taking a plain phoneHash /
+ * learnerId exactly as before. This route is therefore also where
+ * ownership is enforced: req.teacher.phoneHash (populated by the
+ * middleware) is compared against learner.phoneHash before any plan data
+ * is returned, so one teacher's JWT can never read another teacher's
+ * learner data.
  *
  * One deliberate divergence from PR9's PDF behavior: generateLearnerInterventionPdf()
  * returns an error for a learner with zero InterventionPlans (an empty
@@ -60,7 +57,11 @@ function createGetInterventionPlanHandler({ getLearnerById, getLearnerInterventi
    * GET /api/learners/:learnerId/intervention-plan
    *
    * @returns 400 if learnerId is not a positive integer
-   * @returns 404 if no learner with that id exists
+   * @returns 404 if no learner with that id exists, OR if the learner
+   *          exists but belongs to a different teacher (ADR-008 §8 —
+   *          identical response to "not found" so a caller can't use the
+   *          response to probe which learner ids exist under other
+   *          teachers)
    * @returns 200 { learnerId, plans: InterventionPlan[] } otherwise (plans
    *          may be an empty array if the learner has no evidence yet)
    */
@@ -80,6 +81,10 @@ function createGetInterventionPlanHandler({ getLearnerById, getLearnerInterventi
     }
 
     if (!learner) {
+      return res.status(404).json({ error: 'Learner not found.' });
+    }
+
+    if (!req.teacher || learner.phoneHash !== req.teacher.phoneHash) {
       return res.status(404).json({ error: 'Learner not found.' });
     }
 

@@ -14,6 +14,7 @@ function validateEnv() {
     { key: 'PII_SECRET',               hint: 'node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"' },
     { key: 'APP_URL',                  hint: 'Public HTTPS URL of this deployment, e.g. https://your-app.onrender.com' },
     { key: 'ADMIN_SECRET',             hint: 'Any strong random string — used to authenticate /admin/* endpoints' },
+    { key: 'TEACHER_JWT_SECRET',       hint: 'Random secret for signing teacher JWTs — node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"' },
   ];
 
   const AI_KEYS     = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];

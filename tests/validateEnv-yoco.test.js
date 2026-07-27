@@ -22,6 +22,7 @@ const BASE_ENV = {
   PII_SECRET: 'test-pii-secret',
   APP_URL: 'https://example.onrender.com',
   ADMIN_SECRET: 'test-admin-secret',
+  TEACHER_JWT_SECRET: 'test-teacher-jwt-secret',
   ANTHROPIC_API_KEY: 'test-anthropic-key',
 };
 
