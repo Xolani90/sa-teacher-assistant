@@ -71,6 +71,53 @@ function getLearnerById(learnerId) {
 }
 
 /**
+ * Returns every active (non-removed) learner belonging to a teacher, across
+ * all classes, ordered alphabetically by canonical name. Pure single-table
+ * lookup — no joins, no class-name enrichment, no business rules. Deliberately
+ * excludes phoneHash from the returned shape (the caller already supplied it)
+ * and excludes removedAt (an internal soft-delete bookkeeping field, not
+ * caller-facing state).
+ *
+ * @param {string} phoneHash
+ * @returns {Array<{id:number, classId:number|null, canonicalName:string, normalizedName:string, createdAt:string, updatedAt:string}>}
+ */
+function getTeacherLearners(phoneHash) {
+  if (!phoneHash) {
+    throw new Error('getTeacherLearners: phoneHash must not be null or empty');
+  }
+
+  const db = getDb();
+
+  try {
+    const rows = db.prepare(`
+      SELECT
+        id,
+        class_id,
+        canonical_name,
+        normalized_name,
+        created_at,
+        updated_at
+      FROM learners
+      WHERE phone_hash = ?
+        AND removed_at IS NULL
+      ORDER BY canonical_name ASC
+    `).all(phoneHash);
+
+    return rows.map((row) => ({
+      id: row.id,
+      classId: row.class_id,
+      canonicalName: row.canonical_name,
+      normalizedName: row.normalized_name,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    }));
+  } catch (err) {
+    logger.error('Failed to fetch teacher learners', { phoneHash, error: err.message });
+    throw err;
+  }
+}
+
+/**
  * Chronological assessment (learner_results) history for one learner.
  * Returns [] for a learner with no assessment rows, or an unknown/invalid
  * learnerId — this repository never throws on "no results found", only on
@@ -480,6 +527,7 @@ function searchLearnersByName(name, options = {}) {
 
 module.exports = {
   getLearnerById,
+  getTeacherLearners,
   getAssessmentHistory,
   getObservationHistory,
   getLearnerHistory,

@@ -1,0 +1,474 @@
+From 2f82c154b141749049857dbc97aeb9597260c798 Mon Sep 17 00:00:00 2001
+From: Release Prep <deploy@local>
+Date: Mon, 27 Jul 2026 07:38:39 +0000
+Subject: [PATCH] feat: swap /api to per-teacher auth, add ownership check
+ (ADR-008 PR17)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- server.js: /api mount now uses requireTeacherAuth + apiLimiter
+  instead of requireAdminSecret + adminLimiter. /admin/stats and
+  /admin/grant-pro are untouched.
+- utils/teacherAuth.js: add apiLimiter (100 req/15min), sized for
+  per-teacher traffic rather than adminLimiter's 5 req/15min shared-
+  secret budget.
+- utils/validateEnv.js: TEACHER_JWT_SECRET is now required at startup.
+- routes/api.js: enforce ownership — learner.phoneHash is compared
+  against req.teacher.phoneHash before returning plan data; a mismatch
+  returns the same 404 as an unknown learner (no existence oracle).
+  Per ADR-008 §5.1, no service signature changed and no service became
+  auth-aware.
+- Tests: teacherAuth.test.js export-surface assertion updated for
+  apiLimiter; api-intervention-plan.test.js req mocks now carry
+  req.teacher and a new ownership section (cross-teacher -> 404,
+  owner -> 200); new pr17-api-teacher-auth-wiring.test.js (source-
+  inspection, matching the routing-order-*.test.js convention) locks
+  down the mount swap, /admin/* staying on requireAdminSecret, the
+  TEACHER_JWT_SECRET startup check, and the ADR-008 SS5.1 invariant
+  that no services/flows/core module imports jsonwebtoken or reads
+  the Authorization header.
+- Docs: TEACHER_JWT_SECRET documented in .env.example, render.yaml,
+  DEPLOY.md.
+
+Full suite: 66/79 passing locally; remaining 13 failures are the
+pre-existing sandbox-only better-sqlite3 native-binary mismatch,
+unrelated to this change (none touch auth/api/admin).
+---
+ .env.example                               |   5 +
+ DEPLOY.md                                  |   1 +
+ render.yaml                                |   2 +
+ routes/api.js                              |  33 +++---
+ server.js                                  |  15 ++-
+ tests/api-intervention-plan.test.js        |  46 +++++++-
+ tests/pr17-api-teacher-auth-wiring.test.js | 125 +++++++++++++++++++++
+ tests/teacherAuth.test.js                  |   2 +-
+ tests/validateEnv-yoco.test.js             |   1 +
+ utils/teacherAuth.js                       |  20 +++-
+ utils/validateEnv.js                       |   1 +
+ 11 files changed, 225 insertions(+), 26 deletions(-)
+ create mode 100644 tests/pr17-api-teacher-auth-wiring.test.js
+
+diff --git a/.env.example b/.env.example
+index 99ec637..e40d341 100644
+--- a/.env.example
++++ b/.env.example
+@@ -37,6 +37,11 @@ PII_SECRET=generate_a_random_32_byte_hex_string_here
+ # Generate with: node -e "console.log(require('crypto').randomBytes(24).toString('hex'))"
+ ADMIN_SECRET=generate_a_random_hex_string_here
+ 
++# ── Teacher auth (ADR-008) ──────────────────────────────────────────────────────
++# Secret key for signing/verifying teacher JWTs (gates /api/*)
++# Generate with: node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
++TEACHER_JWT_SECRET=generate_a_random_hex_string_here
++
+ # ── Application ───────────────────────────────────────────────────────────────
+ # Public HTTPS URL of your deployment (used for PDF links and Yoco redirects)
+ APP_URL=https://your-app.onrender.com
+diff --git a/DEPLOY.md b/DEPLOY.md
+index 346727d..31aaf38 100644
+--- a/DEPLOY.md
++++ b/DEPLOY.md
+@@ -20,6 +20,7 @@
+ | `PII_SECRET` | Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
+ | `ANTHROPIC_API_KEY` | console.anthropic.com |
+ | `ADMIN_SECRET` | Any strong random string — used to authenticate admin endpoints |
++| `TEACHER_JWT_SECRET` | Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` — signs/verifies teacher JWTs for `/api/*` |
+ | `APP_URL` | Your Render URL, e.g. `https://sa-teacher-assistant.onrender.com` |
+ | `DB_PATH` | `/var/data/teacher_assistant.db` |
+ | `YOCO_SECRET_KEY` | Yoco dashboard → Developers → API Keys |
+diff --git a/render.yaml b/render.yaml
+index c5a0385..f315f63 100644
+--- a/render.yaml
++++ b/render.yaml
+@@ -30,6 +30,8 @@ services:
+         sync: false
+       - key: ADMIN_SECRET
+         sync: false
++      - key: TEACHER_JWT_SECRET
++        sync: false
+       - key: APP_URL
+         sync: false
+       - key: YOCO_SECRET_KEY
+diff --git a/routes/api.js b/routes/api.js
+index fe8f0dc..a1ebbb6 100644
+--- a/routes/api.js
++++ b/routes/api.js
+@@ -13,19 +13,16 @@
+  * JSON. It does not call MasteryService, ProgressService, CoverageService,
+  * or the timeline directly.
+  *
+- * Authorization: gated (at mount time, in server.js) by requireAdminSecret
+- * from utils/adminAuth.js — the same shared-secret scheme already used by
+- * /admin/stats and /admin/grant-pro. This is a deliberate placeholder,
+- * not a teacher-facing auth model. There is currently no per-teacher HTTP
+- * identity anywhere in this codebase: WhatsApp establishes identity via
+- * the sender's phone number (verified by Meta), and the PDF download
+- * endpoint uses an unscoped per-file HMAC token, not a teacher identity.
+- * This endpoint is for trusted internal clients only (dev tooling, an
+- * admin-operated dashboard) until a dedicated ADR defines real teacher
+- * authentication (login/session/token issuance, teacher -> class ->
+- * learner ownership checks). When that lands, only the auth middleware
+- * at the mount point in server.js needs to change — this handler and
+- * everything it calls stays the same.
++ * Authorization: gated (at mount time, in server.js) by requireTeacherAuth
++ * from utils/teacherAuth.js (ADR-008, PR17) — per-teacher JWT, superseding
++ * the ADMIN_SECRET placeholder used through PR16. Per ADR-008 §5.1, no
++ * service (getLearnerById, getLearnerInterventionPlan, etc.) is aware
++ * that HTTP authentication exists; they keep taking a plain phoneHash /
++ * learnerId exactly as before. This route is therefore also where
++ * ownership is enforced: req.teacher.phoneHash (populated by the
++ * middleware) is compared against learner.phoneHash before any plan data
++ * is returned, so one teacher's JWT can never read another teacher's
++ * learner data.
+  *
+  * One deliberate divergence from PR9's PDF behavior: generateLearnerInterventionPdf()
+  * returns an error for a learner with zero InterventionPlans (an empty
+@@ -60,7 +57,11 @@ function createGetInterventionPlanHandler({ getLearnerById, getLearnerInterventi
+    * GET /api/learners/:learnerId/intervention-plan
+    *
+    * @returns 400 if learnerId is not a positive integer
+-   * @returns 404 if no learner with that id exists
++   * @returns 404 if no learner with that id exists, OR if the learner
++   *          exists but belongs to a different teacher (ADR-008 §8 —
++   *          identical response to "not found" so a caller can't use the
++   *          response to probe which learner ids exist under other
++   *          teachers)
+    * @returns 200 { learnerId, plans: InterventionPlan[] } otherwise (plans
+    *          may be an empty array if the learner has no evidence yet)
+    */
+@@ -83,6 +84,10 @@ function createGetInterventionPlanHandler({ getLearnerById, getLearnerInterventi
+       return res.status(404).json({ error: 'Learner not found.' });
+     }
+ 
++    if (!req.teacher || learner.phoneHash !== req.teacher.phoneHash) {
++      return res.status(404).json({ error: 'Learner not found.' });
++    }
++
+     let plans;
+     try {
+       plans = getLearnerInterventionPlan(learnerId);
+diff --git a/server.js b/server.js
+index b1defc7..40827e9 100644
+--- a/server.js
++++ b/server.js
+@@ -105,6 +105,11 @@ app.use(helmet({ contentSecurityPolicy: false }));
+ // side effects (migrations, cron intervals, app.listen) unsafe for tests.
+ const { requireAdminSecret, adminLimiter } = require('./utils/adminAuth');
+ 
++// ── Teacher authentication middleware (ADR-008, PR17) ───────────────────────
++// /api is now teacher-facing (requireTeacherAuth), not admin-facing.
++// /admin/stats and /admin/grant-pro remain on requireAdminSecret, unchanged.
++const { requireTeacherAuth, apiLimiter } = require('./utils/teacherAuth');
++
+ // ── Rate limiting ──────────────────────────────────────────────────────────
+ app.use(rateLimit({
+   windowMs: 15 * 60 * 1000,
+@@ -361,12 +366,12 @@ app.post('/admin/grant-pro', adminLimiter, requireAdminSecret, async (req, res)
+   }
+ });
+ 
+-// ── API: Learner intervention plan (ADR-007 PR10) ───────────────────────────
++// ── API: Learner intervention plan (ADR-007 PR10, teacher auth ADR-008 PR17) ─
+ // Third delivery surface for InterventionService's InterventionPlan[],
+-// alongside WhatsApp (PR8) and PDF (PR9). Internal-only for now — see
+-// routes/api.js and utils/adminAuth.js for why this is gated by
+-// ADMIN_SECRET rather than per-teacher auth, which doesn't exist yet.
+-app.use('/api', adminLimiter, requireAdminSecret, apiRouter);
++// alongside WhatsApp (PR8) and PDF (PR9). Now gated by requireTeacherAuth
++// (per-teacher JWT) instead of the ADMIN_SECRET placeholder — see
++// utils/teacherAuth.js and docs/adr/ADR-008 for the authentication design.
++app.use('/api', apiLimiter, requireTeacherAuth, apiRouter);
+ 
+ // ── Error handlers ─────────────────────────────────────────────────────────
+ app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
+diff --git a/tests/api-intervention-plan.test.js b/tests/api-intervention-plan.test.js
+index bbbe252..0108d5e 100644
+--- a/tests/api-intervention-plan.test.js
++++ b/tests/api-intervention-plan.test.js
+@@ -61,8 +61,8 @@ function mockRes() {
+   return res;
+ }
+ 
+-function mockReq(learnerIdParam) {
+-  return { params: { learnerId: learnerIdParam } };
++function mockReq(learnerIdParam, phoneHash = 'hash_owner') {
++  return { params: { learnerId: learnerIdParam }, teacher: { id: 1, phoneHash } };
+ }
+ 
+ const samplePlans = [
+@@ -79,7 +79,7 @@ const samplePlans = [
+ console.log('\n── Section 1: success path ──────────────────────────────');
+ {
+   const handler = createGetInterventionPlanHandler({
+-    getLearnerById: (id) => (id === 42 ? { id: 42, canonicalName: 'Sipho Dlamini' } : null),
++    getLearnerById: (id) => (id === 42 ? { id: 42, canonicalName: 'Sipho Dlamini', phoneHash: 'hash_owner' } : null),
+     getLearnerInterventionPlan: (id) => (id === 42 ? samplePlans : []),
+   });
+ 
+@@ -117,7 +117,7 @@ console.log('\n── Section 2: unknown learner ──────────
+ console.log('\n── Section 3: resolved learner, zero InterventionPlans ──');
+ {
+   const handler = createGetInterventionPlanHandler({
+-    getLearnerById: () => ({ id: 7, canonicalName: 'New Learner' }),
++    getLearnerById: () => ({ id: 7, canonicalName: 'New Learner', phoneHash: 'hash_owner' }),
+     getLearnerInterventionPlan: () => [],
+   });
+ 
+@@ -167,7 +167,7 @@ console.log('\n── Section 5: dependency failures degrade to 500 ────
+   });
+ 
+   const handlerServiceFails = createGetInterventionPlanHandler({
+-    getLearnerById: () => ({ id: 42, canonicalName: 'Sipho Dlamini' }),
++    getLearnerById: () => ({ id: 42, canonicalName: 'Sipho Dlamini', phoneHash: 'hash_owner' }),
+     getLearnerInterventionPlan: () => { throw new Error('intervention service exploded'); },
+   });
+   const res2 = mockRes();
+@@ -177,5 +177,41 @@ console.log('\n── Section 5: dependency failures degrade to 500 ────
+   });
+ }
+ 
++console.log('\n── Section 6: ownership (ADR-008 §8, PR17) ──────────────');
++{
++  const handler = createGetInterventionPlanHandler({
++    getLearnerById: (id) => (id === 42 ? { id: 42, canonicalName: 'Sipho Dlamini', phoneHash: 'hash_owner' } : null),
++    getLearnerInterventionPlan: () => {
++      throw new Error('should not be called when the requesting teacher does not own this learner');
++    },
++  });
++
++  const req = mockReq('42', 'hash_other_teacher');
++  const res = mockRes();
++  handler(req, res);
++
++  test('cross-teacher access responds 404 (not 403 — no existence oracle)', () => {
++    assert.strictEqual(res.statusCode, 404);
++  });
++  test('cross-teacher 404 body is identical in shape to the unknown-learner 404', () => {
++    assert.ok(res.body.error);
++  });
++
++  const handlerOwned = createGetInterventionPlanHandler({
++    getLearnerById: (id) => (id === 42 ? { id: 42, canonicalName: 'Sipho Dlamini', phoneHash: 'hash_owner' } : null),
++    getLearnerInterventionPlan: (id) => (id === 42 ? samplePlans : []),
++  });
++  const reqOwned = mockReq('42', 'hash_owner');
++  const resOwned = mockRes();
++  handlerOwned(reqOwned, resOwned);
++
++  test('owning teacher (matching phoneHash) still gets 200', () => {
++    assert.strictEqual(resOwned.statusCode, 200);
++  });
++  test('owning teacher still gets the plans', () => {
++    assert.deepStrictEqual(resOwned.body.plans, samplePlans);
++  });
++}
++
+ console.log(`\n${passed} passed, ${failed} failed`);
+ if (failed > 0) process.exitCode = 1;
+diff --git a/tests/pr17-api-teacher-auth-wiring.test.js b/tests/pr17-api-teacher-auth-wiring.test.js
+new file mode 100644
+index 0000000..4ac3797
+--- /dev/null
++++ b/tests/pr17-api-teacher-auth-wiring.test.js
+@@ -0,0 +1,125 @@
++'use strict';
++/**
++ * PR17 wiring + invariant regression test (ADR-008 §5.1, §8).
++ *
++ * Companion to tests/routing-order-*.test.js — same source-inspection
++ * style, used here because the thing worth locking down is "the mount
++ * point in server.js actually uses requireTeacherAuth" and "no service
++ * has become auth-aware", neither of which a unit test of the handler
++ * function alone (tests/api-intervention-plan.test.js) can see.
++ *
++ * Covers:
++ *   1. server.js mounts /api with requireTeacherAuth + apiLimiter, not
++ *      requireAdminSecret/adminLimiter.
++ *   2. /admin/stats and /admin/grant-pro are untouched — still on
++ *      requireAdminSecret.
++ *   3. TEACHER_JWT_SECRET is in validateEnv.js's required-vars list.
++ *   4. ADR-008 §5.1's non-negotiable invariant: no file under services/,
++ *      flows/, core/, or repositories-style modules requires
++ *      'jsonwebtoken' or reads req.headers['authorization'] /
++ *      req.headers.authorization. Only utils/teacherAuth.js may.
++ *
++ * Run individually: node tests/pr17-api-teacher-auth-wiring.test.js
++ * Run via npm:       npm test
++ */
++
++const fs = require('fs');
++const path = require('path');
++
++let passed = 0;
++let failed = 0;
++
++function assert(cond, label) {
++  if (!cond) {
++    console.log(`  ❌ ${label}`);
++    failed++;
++  } else {
++    console.log(`  ✅ ${label}`);
++    passed++;
++  }
++}
++
++const root = path.join(__dirname, '..');
++const serverSrc = fs.readFileSync(path.join(root, 'server.js'), 'utf8');
++const validateEnvSrc = fs.readFileSync(path.join(root, 'utils', 'validateEnv.js'), 'utf8');
++
++console.log('\n── Section 1: /api mount uses requireTeacherAuth ────────');
++{
++  assert(
++    /require\(['"]\.\/utils\/teacherAuth['"]\)/.test(serverSrc),
++    "server.js requires './utils/teacherAuth'"
++  );
++
++  const mountMatch = serverSrc.match(/app\.use\(\s*['"]\/api['"]\s*,([^)]*)\)/);
++  assert(!!mountMatch, "found an app.use('/api', ...) mount in server.js");
++
++  const mountArgs = mountMatch ? mountMatch[1] : '';
++  assert(mountArgs.includes('requireTeacherAuth'), '/api mount includes requireTeacherAuth');
++  assert(mountArgs.includes('apiLimiter'), '/api mount includes apiLimiter');
++  assert(!mountArgs.includes('requireAdminSecret'), '/api mount no longer includes requireAdminSecret');
++  assert(!mountArgs.includes('adminLimiter'), '/api mount no longer includes adminLimiter');
++}
++
++console.log('\n── Section 2: /admin/* untouched ─────────────────────────');
++{
++  const adminStatsMatch = serverSrc.match(/app\.get\(\s*['"]\/admin\/stats['"]\s*,([^)]*)\)/);
++  const adminGrantMatch = serverSrc.match(/app\.post\(\s*['"]\/admin\/grant-pro['"]\s*,([^)]*)\)/);
++
++  assert(!!adminStatsMatch, 'found the /admin/stats route');
++  assert(!!adminGrantMatch, 'found the /admin/grant-pro route');
++
++  assert(
++    !!adminStatsMatch && adminStatsMatch[1].includes('requireAdminSecret'),
++    '/admin/stats still uses requireAdminSecret'
++  );
++  assert(
++    !!adminGrantMatch && adminGrantMatch[1].includes('requireAdminSecret'),
++    '/admin/grant-pro still uses requireAdminSecret'
++  );
++}
++
++console.log('\n── Section 3: TEACHER_JWT_SECRET required at startup ────');
++{
++  assert(
++    /key:\s*['"]TEACHER_JWT_SECRET['"]/.test(validateEnvSrc),
++    'validateEnv.js requires TEACHER_JWT_SECRET'
++  );
++}
++
++console.log('\n── Section 4: ADR-008 §5.1 — services stay auth-unaware ─');
++{
++  const scanDirs = ['services', 'flows', 'core'];
++  const offenders = [];
++
++  function walk(dir) {
++    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
++      const full = path.join(dir, entry.name);
++      if (entry.isDirectory()) {
++        walk(full);
++      } else if (entry.isFile() && entry.name.endsWith('.js')) {
++        const src = fs.readFileSync(full, 'utf8');
++        const usesJwt = /require\(['"]jsonwebtoken['"]\)/.test(src);
++        const readsAuthHeader = /headers\[['"]authorization['"]\]|headers\.authorization/i.test(src);
++        if (usesJwt || readsAuthHeader) {
++          offenders.push({ file: path.relative(root, full), usesJwt, readsAuthHeader });
++        }
++      }
++    }
++  }
++
++  for (const d of scanDirs) {
++    const full = path.join(root, d);
++    if (fs.existsSync(full)) walk(full);
++  }
++
++  assert(
++    offenders.length === 0,
++    offenders.length === 0
++      ? 'no service/flow/core module imports jsonwebtoken or reads the Authorization header'
++      : `found auth-aware code outside utils/teacherAuth.js: ${JSON.stringify(offenders)}`
++  );
++}
++
++console.log('\n' + '='.repeat(75));
++console.log(`${passed} passed, ${failed} failed`);
++if (failed > 0) process.exit(1);
+diff --git a/tests/teacherAuth.test.js b/tests/teacherAuth.test.js
+index 4147ac7..74492b9 100644
+--- a/tests/teacherAuth.test.js
++++ b/tests/teacherAuth.test.js
+@@ -282,7 +282,7 @@ async function run() {
+   {
+     const mod = require(authPath);
+     const exportedKeys = Object.keys(mod).sort();
+-    assert(exportedKeys.join(',') === 'extractBearerToken,requireTeacherAuth,resolveTeacherById', 'module exports exactly the expected surface, nothing extra');
++    assert(exportedKeys.join(',') === 'apiLimiter,extractBearerToken,requireTeacherAuth,resolveTeacherById', 'module exports exactly the expected surface, nothing extra');
+   }
+ 
+   console.log('\n' + '='.repeat(75));
+diff --git a/tests/validateEnv-yoco.test.js b/tests/validateEnv-yoco.test.js
+index 8f54346..a4e3d17 100644
+--- a/tests/validateEnv-yoco.test.js
++++ b/tests/validateEnv-yoco.test.js
+@@ -22,6 +22,7 @@ const BASE_ENV = {
+   PII_SECRET: 'test-pii-secret',
+   APP_URL: 'https://example.onrender.com',
+   ADMIN_SECRET: 'test-admin-secret',
++  TEACHER_JWT_SECRET: 'test-teacher-jwt-secret',
+   ANTHROPIC_API_KEY: 'test-anthropic-key',
+ };
+ 
+diff --git a/utils/teacherAuth.js b/utils/teacherAuth.js
+index 4b33d76..892d41a 100644
+--- a/utils/teacherAuth.js
++++ b/utils/teacherAuth.js
+@@ -43,6 +43,7 @@
+  */
+ 
+ const jwt = require('jsonwebtoken');
++const rateLimit = require('express-rate-limit');
+ const { getDb } = require('./database');
+ 
+ /**
+@@ -138,4 +139,21 @@ function requireTeacherAuth(req, res, next) {
+   next();
+ }
+ 
+-module.exports = { requireTeacherAuth, extractBearerToken, resolveTeacherById };
++/**
++ * Rate limiter for the /api mount (PR17). adminLimiter (utils/adminAuth.js,
++ * 5 req/15min) is sized for a trusted-internal-client shared secret, not
++ * per-teacher traffic from many independent teachers — reusing it here
++ * would make normal dashboard/app usage trip the limit. 100 req/15min is
++ * generous enough for a single teacher's normal usage while still bounding
++ * abuse from a single compromised/misbehaving token.
++ */
++const apiLimiter = rateLimit({
++  windowMs: 15 * 60 * 1000,
++  max: 100,
++  standardHeaders: true,
++  legacyHeaders: false,
++  trustProxy: true,
++  message: { error: 'Too many requests — please try again later.' },
++});
++
++module.exports = { requireTeacherAuth, extractBearerToken, resolveTeacherById, apiLimiter };
+diff --git a/utils/validateEnv.js b/utils/validateEnv.js
+index 9ea75b5..1bb57c0 100644
+--- a/utils/validateEnv.js
++++ b/utils/validateEnv.js
+@@ -14,6 +14,7 @@ function validateEnv() {
+     { key: 'PII_SECRET',               hint: 'node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"' },
+     { key: 'APP_URL',                  hint: 'Public HTTPS URL of this deployment, e.g. https://your-app.onrender.com' },
+     { key: 'ADMIN_SECRET',             hint: 'Any strong random string — used to authenticate /admin/* endpoints' },
++    { key: 'TEACHER_JWT_SECRET',       hint: 'Random secret for signing teacher JWTs — node -e "console.log(require(\'crypto\').randomBytes(32).toString(\'hex\'))"' },
+   ];
+ 
+   const AI_KEYS     = ['ANTHROPIC_API_KEY', 'OPENAI_API_KEY'];
+-- 
+2.43.0
+
