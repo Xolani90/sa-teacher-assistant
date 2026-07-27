@@ -80,6 +80,7 @@ const path      = require('path');
 
 const webhookRouter = require('./routes/webhook');
 const apiRouter     = require('./routes/api');
+const authRouter    = require('./routes/auth');
 
 const app = express();
 
@@ -367,6 +368,18 @@ app.post('/admin/grant-pro', adminLimiter, requireAdminSecret, async (req, res) 
 });
 
 // ── API: Learner intervention plan (ADR-007 PR10, teacher auth ADR-008 PR17) ─
+// ── Teacher JWT issuance (ADR-008, PR21) ────────────────────────────────────
+// Deliberately mounted WITHOUT requireTeacherAuth — a teacher can't present
+// a JWT to obtain their first JWT. Separate router (not a route inside
+// routes/api.js) specifically so it never inherits /api's blanket auth
+// gate below. Uses its own stricter limiter (routes/auth.js) instead of
+// apiLimiter, since a login endpoint is a more attractive brute-force
+// target than an already-authenticated data endpoint. PR21's identity
+// verification is a development-only stub — see routes/auth.js's header
+// comment; PR22 replaces it with WhatsApp OTP verification without
+// changing this mount or the route contract.
+app.use('/api/auth', authRouter.authLimiter, authRouter);
+
 // Third delivery surface for InterventionService's InterventionPlan[],
 // alongside WhatsApp (PR8) and PDF (PR9). Now gated by requireTeacherAuth
 // (per-teacher JWT) instead of the ADMIN_SECRET placeholder — see
