@@ -244,7 +244,7 @@ async function handleCommand(from, text, deps) {
     const { searchLearnersByName } = require('../services/learnerRepository');
     const { getLearnerInterventionPlan } = require('../services/interventionService');
     const { getClassInterventionPlan } = require('../services/classInterventionService');
-    const { generateClassInterventionPdf } = require('../services/pdfService');
+    const { generateClassInterventionPdf, generateLearnerInterventionPdf } = require('../services/pdfService');
 
     return Object.freeze({
       hashPhone: deps.hashPhone,
@@ -261,6 +261,7 @@ async function handleCommand(from, text, deps) {
       getLearnerInterventionPlan,
       getClassInterventionPlan,
       generateClassInterventionPdf,
+      generateLearnerInterventionPdf,
       buildPdfUrl: deps.buildPdfUrl,
       sendDocument: deps.sendDocument,
     });

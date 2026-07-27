@@ -47,6 +47,10 @@
  *                                // single call supplies both the mastery summary and the intervention
  *                                // section below — workspaceFlow doesn't fetch MasteryReport separately.
  *   getClassInterventionPlan,  // (phoneHash, classId) => ClassInterventionPlan (services/classInterventionService.js)
+ *   generateClassInterventionPdf, // (phoneHash, classId) => {fileId, filename}|{error} (services/pdfService.js)
+ *   generateLearnerInterventionPdf, // (learnerId) => {fileId, filename}|{error} (services/pdfService.js)
+ *   buildPdfUrl,               // (fileId) => string
+ *   sendDocument,              // async (from, url, filename, caption) => void
  * }
  */
 
@@ -75,6 +79,7 @@ async function handleWorkspaceFlow(from, text, deps) {
     getLearnerInterventionPlan,
     getClassInterventionPlan,
     generateClassInterventionPdf,
+    generateLearnerInterventionPdf,
     buildPdfUrl,
     sendDocument,
   } = deps;
@@ -270,13 +275,25 @@ async function handleWorkspaceFlow(from, text, deps) {
     return true;
   }
 
-  // ── LEARNER PROGRESS <name> ──
+  // ── LEARNER PROGRESS <name> / LEARNER PROGRESS PDF <name> ──
   if (upper.startsWith('LEARNER PROGRESS')) {
-    const rawName = text.slice('LEARNER PROGRESS'.length).trim();
+    let rest = text.slice('LEARNER PROGRESS'.length).trim();
+
+    // ADR-009 PR15: an optional leading "PDF" token switches this from the
+    // WhatsApp-text mastery overview to the downloadable report generated
+    // by generateLearnerInterventionPdf() (PR9), mirroring PR14's approach
+    // for CLASS INTERVENTION PDF. Everything after "PDF" is still just the
+    // same name to search for — learner resolution below is completely
+    // unaware of which output format was requested.
+    const pdfMatch = rest.match(/^pdf\b\s*/i);
+    const wantsPdf = !!pdfMatch;
+    const rawName = wantsPdf ? rest.slice(pdfMatch[0].length).trim() : rest;
 
     if (!rawName) {
       await safeSendMessage(from,
-        `📈 *Look up a learner's progress*\n\nFormat:\n*LEARNER PROGRESS [name]*\n\nExample:\n_LEARNER PROGRESS Sipho_`
+        wantsPdf
+          ? `📈 *Look up a learner's progress*\n\nFormat:\n*LEARNER PROGRESS PDF [name]*\n\nExample:\n_LEARNER PROGRESS PDF Sipho_`
+          : `📈 *Look up a learner's progress*\n\nFormat:\n*LEARNER PROGRESS [name]*\n\nExample:\n_LEARNER PROGRESS Sipho_`
       );
       return true;
     }
@@ -302,6 +319,12 @@ async function handleWorkspaceFlow(from, text, deps) {
       }
 
       const learner = matches[0];
+
+      if (wantsPdf) {
+        await generateAndSendLearnerInterventionPdf(from, learner, deps);
+        return true;
+      }
+
       // One call supplies both mastery and intervention data: each
       // InterventionPlan's evidence.mastery is the full MasteryReport, so
       // workspaceFlow never fetches MasteryService directly (per ADR-007,
@@ -609,6 +632,36 @@ async function generateAndSendClassInterventionPdf(from, hash, chosenClass, deps
   } catch (pdfErr) {
     console.error('[Workspace] Class intervention PDF generation failed:', pdfErr.message);
     await safeSendMessage(from, `⚠️ Couldn't generate the class intervention report right now. Please try again.`);
+  }
+}
+
+/**
+ * Generates the learner-level intervention PDF (PR9's
+ * generateLearnerInterventionPdf) and sends it as a WhatsApp document.
+ * Mirrors generateAndSendClassInterventionPdf(): the "no assessment or
+ * observation data yet" case is handled inside generateLearnerInterventionPdf
+ * itself via its {error} contract, so this helper doesn't duplicate that
+ * check the way the text branch above does.
+ *
+ * @param {string} from
+ * @param {{id: number, canonicalName: string}} learner
+ * @param {object} deps
+ */
+async function generateAndSendLearnerInterventionPdf(from, learner, deps) {
+  const { generateLearnerInterventionPdf, buildPdfUrl, sendDocument, safeSendMessage } = deps;
+
+  try {
+    const { fileId, filename, error } = await generateLearnerInterventionPdf(learner.id);
+    if (error) {
+      await safeSendMessage(from, `⚠️ Couldn't generate ${learner.canonicalName}'s progress report: ${error}`);
+      return;
+    }
+    const pdfUrl = buildPdfUrl(fileId);
+    await sendDocument(from, pdfUrl, filename,
+      `📎 *Learner Progress Report ready!*\\n\\nMastery levels and intervention notes for *${learner.canonicalName}* are in the PDF above.`);
+  } catch (pdfErr) {
+    console.error('[Workspace] Learner progress PDF generation failed:', pdfErr.message);
+    await safeSendMessage(from, `⚠️ Couldn't generate ${learner.canonicalName}'s progress report right now. Please try again.`);
   }
 }
 
