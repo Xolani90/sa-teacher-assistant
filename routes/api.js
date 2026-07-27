@@ -103,14 +103,69 @@ function createGetInterventionPlanHandler({ getLearnerById, getLearnerInterventi
   };
 }
 
+/**
+ * Builds the GET /classes handler (ADR-008, PR18).
+ *
+ * First teacher-facing API endpoint beyond the intervention-plan route.
+ * Exposes services/teacherWorkspaceService.js's existing
+ * getTeacherClasses(phoneHash) — unchanged, no new service/repository
+ * behavior was introduced for this PR. The route does no aggregation,
+ * filtering, or sorting of its own; getTeacherClasses() already returns
+ * classes ordered by created_at DESC.
+ *
+ * Dependency-injected for the same reason as
+ * createGetInterventionPlanHandler above: tests stub getTeacherClasses
+ * directly, no database required.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string) => Object[]} deps.getTeacherClasses
+ * @returns {(req, res) => void}
+ */
+function createGetClassesHandler({ getTeacherClasses }) {
+  /**
+   * GET /api/classes
+   *
+   * @returns 200 { classes: [...] } — scoped to req.teacher.phoneHash;
+   *          an empty array for a teacher with no classes, not an error
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetClasses(req, res) {
+    let classes;
+    try {
+      classes = getTeacherClasses(req.teacher.phoneHash);
+    } catch (err) {
+      console.error('[API] getTeacherClasses failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    return res.status(200).json({
+      classes: (classes || []).map((c) => ({
+        id: c.id,
+        name: c.name,
+        grade: c.grade,
+        subject: c.subject,
+        learnerCount: c.learner_count,
+        createdAt: c.created_at,
+        updatedAt: c.updated_at,
+      })),
+    });
+  };
+}
+
 // Real wiring — the only place this file touches actual services.
 const { getLearnerById } = require('../services/learnerRepository');
 const { getLearnerInterventionPlan } = require('../services/interventionService');
+const { getTeacherClasses } = require('../services/teacherWorkspaceService');
 
 router.get(
   '/learners/:learnerId/intervention-plan',
   createGetInterventionPlanHandler({ getLearnerById, getLearnerInterventionPlan })
 );
 
+router.get(
+  '/classes',
+  createGetClassesHandler({ getTeacherClasses })
+);
+
 module.exports = router;
-module.exports.__testExports = { createGetInterventionPlanHandler };
+module.exports.__testExports = { createGetInterventionPlanHandler, createGetClassesHandler };
