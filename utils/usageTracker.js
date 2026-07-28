@@ -28,7 +28,17 @@ function hashPhone(phone) {
   // Meta's Cloud API delivers phone numbers WITHOUT the + prefix in webhook payloads,
   // but callers like the admin grant-pro endpoint may include it. Normalizing here
   // means both sides always produce the same HMAC regardless of how the number arrived.
-  const normalized = phone.trim().replace(/^\+/, '');
+  //
+  // Also convert SA local format (0821234567) to international (27821234567).
+  // Every WhatsApp-originated `from` value already arrives in international
+  // format with no leading 0 (Meta's Cloud API never sends local format), so
+  // this only ever changes behavior for locally-typed numbers — e.g. the
+  // dashboard's phone login field — and never alters a hash already derived
+  // from a real WhatsApp message.
+  let normalized = phone.trim().replace(/^\+/, '');
+  if (/^0\d{9}$/.test(normalized)) {
+    normalized = `27${normalized.slice(1)}`;
+  }
   return crypto
     .createHmac('sha256', process.env.PII_SECRET)
     .update(normalized)
