@@ -114,11 +114,24 @@ async function handleRequestCode(req, res) {
 
       createAuthCode(phoneHash, otpHash, expiresAt);
 
+      // --- DEV-ONLY OTP BYPASS ---
+      // Never active in production. Lets you test the login flow locally
+      // without needing a working WhatsApp OTP message template.
+      const isDev = process.env.NODE_ENV !== 'production';
+      if (isDev) {
+        console.log(`[AUTH][DEV ONLY] OTP for ${phone}: ${otp}`);
+      }
+
       try {
         await sendMessage(phone, `Your verification code is: ${otp}`);
       } catch (sendErr) {
         console.warn('[AUTH] Failed to send WhatsApp OTP:', sendErr.message);
       }
+
+      return res.status(200).json({
+        success: true,
+        ...(isDev ? { devOtp: otp } : {}),
+      });
     }
 
     return res.status(200).json({ success: true });

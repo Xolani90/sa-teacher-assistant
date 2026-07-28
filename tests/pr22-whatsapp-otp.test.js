@@ -189,7 +189,7 @@ async function run() {
   await handleRequestCode(req1, res1);
 
   assertEq(res1.statusCode, 200, 'returns 200');
-  assertEq(res1.body, { success: true }, 'returns { success: true }');
+  assertEq(res1.body && res1.body.success, true, 'returns success: true');
   assert(sentMessage !== null, 'sendMessage was called');
   assert(sentMessage && sentMessage.to === testPhone, 'message sent to correct phone');
   assert(sentMessage && sentMessage.text.includes('verification code'), 'message contains verification code');
@@ -234,7 +234,7 @@ async function run() {
   await handleRequestCode(req5, res5);
 
   assertEq(res5.statusCode, 200, 'still returns 200 even if sendMessage fails');
-  assertEq(res5.body, { success: true }, 'still returns success even if sendMessage fails');
+  assertEq(res5.body && res5.body.success, true, 'still returns success even if sendMessage fails');
 
   require('../services/whatsappService').sendMessage = originalSendMessage;
 
