@@ -1,13 +1,7 @@
 'use strict';
 
 /**
- * routes/auth.js — ADR-008 PR21: teacher JWT issuance.
- *
- * Introduces the missing half of ADR-008: `utils/teacherAuth.js` (PR16)
- * can verify a teacher JWT but nothing in the codebase could issue one.
- * This router closes that gap with exactly one responsibility: given a
- * proven teacher identity, sign a JWT that requireTeacherAuth already
- * knows how to accept. It does not implement identity proof itself.
+ * routes/auth.js — ADR-008: teacher authentication (WhatsApp OTP).
  *
  * Mount contract (server.js): `/api/auth` is mounted WITHOUT
  * requireTeacherAuth and WITHOUT apiLimiter — a teacher cannot present a
@@ -17,20 +11,9 @@
  * deliberately a sibling of routes/api.js, not a route added to it,
  * specifically so it never inherits /api's blanket auth gate.
  *
- * Identity verification is injected (createLoginHandler({
- * identityVerifier })), exactly like routes/api.js injects
- * getTeacherClasses/getTeacherLearners/etc. — so tests can stub it with
- * a plain function, no database required.
- *
- * The real wiring below (devIdentityVerifier) is a DEVELOPMENT-ONLY
- * stand-in: it trusts a bare `teacherId` in the request body with no
- * proof of identity whatsoever. It exists only so the JWT-issuance
- * contract (request/response shape, signing conventions) can be built
- * and tested before PR22 replaces the verifier with a real WhatsApp
- * OTP-based check. This endpoint MUST NOT be exposed to real teachers
- * or documented as a production login mechanism until that swap happens
- * — see PR22 (auth_codes, request-code/verify-code, sendMessage()
- * delivery, expiry, replay protection).
+ * POST /request-code and POST /verify-code implement the WhatsApp OTP
+ * flow: a teacher requests a one-time code, it's delivered via
+ * sendMessage(), and verifying it issues a JWT.
  *
  * Claim shape signed here is deliberately minimal, matching what
  * requireTeacherAuth actually reads (utils/teacherAuth.js): only `sub`
@@ -53,91 +36,6 @@ const JWT_EXPIRES_IN = '1h';
 const JWT_EXPIRES_IN_SECONDS = 3600;
 const OTP_EXPIRY_MINUTES = 5;
 const MAX_ATTEMPTS = 5;
-
-/**
- * Builds the POST /login handler.
- *
- * @param {Object} deps
- * @param {(credentials: Object) => ({id:number, name:string|null}|null)} deps.identityVerifier
- *   Given the request body, returns the verified teacher ({id, name})
- *   or null/falsy if identity could not be established. Never throws
- *   for "identity not proven" — that's a normal outcome, not an error.
- * @returns {(req, res) => void}
- */
-function createLoginHandler({ identityVerifier }) {
-  /**
-   * POST /api/auth/login
-   *
-   * @returns 401 (generic — no distinction between "unknown teacher" and
-   *          "bad credential", same collapsed-reason posture as
-   *          requireTeacherAuth) if identityVerifier returns falsy or throws
-   * @returns 500 if TEACHER_JWT_SECRET is not configured, or if signing fails
-   * @returns 200 { accessToken, tokenType, expiresIn, teacher: {id, name} }
-   *          on success
-   */
-  return function handleLogin(req, res) {
-    const secret = process.env.TEACHER_JWT_SECRET;
-
-    if (!secret) {
-      console.warn('[AUTH] TEACHER_JWT_SECRET not set in environment');
-      return res.status(500).json({ error: 'Server misconfiguration' });
-    }
-
-    let teacher;
-    try {
-      teacher = identityVerifier(req.body || {});
-    } catch (err) {
-      console.warn('[AUTH] identityVerifier failed:', err.message);
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    if (!teacher || !Number.isInteger(teacher.id) || teacher.id <= 0) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    let accessToken;
-    try {
-      accessToken = jwt.sign({ sub: teacher.id }, secret, { expiresIn: JWT_EXPIRES_IN });
-    } catch (err) {
-      console.error('[AUTH] Token signing failed:', err.message);
-      return res.status(500).json({ error: 'Internal server error' });
-    }
-
-    return res.status(200).json({
-      accessToken,
-      tokenType: 'Bearer',
-      expiresIn: JWT_EXPIRES_IN_SECONDS,
-      teacher: {
-        id: teacher.id,
-        name: teacher.name || null,
-      },
-    });
-  };
-}
-
-/**
- * DEVELOPMENT-ONLY identity verifier (PR21). Trusts a bare `teacherId`
- * in the request body — no credential, no proof. Looks the teacher up
- * directly (same pattern as teacherAuth.js's local resolveTeacherById:
- * a one-off auth-resolution lookup, not general enough to belong in a
- * shared repository module).
- *
- * PR22 replaces this entire function with WhatsApp OTP verification;
- * the route/handler contract above does not change.
- *
- * @param {{teacherId: number|string}} credentials
- * @returns {{id:number, name:string|null}|null}
- */
-function devIdentityVerifier(credentials) {
-  const { getDb } = require('../utils/database');
-  const teacherId = Number(credentials.teacherId);
-  if (!Number.isInteger(teacherId) || teacherId <= 0) return null;
-
-  const db = getDb();
-  const row = db.prepare('SELECT id, name FROM teachers WHERE id = ?').get(teacherId);
-  if (!row) return null;
-  return { id: row.id, name: row.name };
-}
 
 /**
  * Rate limiter for /api/auth — deliberately stricter than apiLimiter
@@ -308,15 +206,12 @@ async function handleVerifyCode(req, res) {
   }
 }
 
-router.post('/login', createLoginHandler({ identityVerifier: devIdentityVerifier }));
 router.post('/request-code', handleRequestCode);
 router.post('/verify-code', handleVerifyCode);
 
 module.exports = router;
 module.exports.authLimiter = authLimiter;
 module.exports.__testExports = {
-  createLoginHandler,
-  devIdentityVerifier,
   generateOtp,
   hashOtp,
   handleRequestCode,
