@@ -3,20 +3,29 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useTeacher } from '../auth/TeacherContext';
 import { ApiError } from '../api/client';
 import Layout from '../components/Layout';
-import { Card, EmptyState, ErrorBanner, Spinner, Button } from '../components/ui';
+import { Card, EmptyState, ErrorBanner, Spinner, IconBadge, SectionHeader, Pill } from '../components/ui';
 
 const STATUS_LOADING = 'loading';
 const STATUS_READY = 'ready';
 const STATUS_ERROR = 'error';
 
+const PRIORITY_TONE = { high: 'warning', medium: 'accent', low: 'neutral' };
+const PRIORITY_LABEL = { high: 'High priority', medium: 'Medium priority', low: 'Low priority' };
+
+/**
+ * Command-center view of a single class, backed by the aggregated
+ * GET /api/classes/:classId/detail payload (services/classDetailService.js).
+ * One request, one screen: class health, recent assessments, curriculum
+ * coverage, intervention priorities, and the roster with per-learner
+ * averages.
+ */
 export default function ClassDetail() {
   const { classId } = useParams();
   const navigate = useNavigate();
   const { authedFetch } = useTeacher();
 
   const [status, setStatus] = useState(STATUS_LOADING);
-  const [cls, setCls] = useState(null);
-  const [learners, setLearners] = useState([]);
+  const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
 
@@ -27,21 +36,9 @@ export default function ClassDetail() {
       setStatus(STATUS_LOADING);
       setError(null);
       try {
-        const [classesRes, learnersRes] = await Promise.all([
-          authedFetch('/api/classes'),
-          authedFetch('/api/learners'),
-        ]);
+        const res = await authedFetch(`/api/classes/${classId}/detail`);
         if (cancelled) return;
-
-        const matchedClass = (classesRes?.classes || []).find((c) => String(c.id) === String(classId)) || null;
-        // /api/learners has no classId filter server-side (ADR-008 scope);
-        // filter client-side against the classId each learner already carries.
-        const classLearners = (learnersRes?.learners || []).filter(
-          (l) => String(l.classId) === String(classId)
-        );
-
-        setCls(matchedClass);
-        setLearners(classLearners);
+        setDetail(res);
         setStatus(STATUS_READY);
       } catch (err) {
         if (cancelled) return;
@@ -56,11 +53,15 @@ export default function ClassDetail() {
     };
   }, [authedFetch, classId]);
 
+  const learners = detail?.learners || [];
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return learners;
-    return learners.filter((l) => (l.canonicalName || '').toLowerCase().includes(q));
+    return learners.filter((l) => (l.learnerName || '').toLowerCase().includes(q));
   }, [learners, query]);
+
+  const cls = detail?.class;
+  const health = detail?.classHealth;
 
   return (
     <Layout>
@@ -72,7 +73,7 @@ export default function ClassDetail() {
 
       {status === STATUS_ERROR && <ErrorBanner message={error} onRetry={() => window.location.reload()} />}
 
-      {status === STATUS_READY && (
+      {status === STATUS_READY && detail && (
         <>
           <div style={{ marginBottom: 'var(--space-6)' }}>
             <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.02em', margin: '0 0 var(--space-2)' }}>
@@ -84,40 +85,156 @@ export default function ClassDetail() {
             </p>
           </div>
 
-          {learners.length > 0 && (
-            <input
-              type="text"
-              placeholder="Search learners…"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              style={styles.search}
-              aria-label="Search learners"
+          {/* Class health */}
+          <div style={styles.healthGrid}>
+            <HealthStat icon="📊" tone="indigo" label="Class average" value={health?.average != null ? `${health.average}%` : '—'} />
+            <HealthStat icon="✅" tone="mint" label="Pass rate" value={health?.passRate != null ? `${health.passRate}%` : '—'} />
+            <HealthStat icon="⚠️" tone="amber" label="At risk" value={health?.atRisk ?? '—'} />
+            <HealthStat icon="🎯" tone="lavender" label="Active interventions" value={health?.activeInterventions ?? '—'} />
+          </div>
+
+          {/* Curriculum coverage */}
+          <Card style={{ padding: 'var(--space-5)', marginBottom: 'var(--space-6)' }}>
+            <SectionHeader
+              title="Curriculum coverage"
+              subtitle={
+                detail.curriculumCoverage?.dataAvailable
+                  ? `${detail.curriculumCoverage.percentage}% of the ATP covered so far`
+                  : 'No coverage data yet'
+              }
             />
-          )}
+            {detail.curriculumCoverage?.dataAvailable && (
+              <>
+                <div style={styles.coverageTrack}>
+                  <div
+                    style={{
+                      ...styles.coverageFill,
+                      width: `${Math.min(100, Math.max(0, detail.curriculumCoverage.percentage))}%`,
+                    }}
+                  />
+                </div>
+                {detail.curriculumCoverage.remainingTopics?.length > 0 && (
+                  <p style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                    Still outstanding: {detail.curriculumCoverage.remainingTopics.slice(0, 6).join(', ')}
+                    {detail.curriculumCoverage.remainingTopics.length > 6 ? '…' : ''}
+                  </p>
+                )}
+              </>
+            )}
+          </Card>
 
-          {learners.length === 0 && (
-            <EmptyState
-              title="No learners yet"
-              description="Learners added to this class from WhatsApp will appear here."
+          {/* Recent assessments */}
+          <div style={{ marginBottom: 'var(--space-6)' }}>
+            <SectionHeader title="Recent assessments" />
+            {detail.recentAssessments?.length === 0 ? (
+              <EmptyState title="No assessments yet" description="Marks captured from WhatsApp will show up here." />
+            ) : (
+              <div style={styles.cardList}>
+                {detail.recentAssessments.map((a) => (
+                  <Card key={a.assessmentId} style={styles.rowCard}>
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{a.title}</div>
+                      <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                        {a.subject}
+                        {a.term ? ` · Term ${a.term}` : ''} · {a.learnerCount} {a.learnerCount === 1 ? 'learner' : 'learners'}
+                      </div>
+                    </div>
+                    <Pill tone={a.classAverage >= 50 ? 'success' : 'warning'}>{a.classAverage}% avg</Pill>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Intervention priorities */}
+          <div style={{ marginBottom: 'var(--space-6)' }}>
+            <SectionHeader
+              title="Intervention priorities"
+              subtitle={
+                detail.interventions?.summary
+                  ? `${detail.interventions.summary.evaluatedLearners} evaluated · ${detail.interventions.summary.insufficientData} need more data`
+                  : undefined
+              }
             />
-          )}
+            {['high', 'medium'].every((p) => (detail.interventions?.priorityLearners?.[p]?.length || 0) === 0) ? (
+              <EmptyState title="Nothing urgent right now" description="High and medium priority learners will appear here." />
+            ) : (
+              <div style={styles.cardList}>
+                {['high', 'medium'].flatMap((priority) =>
+                  (detail.interventions.priorityLearners[priority] || []).map((l) => (
+                    <Card key={`${priority}-${l.learnerId}`} style={styles.rowCard}>
+                      <span style={{ fontWeight: 500 }}>{l.learnerName}</span>
+                      <Pill tone={PRIORITY_TONE[priority]}>{PRIORITY_LABEL[priority]}</Pill>
+                    </Card>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
 
-          {learners.length > 0 && filtered.length === 0 && (
-            <p style={{ color: 'var(--color-text-secondary)' }}>No learners match "{query}".</p>
-          )}
+          {/* Roster */}
+          <div>
+            <SectionHeader title="Roster" />
+            {learners.length > 0 && (
+              <input
+                type="text"
+                placeholder="Search learners…"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                style={styles.search}
+                aria-label="Search learners"
+              />
+            )}
 
-          {filtered.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', marginTop: 'var(--space-4)' }}>
-              {filtered.map((l) => (
-                <Card key={l.id} style={{ padding: 'var(--space-4) var(--space-5)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                  <span style={{ fontWeight: 500 }}>{l.canonicalName}</span>
-                </Card>
-              ))}
-            </div>
-          )}
+            {learners.length === 0 && (
+              <EmptyState
+                title="No learners yet"
+                description="Learners added to this class from WhatsApp will appear here."
+              />
+            )}
+
+            {learners.length > 0 && filtered.length === 0 && (
+              <p style={{ color: 'var(--color-text-secondary)' }}>No learners match "{query}".</p>
+            )}
+
+            {filtered.length > 0 && (
+              <div style={styles.cardList}>
+                {filtered.map((l) => (
+                  <Card key={l.learnerId} style={styles.rowCard}>
+                    <span style={{ fontWeight: 500 }}>{l.learnerName}</span>
+                    {l.average != null ? (
+                      <Pill tone={l.passing ? 'success' : 'warning'}>
+                        {l.average}% · {l.assessmentCount} {l.assessmentCount === 1 ? 'mark' : 'marks'}
+                      </Pill>
+                    ) : (
+                      <Pill>No data yet</Pill>
+                    )}
+                  </Card>
+                ))}
+              </div>
+            )}
+          </div>
         </>
       )}
     </Layout>
+  );
+}
+
+function HealthStat({ icon, tone, label, value }) {
+  return (
+    <Card style={{ padding: 'var(--space-5)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-4)' }}>
+        <IconBadge tone={tone}>{icon}</IconBadge>
+        <div>
+          <div style={{ fontSize: 'var(--text-2xl)', fontWeight: 700, letterSpacing: '-0.02em', lineHeight: 1.1 }}>
+            {value}
+          </div>
+          <div style={{ marginTop: '0.2rem', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+            {label}
+          </div>
+        </div>
+      </div>
+    </Card>
   );
 }
 
@@ -131,6 +248,36 @@ const styles = {
     padding: 0,
     marginBottom: 'var(--space-5)',
     fontWeight: 500,
+  },
+  healthGrid: {
+    display: 'grid',
+    gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))',
+    gap: 'var(--space-4)',
+    marginBottom: 'var(--space-6)',
+  },
+  coverageTrack: {
+    width: '100%',
+    height: 10,
+    borderRadius: 'var(--radius-full)',
+    background: 'var(--color-bg)',
+    overflow: 'hidden',
+  },
+  coverageFill: {
+    height: '100%',
+    borderRadius: 'var(--radius-full)',
+    background: 'var(--color-accent)',
+    transition: 'width var(--duration-base) var(--ease-standard)',
+  },
+  cardList: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 'var(--space-2)',
+  },
+  rowCard: {
+    padding: 'var(--space-4) var(--space-5)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   search: {
     padding: '0.55rem var(--space-4)',
