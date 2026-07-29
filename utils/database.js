@@ -857,6 +857,47 @@ function runMigrations() {
       ON intervention_plans(learner_id, subject, status);
   `);
 
+  // Migration 037: qms_reflections (ADR-011). First QMS-owned table —
+  // teacher-authored reflection content, distinct from TSE's
+  // tse_evidence_links (Migration 034), which only tags existing rows
+  // and never stores authored content itself. phone_hash is the
+  // ownership identifier, matching every other teacher-scoped table in
+  // this schema (learners, assessments, tse_evidence_links) — ADR-011
+  // §2 deliberately does not introduce teacher_id here to avoid a mixed
+  // identity model.
+  //
+  // evidence_link_ids is a JSON array of tse_evidence_links.id values,
+  // not a join table — ADR-011 §3 records this as a deliberate
+  // low-complexity choice for now, with explicit triggers (moderation
+  // queries, evidence-based search, district-scale reporting) for when
+  // to revisit it as a relational join table instead.
+  //
+  // ai_assisted is a plain boolean (ADR-011 §4, Option A) — richer
+  // generated/edited/approved/submitted lifecycle tracking is the
+  // intended eventual direction but deferred until a moderator/reviewer
+  // role exists to consume it.
+  //
+  // deleted_at is a nullable soft-delete marker (ADR-011 §7) — a
+  // reflection may already be referenced by a generated portfolio
+  // snapshot, so hard-deleting the row could leave that snapshot
+  // pointing at nothing. Soft-deleted reflections are excluded from
+  // future listings/portfolio generation but remain resolvable.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS qms_reflections (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash         TEXT    NOT NULL,
+      term               INTEGER,
+      content            TEXT    NOT NULL,
+      ai_assisted        INTEGER NOT NULL DEFAULT 0,
+      evidence_link_ids  TEXT,
+      created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
+      deleted_at         TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_reflections_phone_term
+      ON qms_reflections(phone_hash, term);
+  `);
+
   console.log('[DB] Migrations complete');
 }
 
