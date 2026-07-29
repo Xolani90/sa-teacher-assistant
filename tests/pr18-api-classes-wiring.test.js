@@ -90,7 +90,15 @@ console.log('\n── Section 3: identity comes from req.teacher.phoneHash ─�
   const handlerStart = apiSrc.indexOf('function createGetClassesHandler');
   assert(handlerStart !== -1, 'createGetClassesHandler function found in routes/api.js');
 
-  const handlerBody = apiSrc.slice(handlerStart, apiSrc.indexOf('// Real wiring', handlerStart));
+  // Bounded to this handler's own function, not all the way to
+  // '// Real wiring' — other handlers may legitimately sit in between
+  // (e.g. createGetClassDetailHandler reads req.params.classId for its
+  // own route) and must not be misattributed to this one.
+  const nextFnMatch = apiSrc.slice(handlerStart + 1).search(/\nfunction\s+create/);
+  const handlerEnd = nextFnMatch === -1
+    ? apiSrc.indexOf('// Real wiring', handlerStart)
+    : handlerStart + 1 + nextFnMatch;
+  const handlerBody = apiSrc.slice(handlerStart, handlerEnd);
   assert(
     /req\.teacher\.phoneHash/.test(handlerBody),
     'the /classes handler reads req.teacher.phoneHash'

@@ -221,11 +221,69 @@ function createGetTseStatusHandler({ getStatusSnapshot }) {
   };
 }
 
+/**
+ * Builds the GET /classes/:classId/detail handler (dashboard "Class
+ * Detail" / command-center view — PROJECT_STATUS.md's post-branding
+ * milestone).
+ *
+ * Exposes services/classDetailService.js's getClassDetail(phoneHash,
+ * classId), which composes five already-shipped reads (class summary,
+ * roster, class history, curriculum coverage, class intervention plan)
+ * into one payload. Same layering discipline as every other route
+ * here: this handler does no aggregation of its own, only auth/shape
+ * concerns (classId validation, 404 vs 500, req.teacher.phoneHash
+ * scoping) — ownership enforcement lives inside getClassDetail() itself
+ * via getClass(classId, phoneHash), the same pattern
+ * teacherWorkspaceService.getClass() already uses elsewhere.
+ *
+ * Dependency-injected for the same reason as the handlers above: tests
+ * stub getClassDetail directly, no database required.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, classId:number) => Object|null} deps.getClassDetail
+ * @returns {(req, res) => void}
+ */
+function createGetClassDetailHandler({ getClassDetail }) {
+  /**
+   * GET /api/classes/:classId/detail
+   *
+   * @returns 400 if classId is not a positive integer
+   * @returns 404 if no class with that id exists, OR if the class
+   *          exists but belongs to a different teacher (ADR-008 §8 —
+   *          identical response to "not found", same convention as the
+   *          intervention-plan route above)
+   * @returns 200 the full aggregated Class Detail payload
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetClassDetail(req, res) {
+    const classId = Number(req.params.classId);
+
+    if (!Number.isInteger(classId) || classId <= 0) {
+      return res.status(400).json({ error: 'classId must be a positive integer.' });
+    }
+
+    let detail;
+    try {
+      detail = getClassDetail(req.teacher.phoneHash, classId);
+    } catch (err) {
+      console.error('[API] getClassDetail failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!detail) {
+      return res.status(404).json({ error: 'Class not found.' });
+    }
+
+    return res.status(200).json(detail);
+  };
+}
+
 // Real wiring — the only place this file touches actual services.
 const { getLearnerById, getTeacherLearners } = require('../services/learnerRepository');
 const { getLearnerInterventionPlan } = require('../services/interventionService');
 const { getTeacherClasses } = require('../services/teacherWorkspaceService');
 const { getStatusSnapshot } = require('../services/tseEvidenceService');
+const { getClassDetail } = require('../services/classDetailService');
 
 router.get(
   '/learners/:learnerId/intervention-plan',
@@ -235,6 +293,11 @@ router.get(
 router.get(
   '/classes',
   createGetClassesHandler({ getTeacherClasses })
+);
+
+router.get(
+  '/classes/:classId/detail',
+  createGetClassDetailHandler({ getClassDetail })
 );
 
 router.get(
@@ -250,6 +313,7 @@ module.exports = router;
 module.exports.__testExports = {
   createGetInterventionPlanHandler,
   createGetClassesHandler,
+  createGetClassDetailHandler,
   createGetLearnersHandler,
   createGetTseStatusHandler,
 };
