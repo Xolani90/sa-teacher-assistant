@@ -1,0 +1,158 @@
+/* src/styles/tokens.css
+ *
+ * Design tokens for the SA Teacher dashboard. Single source of truth for
+ * color, spacing, radius, shadow, and type — every page composes from
+ * these instead of hardcoding values, so the look stays consistent as
+ * more screens are added.
+ */
+
+:root {
+  /* Color */
+  --color-bg: #f5f5f7;
+  --color-surface: #ffffff;
+  --color-surface-raised: #ffffff;
+  --color-border: rgba(0, 0, 0, 0.06);
+  --color-border-strong: rgba(0, 0, 0, 0.1);
+
+  --color-text-primary: #1d1d1f;
+  --color-text-secondary: #6e6e73;
+  --color-text-tertiary: #a1a1a6;
+
+  --color-accent: #3b5bfd;
+  --color-accent-strong: #2c46e0;
+  --color-accent-soft: rgba(59, 91, 253, 0.1);
+
+  --color-success: #1d9a6c;
+  --color-success-soft: rgba(29, 154, 108, 0.1);
+  --color-warning: #c77c02;
+  --color-warning-soft: rgba(199, 124, 2, 0.1);
+  --color-danger: #d93025;
+  --color-danger-soft: rgba(217, 48, 37, 0.08);
+
+  /* Gradient icon tiles (Apple-Health-style), used by IconBadge */
+  --grad-indigo-soft: linear-gradient(135deg, rgba(59, 91, 253, 0.16), rgba(59, 91, 253, 0.06));
+  --grad-lavender-soft: linear-gradient(135deg, rgba(140, 110, 253, 0.16), rgba(140, 110, 253, 0.06));
+  --grad-mint-soft: linear-gradient(135deg, rgba(29, 154, 108, 0.16), rgba(29, 154, 108, 0.06));
+  --grad-amber-soft: linear-gradient(135deg, rgba(199, 124, 2, 0.18), rgba(199, 124, 2, 0.06));
+
+  /* Spacing (8pt grid) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+  --space-8: 64px;
+
+  /* Radius */
+  --radius-sm: 10px;
+  --radius-md: 16px;
+  --radius-lg: 20px;
+  --radius-full: 999px;
+
+  /* Shadow */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 1px rgba(0, 0, 0, 0.03);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.08), 0 2px 8px rgba(0, 0, 0, 0.04);
+
+  /* Type */
+  --font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter',
+    'Segoe UI', Roboto, sans-serif;
+
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 15px;
+  --text-md: 17px;
+  --text-lg: 22px;
+  --text-xl: 28px;
+  --text-2xl: 36px;
+
+  /* Motion */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+
+  --sidebar-width: 240px;
+}
+
+[data-theme='dark'] {
+  --color-bg: #1c1c1e;
+  --color-surface: #232326;
+  --color-surface-raised: #2a2a2d;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.14);
+
+  --color-text-primary: #f5f5f7;
+  --color-text-secondary: #a1a1a6;
+  --color-text-tertiary: #737377;
+
+  --color-accent: #6d87ff;
+  --color-accent-strong: #8398ff;
+  --color-accent-soft: rgba(109, 135, 255, 0.16);
+
+  --color-success-soft: rgba(29, 154, 108, 0.16);
+  --color-warning-soft: rgba(199, 124, 2, 0.16);
+  --color-danger-soft: rgba(217, 48, 37, 0.16);
+
+  --grad-indigo-soft: linear-gradient(135deg, rgba(109, 135, 255, 0.22), rgba(109, 135, 255, 0.08));
+  --grad-lavender-soft: linear-gradient(135deg, rgba(163, 138, 255, 0.22), rgba(163, 138, 255, 0.08));
+  --grad-mint-soft: linear-gradient(135deg, rgba(45, 191, 133, 0.22), rgba(45, 191, 133, 0.08));
+  --grad-amber-soft: linear-gradient(135deg, rgba(224, 148, 20, 0.24), rgba(224, 148, 20, 0.08));
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.45);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-family);
+  -webkit-font-smoothing: antialiased;
+  transition: background-color var(--duration-base) var(--ease-standard);
+}
+
+button,
+input {
+  font-family: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+}
+
+@keyframes fadeSlideUp {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes countUp {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
