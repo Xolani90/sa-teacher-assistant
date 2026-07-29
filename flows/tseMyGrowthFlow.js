@@ -4,7 +4,9 @@
  * WhatsApp "MY GROWTH" command — teacher-facing view of the TSE Evidence
  * Engine snapshot (Migration 034, services/tseEvidenceService.js).
  * Read-only; getStatusSnapshot() is populated by tagEvidence() hooks
- * already wired into six write paths elsewhere in the codebase.
+ * already wired into six write paths elsewhere in the codebase, plus
+ * (Phase 4) the rule-based evidence-gap layer from
+ * services/tseGrowthInsightService.js.
  */
 
 const CATEGORY_LABELS = {
@@ -30,6 +32,19 @@ function formatSnapshot(snapshot) {
     const count = snapshot.counts[cat] ?? 0;
     lines.push(`*${label}:* ${statusLine(count)}`);
   }
+
+  // Phase 4: rule-based evidence-gap layer, when present. Absent/empty
+  // on older snapshot shapes or if the insight layer failed, so every
+  // line here is optional and degrades gracefully.
+  if (snapshot.strength) {
+    lines.push('', `✅ *Strength:* ${snapshot.strength}`);
+  } else if (Array.isArray(snapshot.gaps) && snapshot.gaps.length > 0) {
+    lines.push('', `⚠️ *Growth opportunity:* ${snapshot.gaps[0].message}`);
+    if (snapshot.suggestedAction) {
+      lines.push(`👉 *Suggested next step:* ${snapshot.suggestedAction}`);
+    }
+  }
+
   return lines.join('\n');
 }
 

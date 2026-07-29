@@ -30,10 +30,21 @@
  *     UNIQUE(source_table, source_id, category) constraint (Migration
  *     034), and tagEvidence() uses INSERT OR IGNORE, so calling it
  *     twice for the same row (e.g. live hook + backfill re-run) is safe.
+ *
+ * TSE Phase 4 (services/tseGrowthInsightService.js): getStatusSnapshot()
+ * additionally attaches the rule-based evidence-gap layer — gaps,
+ * strength, suggestedAction — computed from the real assessments /
+ * curriculum_coverage / intervention_plans / observation_assessments
+ * FK relationships. Same non-fatal convention as tagEvidence(): a
+ * failure in the insight layer must never break the snapshot itself,
+ * since getStatusSnapshot() already has real callers (MY GROWTH,
+ * GET /api/tse/status) that need to keep working even if this newer,
+ * smaller piece has a bug.
  */
 
 const { getDb } = require('../utils/database');
 const { getCurrentTerm } = require('./schoolCalendarRepository');
+const { getGrowthInsights } = require('./tseGrowthInsightService');
 
 const VALID_CATEGORIES = [
   'curriculum',
@@ -90,14 +101,18 @@ function tagEvidence(phoneHash, category, sourceTable, sourceId, term = null) {
 
 /**
  * Returns a teacher's evidence snapshot — category counts plus the
- * most recent items per category. Powers both GET /api/tse/status and
- * the WhatsApp MY GROWTH command.
+ * most recent items per category, plus (Phase 4) a rule-based
+ * evidence-gap layer. Powers both GET /api/tse/status and the WhatsApp
+ * MY GROWTH command.
  *
  * @param {string} phoneHash
  * @returns {{
  *   counts: Record<string, number>,
  *   latest: Record<string, Array<{sourceId:number, sourceTable:string, createdAt:string, term:number|null}>>,
- *   missingCategories: string[]
+ *   missingCategories: string[],
+ *   gaps: Array<{ type: string, message: string, count: number }>,
+ *   strength: string|null,
+ *   suggestedAction: string|null
  * }}
  */
 function getStatusSnapshot(phoneHash) {
@@ -137,7 +152,21 @@ function getStatusSnapshot(phoneHash) {
 
   const missingCategories = VALID_CATEGORIES.filter((cat) => counts[cat] === 0);
 
-  return { counts, latest, missingCategories };
+  // Phase 4: rule-based evidence-gap layer. Never let a bug here take
+  // down the snapshot itself — same convention as tagEvidence() above.
+  let gaps = [];
+  let strength = null;
+  let suggestedAction = null;
+  try {
+    const insights = getGrowthInsights(phoneHash);
+    gaps = insights.gaps;
+    strength = insights.strength;
+    suggestedAction = insights.suggestedAction;
+  } catch (err) {
+    console.error('[TSE] getGrowthInsights failed (non-fatal):', err.message);
+  }
+
+  return { counts, latest, missingCategories, gaps, strength, suggestedAction };
 }
 
 module.exports = {
