@@ -55,6 +55,39 @@ function syncLearnerCount(db, phoneHash, classId) {
 }
 
 /**
+ * Returns the live, active-roster learner count for every one of a
+ * teacher's classes in a single query, keyed by class_id.
+ *
+ * Exists because `classes.learner_count` (see syncLearnerCount above) is
+ * a *cache* — it is only updated on writes that go through this module
+ * (setRoster/addLearner/removeLearner/clearRoster). A class created via
+ * the legacy WhatsApp "NEW CLASS <name> | <count>" flow (or one whose
+ * cache simply drifted) can carry a stored count that disagrees with
+ * what's actually in the `learners` table. Any surface that needs to
+ * show teachers a number they can trust — the dashboard class list and
+ * Class Detail command center in particular — must read this function's
+ * result, not `classes.learner_count`, directly. See
+ * scripts/reconcile-learner-counts.js for a one-off audit/repair of the
+ * cached column itself.
+ *
+ * @param {string} phoneHash
+ * @returns {Map<number, number>} classId -> active learner count
+ */
+function getActiveRosterCounts(phoneHash) {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT class_id AS classId, COUNT(*) AS count
+    FROM learners
+    WHERE phone_hash = ? AND class_id IS NOT NULL AND removed_at IS NULL
+    GROUP BY class_id
+  `).all(phoneHash);
+
+  const counts = new Map();
+  for (const row of rows) counts.set(row.classId, row.count);
+  return counts;
+}
+
+/**
  * Returns a class's roster in stable order (oldest-added first).
  *
  * @param {string} phoneHash
@@ -337,6 +370,7 @@ function formatRosterList(roster) {
 
 module.exports = {
   getRoster,
+  getActiveRosterCounts,
   setRoster,
   addLearner,
   removeLearner,

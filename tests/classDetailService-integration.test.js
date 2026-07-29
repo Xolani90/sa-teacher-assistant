@@ -186,6 +186,43 @@ function run() {
     assertLabel(detail.observations.recent[0].learnerCount === 2, 'session covered two learners');
   }
 
+  console.log('\n── Section 8: stale classes.learner_count vs live roster ─────────────');
+  {
+    // Simulates a class created via the legacy WhatsApp "NEW CLASS <name>
+    // | <count>" flow: a declared capacity is stored directly on the row,
+    // but no roster was ever captured through learnerRosterService, so
+    // `learners` has zero real rows for this class and the stored
+    // learner_count (34) never got synced.
+    const staleClassResult = db.prepare(`
+      INSERT INTO classes (phone_hash, name, grade, subject, learner_count)
+      VALUES (?, 'Grade 7A Mathematics', 7, 'General', 34)
+    `).run(PHONE_HASH);
+    const staleClassId = Number(staleClassResult.lastInsertRowid);
+
+    const { getActiveRosterCounts } = require('../services/learnerRosterService');
+
+    const staleDetail = getClassDetail(PHONE_HASH, staleClassId);
+
+    assertLabel(
+      staleDetail.class.learnerCount === 0,
+      'class.learnerCount reflects the live (empty) roster, not the stale stored 34'
+    );
+    assertLabel(
+      staleDetail.learners.length === 0,
+      'learners array is empty — matches the live roster, agreeing with class.learnerCount'
+    );
+
+    const counts = getActiveRosterCounts(PHONE_HASH);
+    assertLabel(
+      (counts.get(staleClassId) || 0) === 0,
+      'getActiveRosterCounts also reports 0 for the class with no real roster (used by GET /api/classes)'
+    );
+    assertLabel(
+      (counts.get(classId) || 0) === 3,
+      'getActiveRosterCounts reports the correct live count (3) for the earlier class with a real roster'
+    );
+  }
+
   console.log('\n' + '='.repeat(75));
   console.log(`${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);

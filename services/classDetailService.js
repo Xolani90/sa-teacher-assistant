@@ -248,7 +248,11 @@ function getClassDetail(phoneHash, classId) {
       name: classData.name,
       grade: classData.grade,
       subject: classData.subject,
-      learnerCount: classData.learner_count,
+      // Live roster count, not classData.learner_count (a write-time
+      // cache that can drift — see learnerRosterService.js's
+      // getActiveRosterCounts doc comment). Keeps this figure honest
+      // and in agreement with `learners` below it.
+      learnerCount: roster.length,
       createdAt: classData.created_at,
       updatedAt: classData.updated_at,
     },

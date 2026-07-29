@@ -117,22 +117,42 @@ function createGetInterventionPlanHandler({ getLearnerById, getLearnerInterventi
  * createGetInterventionPlanHandler above: tests stub getTeacherClasses
  * directly, no database required.
  *
+ * Uses learnerRosterService.getActiveRosterCounts(phoneHash) — NOT
+ * classes.learner_count — for the learnerCount on each class.
+ * classes.learner_count is a write-time cache (see
+ * learnerRosterService.js's syncLearnerCount) that can drift from the
+ * real roster: classes created via the legacy WhatsApp
+ * "NEW CLASS <name> | <count>" flow store a declared capacity there and
+ * never get a real `learners` row until a roster is actually captured.
+ * The dashboard is a trust surface — a class card that says "34
+ * learners" has to mean 34 rows exist, or clicking into it just looks
+ * broken (see docs/ARCHITECTURE.md's Class Detail note on this). WhatsApp
+ * flows that still read classes.learner_count directly (assessment
+ * capture's slot count, "NEW CLASS" confirmation, etc.) are unaffected
+ * by this change — that's a separate, intentional use of the same
+ * column as a capture-time capacity, not a headcount.
+ *
  * @param {Object} deps
  * @param {(phoneHash:string) => Object[]} deps.getTeacherClasses
+ * @param {(phoneHash:string) => Map<number,number>} deps.getActiveRosterCounts
  * @returns {(req, res) => void}
  */
-function createGetClassesHandler({ getTeacherClasses }) {
+function createGetClassesHandler({ getTeacherClasses, getActiveRosterCounts }) {
   /**
    * GET /api/classes
    *
    * @returns 200 { classes: [...] } — scoped to req.teacher.phoneHash;
-   *          an empty array for a teacher with no classes, not an error
+   *          an empty array for a teacher with no classes, not an error.
+   *          learnerCount reflects the live, active roster
+   *          (learners.removed_at IS NULL), not classes.learner_count.
    * @returns 500 if the underlying service throws
    */
   return function handleGetClasses(req, res) {
     let classes;
+    let rosterCounts;
     try {
       classes = getTeacherClasses(req.teacher.phoneHash);
+      rosterCounts = getActiveRosterCounts(req.teacher.phoneHash);
     } catch (err) {
       console.error('[API] getTeacherClasses failed:', err.message);
       return res.status(500).json({ error: 'Internal server error' });
@@ -144,7 +164,7 @@ function createGetClassesHandler({ getTeacherClasses }) {
         name: c.name,
         grade: c.grade,
         subject: c.subject,
-        learnerCount: c.learner_count,
+        learnerCount: rosterCounts.get(c.id) || 0,
         createdAt: c.created_at,
         updatedAt: c.updated_at,
       })),
@@ -282,6 +302,7 @@ function createGetClassDetailHandler({ getClassDetail }) {
 const { getLearnerById, getTeacherLearners } = require('../services/learnerRepository');
 const { getLearnerInterventionPlan } = require('../services/interventionService');
 const { getTeacherClasses } = require('../services/teacherWorkspaceService');
+const { getActiveRosterCounts } = require('../services/learnerRosterService');
 const { getStatusSnapshot } = require('../services/tseEvidenceService');
 const { getClassDetail } = require('../services/classDetailService');
 
@@ -292,7 +313,7 @@ router.get(
 
 router.get(
   '/classes',
-  createGetClassesHandler({ getTeacherClasses })
+  createGetClassesHandler({ getTeacherClasses, getActiveRosterCounts })
 );
 
 router.get(
