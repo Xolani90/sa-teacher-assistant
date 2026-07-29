@@ -273,6 +273,19 @@ function saveResource(phoneHash, resourceType, title, content, metadata = {}, ge
       `).run(phoneHash);
 
       rowid = result.lastInsertRowid;
+
+      // TSE Evidence Engine (Migration 034): tag this save as 'resource'
+      // evidence. Non-fatal by design — see tseEvidenceService.tagEvidence().
+      try {
+        require('./tseEvidenceService').tagEvidence(
+          phoneHash,
+          'resource',
+          'saved_resources',
+          rowid
+        );
+      } catch (evidenceErr) {
+        console.error('[TSE] saveResource evidence tagging failed:', evidenceErr.message);
+      }
       db.prepare('COMMIT').run();
     } catch (txErr) {
       try { db.prepare('ROLLBACK').run(); } catch (_) { /* best-effort */ }

@@ -756,6 +756,65 @@ function runMigrations() {
       ON auth_codes(phone_hash, expires_at);
   `);
 
+  // Migration 033: School calendar — resolves a term (1-4) for a given
+  // date, standalone reference table (not a per-teacher table). Seeded
+  // with default SA public-school term dates below; a school/teacher-
+  // specific override is not modeled yet (nothing consumes that today).
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS school_calendar (
+      id         INTEGER PRIMARY KEY AUTOINCREMENT,
+      year       INTEGER NOT NULL,
+      term       INTEGER NOT NULL,
+      start_date TEXT    NOT NULL,
+      end_date   TEXT    NOT NULL,
+      UNIQUE(year, term)
+    );
+  `);
+
+  // Seed default terms (idempotent — INSERT OR IGNORE on the UNIQUE(year,term))
+  // Approximate SA public school calendar.
+  const calendarSeed = [
+    [2025, 1, '2025-01-15', '2025-03-28'],
+    [2025, 2, '2025-04-08', '2025-06-27'],
+    [2025, 3, '2025-07-22', '2025-10-03'],
+    [2025, 4, '2025-10-13', '2025-12-10'],
+    [2026, 1, '2026-01-14', '2026-03-27'],
+    [2026, 2, '2026-04-07', '2026-06-26'],
+    [2026, 3, '2026-07-21', '2026-10-02'],
+    [2026, 4, '2026-10-12', '2026-12-09'],
+  ];
+  const insertTerm = db.prepare(`
+    INSERT OR IGNORE INTO school_calendar (year, term, start_date, end_date)
+    VALUES (?, ?, ?, ?)
+  `);
+  for (const row of calendarSeed) insertTerm.run(...row);
+
+  // Migration 034: TSE (Teacher Support Evidence) Evidence Engine links.
+  // Every successful write to saved_resources / assessments / reports /
+  // intervention_plans / curriculum_coverage / observation_assessments
+  // gets a corresponding row here (see services/tseEvidenceService.js),
+  // tagging it with a category so MY GROWTH / the dashboard can query
+  // "what evidence does this teacher have" without joining six tables.
+  //
+  // UNIQUE(source_table, source_id, category) makes tagging idempotent —
+  // both the live hooks and the one-time backfill script
+  // (scripts/backfillTseEvidence.js) can call tagEvidence() safely more
+  // than once for the same source row without creating duplicates.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS tse_evidence_links (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash    TEXT    NOT NULL,
+      category      TEXT    NOT NULL,
+      source_table  TEXT    NOT NULL,
+      source_id     INTEGER NOT NULL,
+      term          INTEGER,
+      created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
+      UNIQUE(source_table, source_id, category)
+    );
+    CREATE INDEX IF NOT EXISTS idx_tse_evidence_phone
+      ON tse_evidence_links(phone_hash, category);
+  `);
+
   console.log('[DB] Migrations complete');
 }
 

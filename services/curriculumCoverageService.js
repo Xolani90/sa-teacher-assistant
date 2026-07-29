@@ -59,6 +59,28 @@ function markTopicCovered(phoneHash, grade, subject, term, topic) {
     ON CONFLICT(phone_hash, grade, subject, term, topic) 
     DO UPDATE SET covered = 1, date_covered = datetime('now'), updated_at = datetime('now')
   `).run(phoneHash, grade, subject, term, topic);
+
+  // TSE Evidence Engine (Migration 034): tag as 'curriculum' evidence.
+  // markTopicCovered is an upsert, so lastInsertRowid isn't reliable
+  // across the insert/update branches — resolve the row id with a
+  // follow-up SELECT on the composite key instead. Non-fatal.
+  try {
+    const row = db.prepare(`
+      SELECT id FROM curriculum_coverage
+      WHERE phone_hash = ? AND grade = ? AND subject = ? AND term = ? AND topic = ?
+    `).get(phoneHash, grade, subject, term, topic);
+    if (row) {
+      require('./tseEvidenceService').tagEvidence(
+        phoneHash,
+        'curriculum',
+        'curriculum_coverage',
+        row.id,
+        term
+      );
+    }
+  } catch (evidenceErr) {
+    console.error('[TSE] markTopicCovered evidence tagging failed:', evidenceErr.message);
+  }
 }
 
 /**

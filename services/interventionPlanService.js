@@ -346,7 +346,7 @@ function generateInterventionSummary(plan) {
 function saveInterventionPlan(plan) {
   const db = getDb();
 
-  db.prepare(`
+  const result = db.prepare(`
     INSERT INTO intervention_plans (
       phone_hash, assessment_id, problem_area, target_group, goals, duration_days,
       strategies, resources, monitoring_plan, success_indicators, status
@@ -364,6 +364,24 @@ function saveInterventionPlan(plan) {
     plan.successIndicators,
     plan.status
   );
+
+  const planId = result.lastInsertRowid;
+
+  // TSE Evidence Engine (Migration 034): tag as 'intervention' evidence.
+  // Non-fatal. Return value added here (previously void) — no existing
+  // caller uses saveInterventionPlan()'s return value, so this is safe.
+  try {
+    require('./tseEvidenceService').tagEvidence(
+      plan.phoneHash,
+      'intervention',
+      'intervention_plans',
+      planId
+    );
+  } catch (evidenceErr) {
+    console.error('[TSE] saveInterventionPlan evidence tagging failed:', evidenceErr.message);
+  }
+
+  return planId;
 }
 
 /**

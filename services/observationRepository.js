@@ -138,6 +138,20 @@ function saveObservationSubmission(phoneHash, header, records, classId = null, c
       recordCount: records.length,
     });
 
+    // TSE Evidence Engine (Migration 034): tag as 'observation' evidence.
+    // Deliberately after COMMIT, not inside the transaction — a tagging
+    // failure must not roll back an already-durable observation save.
+    try {
+      require('./tseEvidenceService').tagEvidence(
+        phoneHash,
+        'observation',
+        'observation_assessments',
+        assessmentId
+      );
+    } catch (evidenceErr) {
+      console.error('[TSE] saveObservationSubmission evidence tagging failed:', evidenceErr.message);
+    }
+
     return { assessmentId, recordCount: records.length };
   } catch (err) {
     logger.error('Failed to save observation submission', { phoneHash, error: err.message });

@@ -177,7 +177,22 @@ function storeAssessment(phoneHash, assessmentData) {
       assessmentData.blueprintVersion ?? null
     );
 
-    return result.lastInsertRowid;
+    const assessmentId = result.lastInsertRowid;
+
+    // TSE Evidence Engine (Migration 034): tag as 'assessment' evidence.
+    // Non-fatal — see tseEvidenceService.tagEvidence().
+    try {
+      require('./tseEvidenceService').tagEvidence(
+        phoneHash,
+        'assessment',
+        'assessments',
+        assessmentId
+      );
+    } catch (evidenceErr) {
+      console.error('[TSE] storeAssessment evidence tagging failed:', evidenceErr.message);
+    }
+
+    return assessmentId;
   } catch (error) {
     console.error('Failed to store assessment:', error.message);
     return null;
@@ -387,4 +402,9 @@ module.exports = {
   generateDiagnosticSummary,
   getDiagnosticHistory,
   validateAssessmentData,
+  // Exposed for testability (tests/tseEvidenceHooks.test.js) — matches
+  // the __testExports convention used elsewhere (routes/api.js). Not
+  // previously exported; processAssessmentData() remains the only
+  // production caller.
+  storeAssessment,
 };

@@ -400,10 +400,23 @@ function generateAdministratorSummary(assessmentIds) {
  */
 function saveReport(phoneHash, assessmentId, reportType, content, learnerName = null) {
   const db = getDb();
-  db.prepare(`
+  const result = db.prepare(`
     INSERT INTO reports (phone_hash, assessment_id, report_type, learner_name, content)
     VALUES (?, ?, ?, ?, ?)
   `).run(phoneHash, assessmentId, reportType, learnerName, content);
+
+  const reportId = result.lastInsertRowid;
+
+  // TSE Evidence Engine (Migration 034): tag as 'assessment' evidence
+  // (a diagnostic/HOD/parent report is downstream evidence of an
+  // assessment, not a separate category). Non-fatal.
+  try {
+    require('./tseEvidenceService').tagEvidence(phoneHash, 'assessment', 'reports', reportId);
+  } catch (evidenceErr) {
+    console.error('[TSE] saveReport evidence tagging failed:', evidenceErr.message);
+  }
+
+  return reportId;
 }
 
 /**
