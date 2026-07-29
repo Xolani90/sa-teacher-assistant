@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useTeacher } from '../auth/TeacherContext';
 import { useTheme } from '../theme/ThemeContext';
+import logo from '../assets/logo.png';
 
 const NAV_ITEMS = [
   { to: '/', label: 'Overview', icon: '◆', end: true },
@@ -33,22 +34,16 @@ export default function Layout({ children }) {
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', padding: '0 var(--space-2)' }}>
-          <span
+          <img
+            src={logo}
+            alt="SA Teacher Assistant"
             style={{
               width: 28,
               height: 28,
               borderRadius: 'var(--radius-sm)',
-              background: 'var(--color-accent)',
-              color: '#fff',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontWeight: 700,
-              fontSize: 'var(--text-sm)',
+              objectFit: 'cover',
             }}
-          >
-            S
-          </span>
+          />
           <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>SA Teacher</span>
         </div>
 
