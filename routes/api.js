@@ -193,10 +193,39 @@ function createGetLearnersHandler({ getTeacherLearners }) {
   };
 }
 
+/**
+ * Dependency-injected for the same reason as createGetLearnersHandler
+ * above: tests stub getStatusSnapshot directly, no database required.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string) => Object} deps.getStatusSnapshot
+ * @returns {(req, res) => void}
+ */
+function createGetTseStatusHandler({ getStatusSnapshot }) {
+  /**
+   * GET /api/tse/status
+   *
+   * @returns 200 { counts, latest, missingCategories } — scoped to
+   *          req.teacher.phoneHash
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetTseStatus(req, res) {
+    let snapshot;
+    try {
+      snapshot = getStatusSnapshot(req.teacher.phoneHash);
+    } catch (err) {
+      console.error('[API] getStatusSnapshot failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+    return res.status(200).json(snapshot);
+  };
+}
+
 // Real wiring — the only place this file touches actual services.
 const { getLearnerById, getTeacherLearners } = require('../services/learnerRepository');
 const { getLearnerInterventionPlan } = require('../services/interventionService');
 const { getTeacherClasses } = require('../services/teacherWorkspaceService');
+const { getStatusSnapshot } = require('../services/tseEvidenceService');
 
 router.get(
   '/learners/:learnerId/intervention-plan',
@@ -212,10 +241,15 @@ router.get(
   '/learners',
   createGetLearnersHandler({ getTeacherLearners })
 );
+router.get(
+  '/tse/status',
+  createGetTseStatusHandler({ getStatusSnapshot })
+);
 
 module.exports = router;
 module.exports.__testExports = {
   createGetInterventionPlanHandler,
   createGetClassesHandler,
   createGetLearnersHandler,
+  createGetTseStatusHandler,
 };
