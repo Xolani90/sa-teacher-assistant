@@ -1,7 +1,7 @@
 # ADR-011: QMS Domain Model
 
 ## Status
-Proposed — design only, no implementation.
+Accepted
 
 **Depends on:** ADR-010 (TSE is the evidence infrastructure for QMS).
 
@@ -69,6 +69,25 @@ not to introduce a standing duplicate column that can drift out of sync
 with the system that actually owns that data.
 
 ### 2. QMS-owned entities
+
+**Ownership identifier — `phone_hash`, not `teacher_id`.** All three QMS
+tables use `phone_hash` as the teacher-ownership column, matching every
+other teacher-scoped table in this schema (`learners`, `assessments`,
+`tse_evidence_links`, and the rest). This is a deliberate consistency
+choice, not an oversight: ADR-008 establishes `teacher.id` as the JWT
+subject specifically because it's more stable than `phone_hash` for
+token issuance (§4.1 of that ADR), but the *data layer* has used
+`phone_hash` as the ownership key throughout, predating and independent
+of ADR-008's auth work. Introducing `teacher_id` as the ownership column
+only for QMS tables would create a mixed identity model — some
+teacher-owned tables keyed one way, new ones keyed another — for no
+present benefit. QMS follows the existing WhatsApp-first identity model
+established across the schema and does not introduce `teacher_id` as an
+ownership key at this stage. If a genuine multi-channel identity
+requirement emerges later (e.g. a teacher's ownership needing to survive
+a phone number change in a way `phone_hash` can't), that is a schema-wide
+migration decision affecting every existing table, not something QMS
+tables should diverge on unilaterally.
 
 **Reflection** (`qms_reflections`) — teacher-authored prose reflecting on
 their own practice for a term, optionally informed by evidence. Editable,
