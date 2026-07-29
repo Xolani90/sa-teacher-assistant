@@ -72,6 +72,7 @@ const observationState        = new SessionStore('observation',        30 * 60 *
 const observationHistoryState = new SessionStore('observationHistory',  15 * 60 * 1000);
 const assessmentSessionState  = new SessionStore('assessmentSession',   24 * 60 * 60 * 1000); // ADR-006 — long TTL: a teacher may resume marks capture the next day
 const rosterState             = new SessionStore('roster',              30 * 60 * 1000); // ADR-006 PR3 — ROSTER/ADD/REMOVE/CLEAR
+const reflectionState          = new SessionStore('reflection',          30 * 60 * 1000);
 const saveLock = new Set(); // B5-F1: per-phone SAVE in-flight lock (try/finally in SAVE handler)
 
 // ── Observation flow module (extracted from this file) ─────────────────────
@@ -100,6 +101,22 @@ function buildObservationDeps() {
     getTeacherClasses, // ADR-004: class-context resolution
     formatClassSelectionPrompt,
     matchClassSelection,
+  });
+}
+
+// ── Reflection flow module ──────────────────────────────────────────────────
+const { handleReflectionFlow } = require('../flows/reflectionFlow');
+const { createReflection } = require('../services/reflectionService');
+const { getCurrentTerm } = require('../services/schoolCalendarRepository');
+
+function buildReflectionDeps() {
+  return Object.freeze({
+    reflectionState,
+    safeSendMessage,
+    parseIntent,
+    hashPhone,
+    createReflection,
+    getCurrentTerm,
   });
 }
 
@@ -406,9 +423,12 @@ function buildProcessMessageDeps() {
     observationHistoryState,
     assessmentSessionState,
     rosterState,
+    reflectionState,
     handleObservationFlow,
     buildObservationDeps,
     handleObservationHistoryFlow,
+    handleReflectionFlow,
+    buildReflectionDeps,
     handleAssessmentSessionFlow,
     buildAssessmentSessionDeps,
     handleRosterFlow,

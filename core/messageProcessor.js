@@ -150,7 +150,8 @@ async function processMessage(message, deps) {
     deps.observationState.get(phoneHash) ||
     deps.observationHistoryState.get(phoneHash) ||
     deps.assessmentSessionState.get(phoneHash) ||
-    deps.rosterState.get(phoneHash)
+    deps.rosterState.get(phoneHash) ||
+    deps.reflectionState.get(phoneHash)
   );
 
   if (alreadyMidFlow) {
@@ -159,6 +160,7 @@ async function processMessage(message, deps) {
     // order below so behavior is identical to the classified path.
     if (await deps.handleObservationFlow(from, text, null, deps.buildObservationDeps())) return;
     if (await deps.handleObservationHistoryFlow(from, text, null, deps.buildObservationDeps())) return;
+    if (await deps.handleReflectionFlow(from, text, null, deps.buildReflectionDeps())) return;
     if (await deps.handleAssessmentSessionFlow(from, text, message, null, deps.buildAssessmentSessionDeps())) return;
     if (await deps.handleRosterFlow(from, text, message, null, deps.buildRosterDeps())) return;
     if (await deps.handleReportCommentFlow(from, text, null, deps.buildReportCommentDeps())) return;
@@ -216,6 +218,10 @@ async function processMessage(message, deps) {
   // ── Observation history multi-turn flow (list + numbered selection) ────
   const observationHistoryHandled = await deps.handleObservationHistoryFlow(from, text, intent, deps.buildObservationDeps());
   if (observationHistoryHandled) return;
+
+  // ── Reflection multi-turn flow ──────────────────────────────────────
+  const reflectionHandled = await deps.handleReflectionFlow(from, text, intent, deps.buildReflectionDeps());
+  if (reflectionHandled) return;
 
   // ── Assessment session multi-turn flow (ADR-006) ────────────────────
   // Checked immediately after the observation flows and before every
