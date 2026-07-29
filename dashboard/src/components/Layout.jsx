@@ -38,10 +38,11 @@ export default function Layout({ children }) {
             src={logo}
             alt="SA Teacher Assistant"
             style={{
-              width: 28,
-              height: 28,
-              borderRadius: 'var(--radius-sm)',
+              width: 36,
+              height: 36,
+              borderRadius: '50%',
               objectFit: 'cover',
+              flexShrink: 0,
             }}
           />
           <span style={{ fontWeight: 600, fontSize: 'var(--text-base)' }}>SA Teacher</span>
