@@ -28,8 +28,12 @@
  * and no higher-level consumer (WhatsApp, PDF, dashboard) should reach
  * past InterventionService into Mastery/Progress/Coverage/Timeline
  * directly once InterventionService exists for a given use case.
+ *
+ * saveLearnerInterventionPlan() (below) is this module's first write
+ * path — everything above it remains pure composition/read-only.
  */
 
+const { getDb } = require('../utils/database');
 const masteryService = require('./masteryService');
 
 /**
@@ -214,9 +218,106 @@ function getLearnerInterventionPlanForSubject(learnerId, subject, options = {}) 
   return buildPlan(mastery);
 }
 
+/**
+ * Persists a single InterventionPlan (as produced by buildPlan /
+ * getLearnerInterventionPlanForSubject) to intervention_plans
+ * (Migration 036's subject column).
+ *
+ * Dedup key: (learner_id, subject) scoped to status = 'active'. One
+ * active learner-level plan per subject at a time — a second call for
+ * the same learner+subject updates the existing row in place (refreshed
+ * problem_area/goals/strategies/updated_at) rather than inserting a
+ * duplicate. assessment_id is attached as context via COALESCE (kept if
+ * already set, filled in if not) — it is not part of identity, since a
+ * MasteryReport draws on multiple assessments over time, not one.
+ *
+ * Deliberately separate from interventionPlanService.js's
+ * saveInterventionPlan(), which persists a different, assessment-scoped
+ * plan shape (problem_area/target_group/goals as AI/rules-generated
+ * prose keyed on assessment_id, no learner_id/subject identity). Both
+ * write to the same intervention_plans table but never collide: this
+ * writer's rows are identified by (learner_id, subject, status='active'),
+ * the other's by assessment_id — and this writer never touches rows it
+ * didn't create (it only ever SELECTs/UPDATEs by learner_id+subject).
+ *
+ * @param {InterventionPlan} plan
+ * @param {{assessmentId?: number|null}} [options]
+ * @returns {number} the intervention_plans row id (existing or newly inserted)
+ */
+function saveLearnerInterventionPlan(plan, { assessmentId = null } = {}) {
+  const db = getDb();
+
+  const learner = db.prepare(`SELECT phone_hash FROM learners WHERE id = ?`).get(plan.learnerId);
+  if (!learner) {
+    throw new Error(`saveLearnerInterventionPlan: no learner found for learnerId ${plan.learnerId}`);
+  }
+  const phoneHash = learner.phone_hash;
+
+  const problemArea = plan.focusTopics && plan.focusTopics.length > 0
+    ? `Focus topics: ${plan.focusTopics.join(', ')}`
+    : `General performance in ${plan.subject}`;
+  const goals = plan.recommendedActions.join('\n');
+  const strategies = JSON.stringify(plan.recommendedActions);
+  const durationDays = 14;
+
+  const existing = db.prepare(`
+    SELECT id FROM intervention_plans
+    WHERE learner_id = ? AND subject = ? AND status = 'active'
+  `).get(plan.learnerId, plan.subject);
+
+  let planId;
+  if (existing) {
+    db.prepare(`
+      UPDATE intervention_plans
+      SET problem_area = ?,
+          goals = ?,
+          strategies = ?,
+          assessment_id = COALESCE(assessment_id, ?),
+          updated_at = datetime('now')
+      WHERE id = ?
+    `).run(problemArea, goals, strategies, assessmentId, existing.id);
+    planId = existing.id;
+  } else {
+    const result = db.prepare(`
+      INSERT INTO intervention_plans (
+        phone_hash, assessment_id, problem_area, target_group, goals,
+        duration_days, strategies, status, learner_id, subject
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
+    `).run(
+      phoneHash,
+      assessmentId,
+      problemArea,
+      `Learner ${plan.learnerId}`,
+      goals,
+      durationDays,
+      strategies,
+      plan.learnerId,
+      plan.subject
+    );
+    planId = result.lastInsertRowid;
+
+    // TSE Evidence Engine (Migration 034): tag as 'intervention' evidence,
+    // same convention as interventionPlanService.js's saveInterventionPlan().
+    // Non-fatal.
+    try {
+      require('./tseEvidenceService').tagEvidence(
+        phoneHash,
+        'intervention',
+        'intervention_plans',
+        planId
+      );
+    } catch (evidenceErr) {
+      console.error('[TSE] saveLearnerInterventionPlan evidence tagging failed:', evidenceErr.message);
+    }
+  }
+
+  return planId;
+}
+
 module.exports = {
   getLearnerInterventionPlan,
   getLearnerInterventionPlanForSubject,
+  saveLearnerInterventionPlan,
   // Exported for unit testing as pure functions; not part of the public
   // contract for other services (same pattern as masteryService.js).
   determinePriority,

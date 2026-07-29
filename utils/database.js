@@ -709,9 +709,7 @@ function runMigrations() {
     CREATE INDEX IF NOT EXISTS idx_assessments_blueprint
       ON assessments(blueprint_id);
   `);
-// ── Paste this block into utils/database.js ────────────────────────────────
-// Location: right before the final `console.log('[DB] Migrations complete');`
-// line at the end of runMigrations() (after the Migration 029 index block).
+
   // Migration 032: WhatsApp OTP persistence (ADR-008 PR22A). Standalone
   // table, not an ALTER — mirrors the rate_limit_events template
   // (Migration 023) rather than the alterations[] array, since this is a
@@ -813,6 +811,50 @@ function runMigrations() {
     );
     CREATE INDEX IF NOT EXISTS idx_tse_evidence_phone
       ON tse_evidence_links(phone_hash, category);
+  `);
+
+  // Migration 035: link intervention plans to learner identity, and add
+  // a slot for the plan's eventual outcome (same convention as Migration
+  // 025 — column shipped ahead of the writer). learner_id is nullable
+  // and additive: no existing intervention_plans row is touched, and any
+  // write path that doesn't yet resolve a single learner (e.g. a
+  // group-level plan) continues to work with learner_id left NULL.
+  // outcome_status is a free-form nullable TEXT slot for whenever a plan
+  // is closed out (e.g. 'improved' | 'no_change' | 'escalated'). Nothing
+  // writes to either column yet — that's deliberate. The follow-up (not
+  // this migration) is updating interventionService.js's read-side
+  // buildPlan() and whatever future write path persists an
+  // InterventionPlan to actually populate learner_id. This unblocks
+  // PR20 (GET /api/learners) without needing a second migration later.
+  for (const stmt of [
+    `ALTER TABLE intervention_plans ADD COLUMN learner_id INTEGER REFERENCES learners(id)`,
+    `ALTER TABLE intervention_plans ADD COLUMN outcome_status TEXT`,
+  ]) {
+    try { db.exec(stmt); } catch (_) { /* column already exists */ }
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_intervention_plans_learner
+      ON intervention_plans(learner_id);
+  `);
+
+  // Migration 036: intervention_plans.subject — the dedup key needed to
+  // enforce "one active learner-level intervention plan per subject".
+  // InterventionPlan (services/interventionService.js) is computed per
+  // (learnerId, subject) from MasteryService, but until now
+  // intervention_plans had no subject column, so persisting one of these
+  // rollups had no reliable identity to dedup against short of
+  // string-matching problem_area, which is fragile. Nullable and
+  // additive: interventionPlanService.js's existing assessment-scoped
+  // writer (saveInterventionPlan()) is untouched and continues to leave
+  // this column NULL — only the new learner+subject writer
+  // (interventionService.saveLearnerInterventionPlan(), added alongside
+  // this migration) populates it.
+  try {
+    db.exec(`ALTER TABLE intervention_plans ADD COLUMN subject TEXT`);
+  } catch (_) { /* column already exists */ }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_intervention_plans_learner_subject_status
+      ON intervention_plans(learner_id, subject, status);
   `);
 
   console.log('[DB] Migrations complete');

@@ -87,6 +87,27 @@ function processAssessmentData(phoneHash, assessmentData) {
 
   storeResult.skipped = [...blueprintSkipped, ...storeResult.skipped];
 
+  // Step 2a: persist a per-learner, per-subject InterventionPlan
+  // (services/interventionService.js, Migration 036) for every learner
+  // resolved above. This is deliberately distinct from Step 6 below
+  // (interventionPlanService's assessment-scoped, group-level rules
+  // plan) — different table identity (learner_id + subject vs
+  // assessment_id), no collision. Best-effort per learner: one bad
+  // learnerId must not fail the whole upload, since results/analyses
+  // for the rest of the class are already committed by this point.
+  if (storeResult.learnerIds && storeResult.learnerIds.length > 0) {
+    const { getLearnerInterventionPlanForSubject, saveLearnerInterventionPlan } = require('./interventionService');
+    const uniqueLearnerIds = [...new Set(storeResult.learnerIds)];
+    for (const learnerId of uniqueLearnerIds) {
+      try {
+        const plan = getLearnerInterventionPlanForSubject(learnerId, assessmentData.subject);
+        saveLearnerInterventionPlan(plan, { assessmentId });
+      } catch (err) {
+        console.error('[diagnosticWorkflow] Failed to persist learner intervention plan:', err.message);
+      }
+    }
+  }
+
   // Step 3: Run item analysis
   const itemAnalysis = performItemAnalysis(assessmentId);
   if (!itemAnalysis.error) {
@@ -206,7 +227,15 @@ function storeAssessment(phoneHash, assessmentData) {
  *   identity resolution — see ADR-003; identity is scoped per-teacher)
  * @param {number} assessmentId - Assessment ID
  * @param {Array} learnerResults - Array of learner result objects
- * @returns {boolean} Success status
+ * @returns {{success: boolean, skipped: string[], learnerIds?: number[]}}
+ *   learnerIds is the resolved learner.id for every row actually
+ *   inserted (may contain duplicates if the same learner appears more
+ *   than once in learnerResults — callers that need uniqueness should
+ *   dedup, e.g. via a Set). Added so processAssessmentData() can persist
+ *   a per-learner InterventionPlan (Step 2a) without a second query;
+ *   every existing caller of storeLearnerResults() continues to work
+ *   unchanged since this is purely an additional field on the return
+ *   object, not a signature change.
  */
 function storeLearnerResults(phoneHash, assessmentId, learnerResults, classId = null) {
   const db = getDb();
@@ -227,6 +256,7 @@ function storeLearnerResults(phoneHash, assessmentId, learnerResults, classId = 
     `);
 
     const skipped = [];
+    const learnerIds = [];
     for (const result of learnerResults) {
       // A malformed row (e.g. a teacher typo like "Thabo 5/0") produces
       // Infinity/NaN here, which then poisons classAverage for the ENTIRE
@@ -257,6 +287,7 @@ function storeLearnerResults(phoneHash, assessmentId, learnerResults, classId = 
         classId,
         learnerName: result.learnerName,
       });
+      learnerIds.push(learner.id);
 
       insert.run(
         assessmentId,
@@ -274,7 +305,7 @@ function storeLearnerResults(phoneHash, assessmentId, learnerResults, classId = 
     }
 
     db.prepare('COMMIT').run();
-    return { success: true, skipped };
+    return { success: true, skipped, learnerIds };
   } catch (error) {
     try { db.prepare('ROLLBACK').run(); } catch (_) { /* best-effort */ }
     console.error('Failed to store learner results:', error.message);
