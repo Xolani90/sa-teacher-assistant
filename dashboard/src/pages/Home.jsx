@@ -215,7 +215,7 @@ export default function Home() {
         ) : (
           <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-4">
             {classes.slice(0, 6).map((c) => (
-              <Card key={c.id} onClick={() => navigate('/classes')} className="p-5">
+              <Card key={c.id} onClick={() => navigate(`/classes/${c.id}`)} className="p-5">
                 <div className="mb-3 flex items-center gap-3">
                   <IconBadge tone="indigo" size={40}>👥</IconBadge>
                   <div className="min-w-0">

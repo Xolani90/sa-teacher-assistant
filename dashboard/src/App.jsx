@@ -2,7 +2,9 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { TeacherProvider } from './auth/TeacherContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
+import Home from './pages/Home';
+import Classes from './pages/Classes';
+import ClassDetail from './pages/ClassDetail';
 
 export default function App() {
   return (
@@ -14,7 +16,23 @@ export default function App() {
             path="/"
             element={
               <ProtectedRoute>
-                <Dashboard />
+                <Home />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/classes"
+            element={
+              <ProtectedRoute>
+                <Classes />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/classes/:classId"
+            element={
+              <ProtectedRoute>
+                <ClassDetail />
               </ProtectedRoute>
             }
           />
