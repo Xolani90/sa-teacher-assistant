@@ -2,6 +2,55 @@
 
 const { handleReflectionFlow } = require('../flows/reflectionFlow');
 
+let passed = 0;
+let failed = 0;
+
+function assert(condition, message) {
+  if (condition) {
+    passed++;
+    console.log(`  ✅ ${message}`);
+  } else {
+    failed++;
+    console.log(`  ❌ FAILED: ${message}`);
+  }
+}
+
+function assertEqual(actual, expected, message) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  if (!ok) {
+    console.log(`     expected: ${JSON.stringify(expected)}`);
+    console.log(`     actual:   ${JSON.stringify(actual)}`);
+  }
+  assert(ok, message);
+}
+
+function assertContains(haystack, needle, message) {
+  assert(typeof haystack === 'string' && haystack.includes(needle), message);
+}
+
+function assertNotContains(haystack, needle, message) {
+  assert(typeof haystack === 'string' && !haystack.includes(needle), message);
+}
+
+function assertMatch(str, regex, message) {
+  assert(typeof str === 'string' && regex.test(str), message);
+}
+
+/**
+ * Minimal mock function tracker — replaces jest.fn() for plain-node execution.
+ * Records calls and supports a fixed return value or a custom implementation.
+ */
+function createMockFn(implementation) {
+  const calls = [];
+  const fn = (...args) => {
+    calls.push(args);
+    return implementation ? implementation(...args) : undefined;
+  };
+  fn.calls = calls;
+  fn.callCount = () => calls.length;
+  return fn;
+}
+
 /**
  * Minimal in-memory SessionStore stand-in — mirrors the get/set/delete
  * shape reflectionFlow.js expects, with per-phoneHash isolation.
@@ -18,11 +67,11 @@ function createSessionStore() {
 
 function createDeps(overrides = {}) {
   const reflectionState = createSessionStore();
-  const safeSendMessage = jest.fn().mockResolvedValue(undefined);
-  const parseIntent = jest.fn().mockReturnValue({ type: 'reflection' });
-  const hashPhone = jest.fn((from) => `hash:${from}`);
-  const createReflection = jest.fn().mockReturnValue({ id: 1 });
-  const getCurrentTerm = jest.fn().mockReturnValue(2);
+  const safeSendMessage = createMockFn(() => Promise.resolve(undefined));
+  const parseIntent = createMockFn(() => ({ type: 'reflection' }));
+  const hashPhone = createMockFn((from) => `hash:${from}`);
+  const createReflection = createMockFn(() => ({ id: 1 }));
+  const getCurrentTerm = createMockFn(() => 2);
 
   return {
     reflectionState,
@@ -49,157 +98,184 @@ async function runHappyPathUpTo(deps, from, step) {
   await handleReflectionFlow(from, 'More practical examples.', null, deps); // improvement -> reviewSummary
 }
 
-describe('reflectionFlow', () => {
-  describe('happy path', () => {
-    it('collects all three fields and saves on YES', async () => {
-      const deps = createDeps();
-      const from = '+27000000001';
+async function run() {
+  console.log('reflectionFlow tests');
+  console.log('='.repeat(60));
 
-      await runHappyPathUpTo(deps, from, 'reviewSummary');
-      await handleReflectionFlow(from, 'YES', null, deps);
+  // ── happy path ─────────────────────────────────────────────
+  console.log('\n── happy path ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000001';
 
-      expect(deps.createReflection).toHaveBeenCalledTimes(1);
-      const [phoneHash, payload] = deps.createReflection.mock.calls[0];
+    await runHappyPathUpTo(deps, from, 'reviewSummary');
+    await handleReflectionFlow(from, 'YES', null, deps);
 
-      expect(phoneHash).toBe('hash:+27000000001');
-      expect(payload.term).toBe(2);
-      expect(payload.aiAssisted).toBe(false);
-      expect(payload.evidenceLinkIds).toEqual([]);
-      expect(payload.content).toContain('Lesson:\nFractions Grade 6');
-      expect(payload.content).toContain('What went well:\nLearners understood equivalent fractions.');
-      expect(payload.content).toContain('What I would improve:\nMore practical examples.');
+    assert(deps.createReflection.callCount() === 1, 'collects all three fields and calls createReflection exactly once on YES');
+    const [phoneHash, payload] = deps.createReflection.calls[0];
 
-      // state cleared after save
-      expect(deps.reflectionState.get('hash:+27000000001')).toBeNull();
-    });
-  });
+    assertEqual(phoneHash, 'hash:+27000000001', 'phoneHash passed to createReflection is correct');
+    assertEqual(payload.term, 2, 'term is carried through from getCurrentTerm');
+    assertEqual(payload.aiAssisted, false, 'aiAssisted defaults to false');
+    assertEqual(payload.evidenceLinkIds, [], 'evidenceLinkIds defaults to empty array');
+    assertContains(payload.content, 'Lesson:\nFractions Grade 6', 'content includes the lesson field');
+    assertContains(payload.content, 'What went well:\nLearners understood equivalent fractions.', 'content includes the went-well field');
+    assertContains(payload.content, 'What I would improve:\nMore practical examples.', 'content includes the improvement field');
 
-  describe('correction path', () => {
-    it('replaces only the chosen field and saves once with the corrected content', async () => {
-      const deps = createDeps();
-      const from = '+27000000002';
+    assert(deps.reflectionState.get('hash:+27000000001') === null, 'state is cleared after save');
+  }
 
-      await runHappyPathUpTo(deps, from, 'reviewSummary');
-      await handleReflectionFlow(from, 'NO', null, deps); // -> awaitingCorrectionChoice
-      await handleReflectionFlow(from, '1', null, deps); // choose Lesson -> awaitingLesson (correcting)
-      await handleReflectionFlow(from, 'Fractions Grade 7 (corrected)', null, deps); // -> back to reviewSummary
-      await handleReflectionFlow(from, 'YES', null, deps);
+  // ── correction path ────────────────────────────────────────
+  console.log('\n── correction path ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000002';
 
-      expect(deps.createReflection).toHaveBeenCalledTimes(1);
-      const [, payload] = deps.createReflection.mock.calls[0];
+    await runHappyPathUpTo(deps, from, 'reviewSummary');
+    await handleReflectionFlow(from, 'NO', null, deps); // -> awaitingCorrectionChoice
+    await handleReflectionFlow(from, '1', null, deps); // choose Lesson -> awaitingLesson (correcting)
+    await handleReflectionFlow(from, 'Fractions Grade 7 (corrected)', null, deps); // -> back to reviewSummary
+    await handleReflectionFlow(from, 'YES', null, deps);
 
-      expect(payload.content).toContain('Lesson:\nFractions Grade 7 (corrected)');
-      expect(payload.content).toContain('What went well:\nLearners understood equivalent fractions.');
-      expect(payload.content).toContain('What I would improve:\nMore practical examples.');
-      expect(payload.content).not.toContain('Fractions Grade 6\n');
-    });
-  });
+    assert(deps.createReflection.callCount() === 1, 'saves exactly once after a correction');
+    const [, payload] = deps.createReflection.calls[0];
 
-  describe('cancel', () => {
-    const cancelSteps = [
-      { name: 'awaitingLesson', drive: async (deps, from) => {
+    assertContains(payload.content, 'Lesson:\nFractions Grade 7 (corrected)', 'content reflects the corrected lesson field');
+    assertContains(payload.content, 'What went well:\nLearners understood equivalent fractions.', 'went-well field untouched by the correction');
+    assertContains(payload.content, 'What I would improve:\nMore practical examples.', 'improvement field untouched by the correction');
+    assertNotContains(payload.content, 'Fractions Grade 6\n', 'original (pre-correction) lesson text is gone');
+  }
+
+  // ── cancel ─────────────────────────────────────────────────
+  console.log('\n── cancel ──');
+  const cancelSteps = [
+    {
+      name: 'awaitingLesson',
+      drive: async (deps, from) => {
         await handleReflectionFlow(from, 'REFLECT', null, deps);
-      } },
-      { name: 'awaitingWentWell', drive: async (deps, from) => {
+      },
+    },
+    {
+      name: 'awaitingWentWell',
+      drive: async (deps, from) => {
         await handleReflectionFlow(from, 'REFLECT', null, deps);
         await handleReflectionFlow(from, 'Lesson text', null, deps);
-      } },
-      { name: 'awaitingImprovement', drive: async (deps, from) => {
+      },
+    },
+    {
+      name: 'awaitingImprovement',
+      drive: async (deps, from) => {
         await handleReflectionFlow(from, 'REFLECT', null, deps);
         await handleReflectionFlow(from, 'Lesson text', null, deps);
         await handleReflectionFlow(from, 'Went well text', null, deps);
-      } },
-      { name: 'reviewSummary', drive: async (deps, from) => {
+      },
+    },
+    {
+      name: 'reviewSummary',
+      drive: async (deps, from) => {
         await runHappyPathUpTo(deps, from, 'reviewSummary');
-      } },
-      { name: 'awaitingCorrectionChoice', drive: async (deps, from) => {
+      },
+    },
+    {
+      name: 'awaitingCorrectionChoice',
+      drive: async (deps, from) => {
         await runHappyPathUpTo(deps, from, 'reviewSummary');
         await handleReflectionFlow(from, 'NO', null, deps);
-      } },
-    ];
+      },
+    },
+  ];
 
-    it.each(cancelSteps)('cancels cleanly from $name without ever saving', async ({ drive }) => {
-      const deps = createDeps();
-      const from = '+27000000003';
+  for (const { name, drive } of cancelSteps) {
+    const deps = createDeps();
+    const from = '+27000000003';
 
-      await drive(deps, from);
-      await handleReflectionFlow(from, 'CANCEL', null, deps);
+    await drive(deps, from);
+    await handleReflectionFlow(from, 'CANCEL', null, deps);
 
-      expect(deps.createReflection).not.toHaveBeenCalled();
-      expect(deps.reflectionState.get('hash:+27000000003')).toBeNull();
+    assert(deps.createReflection.callCount() === 0, `cancels cleanly from ${name} without ever saving`);
+    assert(deps.reflectionState.get('hash:+27000000003') === null, `state is cleared after CANCEL from ${name}`);
+  }
+
+  // ── timeout ────────────────────────────────────────────────
+  console.log('\n── timeout ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000004';
+    const phoneHash = 'hash:+27000000004';
+
+    deps.reflectionState.set(phoneHash, {
+      step: 'awaitingLesson',
+      lastActivity: Date.now() - 31 * 60 * 1000,
     });
-  });
 
-  describe('timeout', () => {
-    it('drops stale state and does not treat the message as handled', async () => {
-      const deps = createDeps();
-      const from = '+27000000004';
-      const phoneHash = 'hash:+27000000004';
+    const handled = await handleReflectionFlow(from, 'some text', null, deps);
 
-      deps.reflectionState.set(phoneHash, {
-        step: 'awaitingLesson',
-        lastActivity: Date.now() - 31 * 60 * 1000,
-      });
+    assert(handled === false, 'drops stale state and does not treat the message as handled');
+    assert(deps.reflectionState.get(phoneHash) === null, 'stale state is removed');
+  }
 
-      const handled = await handleReflectionFlow(from, 'some text', null, deps);
+  // ── session isolation ──────────────────────────────────────
+  console.log('\n── session isolation ──');
+  {
+    const deps = createDeps();
+    const teacherA = '+27000000005';
+    const teacherB = '+27000000006';
 
-      expect(handled).toBe(false);
-      expect(deps.reflectionState.get(phoneHash)).toBeNull();
-    });
-  });
+    await handleReflectionFlow(teacherA, 'REFLECT', null, deps);
+    await handleReflectionFlow(teacherA, 'Teacher A lesson', null, deps);
 
-  describe('session isolation', () => {
-    it('keeps two teachers\' in-progress reflections independent', async () => {
-      const deps = createDeps();
-      const teacherA = '+27000000005';
-      const teacherB = '+27000000006';
+    await handleReflectionFlow(teacherB, 'REFLECT', null, deps);
+    await handleReflectionFlow(teacherB, 'Teacher B lesson', null, deps);
 
-      await handleReflectionFlow(teacherA, 'REFLECT', null, deps);
-      await handleReflectionFlow(teacherA, 'Teacher A lesson', null, deps);
+    const stateA = deps.reflectionState.get('hash:+27000000005');
+    const stateB = deps.reflectionState.get('hash:+27000000006');
 
-      await handleReflectionFlow(teacherB, 'REFLECT', null, deps);
-      await handleReflectionFlow(teacherB, 'Teacher B lesson', null, deps);
+    assertEqual(stateA.lesson, 'Teacher A lesson', "teacher A's in-progress lesson is correct");
+    assertEqual(stateB.lesson, 'Teacher B lesson', "teacher B's in-progress lesson is correct");
+    assert(stateA.lesson !== stateB.lesson, "keeps two teachers' in-progress reflections independent");
+  }
 
-      const stateA = deps.reflectionState.get('hash:+27000000005');
-      const stateB = deps.reflectionState.get('hash:+27000000006');
+  // ── term unavailable ───────────────────────────────────────
+  console.log('\n── term unavailable ──');
+  {
+    const deps = createDeps({ getCurrentTerm: createMockFn(() => null) });
+    const from = '+27000000007';
 
-      expect(stateA.lesson).toBe('Teacher A lesson');
-      expect(stateB.lesson).toBe('Teacher B lesson');
-      expect(stateA.lesson).not.toBe(stateB.lesson);
-    });
-  });
+    await runHappyPathUpTo(deps, from, 'reviewSummary');
+    await handleReflectionFlow(from, 'YES', null, deps);
 
-  describe('term unavailable', () => {
-    it('does not save and tells the teacher when getCurrentTerm returns null', async () => {
-      const deps = createDeps({ getCurrentTerm: jest.fn().mockReturnValue(null) });
-      const from = '+27000000007';
+    assert(deps.createReflection.callCount() === 0, 'does not save when getCurrentTerm returns null');
+    assert(deps.reflectionState.get('hash:+27000000007') === null, 'state is cleared even though the save was blocked');
 
-      await runHappyPathUpTo(deps, from, 'reviewSummary');
-      await handleReflectionFlow(from, 'YES', null, deps);
+    const lastCall = deps.safeSendMessage.calls[deps.safeSendMessage.calls.length - 1];
+    const lastMessage = lastCall[1];
+    assertMatch(lastMessage, /couldn't determine the current school term/i, 'tells the teacher the term could not be determined');
+  }
 
-      expect(deps.createReflection).not.toHaveBeenCalled();
-      expect(deps.reflectionState.get('hash:+27000000007')).toBeNull();
+  // ── invalid confirmation reply ─────────────────────────────
+  console.log('\n── invalid confirmation reply ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000008';
 
-      const lastMessage = deps.safeSendMessage.mock.calls[deps.safeSendMessage.mock.calls.length - 1][1];
-      expect(lastMessage).toMatch(/couldn't determine the current school term/i);
-    });
-  });
+    await runHappyPathUpTo(deps, from, 'reviewSummary');
+    await handleReflectionFlow(from, 'maybe', null, deps);
 
-  describe('invalid confirmation reply', () => {
-    it('stays on reviewSummary and preserves the collected fields', async () => {
-      const deps = createDeps();
-      const from = '+27000000008';
+    assert(deps.createReflection.callCount() === 0, 'an unrecognised confirmation reply does not save');
 
-      await runHappyPathUpTo(deps, from, 'reviewSummary');
-      await handleReflectionFlow(from, 'maybe', null, deps);
+    const state = deps.reflectionState.get('hash:+27000000008');
+    assertEqual(state.step, 'reviewSummary', 'stays on reviewSummary after an invalid reply');
+    assertEqual(state.lesson, 'Fractions Grade 6', 'lesson field is preserved');
+    assertEqual(state.wentWell, 'Learners understood equivalent fractions.', 'wentWell field is preserved');
+    assertEqual(state.improvement, 'More practical examples.', 'improvement field is preserved');
+  }
 
-      expect(deps.createReflection).not.toHaveBeenCalled();
+  console.log('\n' + '─'.repeat(55));
+  console.log(`reflectionFlow.test.js Results: ${passed} passed, ${failed} failed`);
+  if (failed > 0) process.exitCode = 1;
+}
 
-      const state = deps.reflectionState.get('hash:+27000000008');
-      expect(state.step).toBe('reviewSummary');
-      expect(state.lesson).toBe('Fractions Grade 6');
-      expect(state.wentWell).toBe('Learners understood equivalent fractions.');
-      expect(state.improvement).toBe('More practical examples.');
-    });
-  });
+run().catch((err) => {
+  console.error('Unexpected test runner error:', err);
+  process.exitCode = 1;
 });
