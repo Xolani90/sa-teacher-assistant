@@ -79,14 +79,7 @@ async function handleReflectionFlow(from, text, preClassifiedIntent, deps) {
   const phoneHash = hashPhone(from);
   const state = reflectionState.get(phoneHash);
 
-  console.log('[REFLECTION DEBUG] phoneHash:', phoneHash);
-  console.log('[REFLECTION DEBUG] state:', JSON.stringify(state));
-  if (state) {
-    console.log('[REFLECTION DEBUG] minutesSinceActivity:', (Date.now() - state.lastActivity) / 60000);
-  }
-
   if (state && Date.now() - state.lastActivity > 30 * 60 * 1000) {
-    console.log('[REFLECTION DEBUG] TIMEOUT TRIGGERED — deleting state');
     reflectionState.delete(phoneHash);
     return false;
   }
