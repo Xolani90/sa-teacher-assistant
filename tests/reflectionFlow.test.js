@@ -205,6 +205,7 @@ async function run() {
 
     deps.reflectionState.set(phoneHash, {
       step: 'awaitingLesson',
+      lesson: 'Fractions Grade 6', // proves the discarded state, not just its shell, is stale
       lastActivity: Date.now() - 31 * 60 * 1000,
     });
 
@@ -212,6 +213,56 @@ async function run() {
 
     assert(handled === false, 'drops stale state and does not treat the message as handled');
     assert(deps.reflectionState.get(phoneHash) === null, 'stale state is removed');
+    assert(deps.createReflection.callCount() === 0, 'never persists anything when dropping a stale session');
+    assert(deps.safeSendMessage.callCount() === 0, 'sends nothing back to the teacher when dropping a stale session');
+  }
+
+  console.log('\n── timeout boundary ──');
+  {
+    // Exactly at the threshold should NOT be treated as stale — the
+    // check is strictly greater-than, so equal elapsed time must pass through.
+    const deps = createDeps();
+    const from = '+27000000009';
+    const phoneHash = 'hash:+27000000009';
+
+    deps.reflectionState.set(phoneHash, {
+      step: 'awaitingLesson',
+      lastActivity: Date.now() - 30 * 60 * 1000,
+    });
+
+    const handled = await handleReflectionFlow(from, 'Fractions Grade 6', null, deps);
+
+    assert(handled === true, 'treats a session exactly at the 30-minute boundary as still active');
+    const state = deps.reflectionState.get(phoneHash);
+    assert(state !== null, 'state at the exact boundary is not dropped');
+    assertEqual(state && state.step, 'awaitingWentWell', 'session at the boundary continues to advance normally');
+  }
+
+  console.log('\n── fresh session after timeout ──');
+  {
+    // After a stale session is dropped (handled === false), the caller's
+    // normal routing re-invokes with the same message so intent parsing
+    // runs again and a brand-new session starts cleanly.
+    const deps = createDeps();
+    const from = '+27000000010';
+    const phoneHash = 'hash:+27000000010';
+
+    deps.reflectionState.set(phoneHash, {
+      step: 'awaitingImprovement',
+      lesson: 'Old stale lesson',
+      wentWell: 'Old stale went-well',
+      lastActivity: Date.now() - 45 * 60 * 1000,
+    });
+
+    const droppedHandled = await handleReflectionFlow(from, 'REFLECT', null, deps);
+    assert(droppedHandled === false, 'first call on a stale session only drops it and reports unhandled');
+
+    const restartHandled = await handleReflectionFlow(from, 'REFLECT', null, deps);
+    assert(restartHandled === true, 'a subsequent call starts a brand-new session');
+
+    const state = deps.reflectionState.get(phoneHash);
+    assertEqual(state && state.step, 'awaitingLesson', 'new session starts at awaitingLesson, not mid-flow');
+    assert(!('lesson' in (state || {})), 'no leftover fields survive from the stale session');
   }
 
   // ── session isolation ──────────────────────────────────────
