@@ -86,6 +86,28 @@ function classifyCognitiveLevel(topic, difficulty, subject = 'general') {
 function performItemAnalysis(assessmentId) {
   const db = getDb();
 
+  const assessment = db.prepare(`SELECT * FROM assessments WHERE id = ?`).get(assessmentId);
+  const isBlueprintBacked = !!(assessment && assessment.blueprint_id);
+
+  // For blueprint-backed assessments, question_data is stored as plain
+  // { questionNumber: marksAwarded } (see blueprintAnalytics.js's module
+  // doc) — maxMarks/topic live once on the blueprint's locked question
+  // list, not repeated per learner. Resolve them via the same join
+  // blueprintAnalytics.js uses, keyed off assessment.blueprint_id so we
+  // read the exact locked version this assessment was captured against.
+  let blueprintQuestionMeta = {};
+  if (isBlueprintBacked) {
+    const rows = db.prepare(`
+      SELECT question_number, topic, max_marks FROM blueprint_questions WHERE blueprint_id = ?
+    `).all(assessment.blueprint_id);
+    for (const row of rows) {
+      blueprintQuestionMeta[row.question_number] = {
+        topic: row.topic,
+        maxMark: row.max_marks,
+      };
+    }
+  }
+
   // Get all learner results for this assessment
   const learnerResults = db.prepare(`
     SELECT * FROM learner_results WHERE assessment_id = ?
@@ -105,17 +127,22 @@ function performItemAnalysis(assessmentId) {
       try {
         const questions = JSON.parse(result.question_data);
         for (const [qNum, qData] of Object.entries(questions)) {
+          // Blueprint-backed: qData is a bare number (marks awarded).
+          // Free-form (legacy): qData is { mark, maxMark, topic }.
+          const mark = isBlueprintBacked ? (qData || 0) : (qData.mark || 0);
+          const meta = isBlueprintBacked ? (blueprintQuestionMeta[qNum] || {}) : qData;
+
           if (!questionData[qNum]) {
             questionData[qNum] = [];
-            maxMarks[qNum] = qData.maxMark || 1;
+            maxMarks[qNum] = meta.maxMark || 1;
           }
           // Capture topic from first learner record that provides one
-          if (qData.topic && !questionTopics[qNum]) {
-            questionTopics[qNum] = qData.topic;
+          if (meta.topic && !questionTopics[qNum]) {
+            questionTopics[qNum] = meta.topic;
           }
           questionData[qNum].push({
             learnerName: result.learner_name,
-            mark: qData.mark || 0,
+            mark,
           });
         }
       } catch (e) {
