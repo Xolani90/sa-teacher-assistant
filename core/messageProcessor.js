@@ -99,9 +99,9 @@ async function processMessage(message, deps) {
   // ── Command handler (simple commands short-circuit AI; all commands checked here) ──
   const commandHandled = await deps.handleCommand(from, text);
   if (commandHandled) return;
-
   // ── Onboarding (new users) ────────────────────────────────────
-  if (deps.needsOnboarding(from)) {
+  const needsOb = deps.needsOnboarding(from);
+  if (needsOb) {
     const result = deps.handleOnboarding(from, text);
     if (result.handled) {
       await deps.safeSendMessage(from, result.message);

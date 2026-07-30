@@ -141,7 +141,7 @@ async function sendSingleMessage(to, text) {
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      await graphPost(`${BASE_URL}/${phoneNumberId}/messages`, {
+      const result = await graphPost(`${BASE_URL}/${phoneNumberId}/messages`, {
         messaging_product: 'whatsapp',
         recipient_type: 'individual',
         to,
