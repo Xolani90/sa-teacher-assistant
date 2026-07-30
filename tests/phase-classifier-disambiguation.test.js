@@ -16,17 +16,32 @@
 // model itself can be tested against. A regex/unit test would just prove
 // the string was added, not that it works.
 //
-// REQUIRES: ANTHROPIC_API_KEY (or OPENAI_API_KEY) in the environment.
-// Loaded from .env here (unlike other tests in this suite, which fake their
-// own env vars locally) because this is the first test that makes a real
-// external API call rather than exercising local-only logic.
-// If neither key is set, this suite SKIPS with exit code 0 rather than
-// failing the whole `npm test` run for contributors without a key
-// configured -- consistent with this test needing a live paid API call.
+// REQUIRES: RUN_NETWORK_TESTS=1, plus ANTHROPIC_API_KEY (or OPENAI_API_KEY)
+// in the environment. Loaded from .env here (unlike other tests in this
+// suite, which fake their own env vars locally) because this is the first
+// test that makes a real external API call rather than exercising
+// local-only logic. Opt-in gated (like tests/payment-webhook-smoke.test.js's
+// RUN_SMOKE_TESTS) because a present API key does not guarantee network
+// reachability -- this suite SKIPS with exit code 0 by default so it never
+// fails the standard `npm test` run.
 //
 // Run: node tests/phase-classifier-disambiguation.test.js
 
 require('dotenv').config();
+
+// Opt-in only: this suite makes real, paid AI API calls and requires
+// outbound network access to api.anthropic.com. A present API key does
+// NOT guarantee reachability (e.g. no network in this shell/CI job), so
+// gate on an explicit flag rather than key presence alone -- same pattern
+// as tests/payment-webhook-smoke.test.js's RUN_SMOKE_TESTS.
+if (!process.env.RUN_NETWORK_TESTS) {
+  console.log(
+    'SKIPPED: phase-classifier-disambiguation.test.js ' +
+    '(set RUN_NETWORK_TESTS=1 to run -- makes real AI API calls)'
+  );
+  process.exitCode = 0;
+  process.exit(0);
+}
 
 if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
   console.log('\n⚠️  phase-classifier-disambiguation.test.js SKIPPED — no ANTHROPIC_API_KEY or OPENAI_API_KEY set.');
