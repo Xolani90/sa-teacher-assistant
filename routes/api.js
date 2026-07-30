@@ -404,6 +404,126 @@ function createGetObservationDetailHandler({ getObservationDetail }) {
   };
 }
 
+/**
+ * Builds the GET /assessments/:assessmentId/detail handler — the
+ * evidence view behind a class/learner's overall percentage. Same
+ * ownership-scoped, dependency-injected convention as
+ * createGetObservationDetailHandler.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, assessmentId:number) => Object|null} deps.getAssessmentDetail
+ * @returns {(req, res) => void}
+ */
+function createGetAssessmentDetailHandler({ getAssessmentDetail }) {
+  /**
+   * GET /api/assessments/:assessmentId/detail
+   *
+   * @returns 400 if assessmentId is not a positive integer
+   * @returns 404 if no assessment with that id exists, OR if it belongs
+   *          to a different teacher (identical response to "not found")
+   * @returns 200 the full aggregated Assessment Detail payload
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetAssessmentDetail(req, res) {
+    const assessmentId = Number(req.params.assessmentId);
+
+    if (!Number.isInteger(assessmentId) || assessmentId <= 0) {
+      return res.status(400).json({ error: 'assessmentId must be a positive integer.' });
+    }
+
+    let detail;
+    try {
+      detail = getAssessmentDetail(req.teacher.phoneHash, assessmentId);
+    } catch (err) {
+      console.error('[API] getAssessmentDetail failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!detail) {
+      return res.status(404).json({ error: 'Assessment not found.' });
+    }
+    return res.status(200).json(detail);
+  };
+}
+
+/**
+ * Builds the GET /assessments/:assessmentId/pdf handler. Generates the
+ * Blueprint Assessment PDF on demand (not pre-generated/cached — same
+ * on-demand convention as every other PDF route in this codebase, e.g.
+ * assessmentSessionFlow's PRINT command) and returns a signed download
+ * URL rather than the file bytes, matching buildPdfUrl()'s existing
+ * contract (core/generationPipeline.js).
+ *
+ * Ownership is enforced the same way generateBlueprintAssessmentPdf()
+ * itself looks up the assessment — by re-deriving it from the DB inside
+ * the service call. This handler additionally re-checks phone_hash here
+ * before generating anything, so a cross-teacher assessmentId never
+ * reaches PDF generation at all.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, assessmentId:number) => Object|null} deps.getAssessmentDetail
+ * @param {(assessmentId:number) => Promise<{fileId:string, filename:string}|{error:string}>} deps.generateBlueprintAssessmentPdf
+ * @param {(fileId:string) => string} deps.buildPdfUrl
+ * @returns {(req, res) => void}
+ */
+function createGetAssessmentPdfHandler({ getAssessmentDetail, generateBlueprintAssessmentPdf, buildPdfUrl }) {
+  /**
+   * GET /api/assessments/:assessmentId/pdf
+   *
+   * @returns 400 if assessmentId is not a positive integer
+   * @returns 404 if no assessment with that id exists, OR if it belongs
+   *          to a different teacher
+   * @returns 422 if the assessment isn't blueprint-backed, or the PDF
+   *          generator otherwise reports a structured error (e.g. zero
+   *          learner results) — this is a request that will never
+   *          succeed as-is, not a transient server fault
+   * @returns 200 { url, filename }
+   * @returns 500 if the underlying service throws
+   */
+  return async function handleGetAssessmentPdf(req, res) {
+    const assessmentId = Number(req.params.assessmentId);
+
+    if (!Number.isInteger(assessmentId) || assessmentId <= 0) {
+      return res.status(400).json({ error: 'assessmentId must be a positive integer.' });
+    }
+
+    let detail;
+    try {
+      detail = getAssessmentDetail(req.teacher.phoneHash, assessmentId);
+    } catch (err) {
+      console.error('[API] getAssessmentDetail failed (pdf route):', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!detail) {
+      return res.status(404).json({ error: 'Assessment not found.' });
+    }
+
+    if (!detail.assessment.isBlueprintBacked) {
+      return res.status(422).json({
+        error: 'This assessment was not created from a Blueprint, so no PDF report is available.',
+      });
+    }
+
+    let pdfResult;
+    try {
+      pdfResult = await generateBlueprintAssessmentPdf(assessmentId);
+    } catch (err) {
+      console.error('[API] generateBlueprintAssessmentPdf failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (pdfResult.error) {
+      return res.status(422).json({ error: pdfResult.error });
+    }
+
+    return res.status(200).json({
+      url: buildPdfUrl(pdfResult.fileId),
+      filename: pdfResult.filename,
+    });
+  };
+}
+
 // Real wiring — the only place this file touches actual services.
 const { getLearnerById, getTeacherLearners } = require('../services/learnerRepository');
 const { getLearnerInterventionPlan } = require('../services/interventionService');
@@ -413,6 +533,9 @@ const { getStatusSnapshot } = require('../services/tseEvidenceService');
 const { getClassDetail } = require('../services/classDetailService');
 const { getLearnerDetail } = require('../services/learnerDetailService');
 const { getObservationDetail } = require('../services/observationDetailService');
+const { getAssessmentDetail } = require('../services/assessmentDetailService');
+const { generateBlueprintAssessmentPdf } = require('../services/pdfService');
+const { buildPdfUrl } = require('../core/generationPipeline');
 
 router.get(
   '/learners/:learnerId/intervention-plan',
@@ -440,6 +563,15 @@ router.get(
 );
 
 router.get(
+  '/assessments/:assessmentId/detail',
+  createGetAssessmentDetailHandler({ getAssessmentDetail })
+);
+router.get(
+  '/assessments/:assessmentId/pdf',
+  createGetAssessmentPdfHandler({ getAssessmentDetail, generateBlueprintAssessmentPdf, buildPdfUrl })
+);
+
+router.get(
   '/learners',
   createGetLearnersHandler({ getTeacherLearners })
 );
@@ -455,6 +587,8 @@ module.exports.__testExports = {
   createGetClassDetailHandler,
   createGetLearnerDetailHandler,
   createGetObservationDetailHandler,
+  createGetAssessmentDetailHandler,
+  createGetAssessmentPdfHandler,
   createGetLearnersHandler,
   createGetTseStatusHandler,
 };
