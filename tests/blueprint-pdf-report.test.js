@@ -280,6 +280,58 @@ async function run() {
   const plainPdfResult = await generateBlueprintAssessmentPdf(plainAssessment.lastInsertRowid);
   assert(!!plainPdfResult.error, 'non-blueprint assessment returns analytics error, not a PDF');
 
+  console.log('\n── Section 5: Unknown assessmentId ───────────────────────────────────');
+
+  // getBlueprintAssessmentAnalytics()'s !assessment branch returns a distinct
+  // error from the !assessment.blueprint_id branch above (Section 4) — assert
+  // the exact string so a future edit that collapses these two guards into
+  // one message is caught here.
+  const unknownAssessmentId = 999999;
+  const unknownPdfResult = await generateBlueprintAssessmentPdf(unknownAssessmentId);
+  assert(!!unknownPdfResult.error, 'unknown assessmentId returns an error, not a PDF');
+  assert(
+    unknownPdfResult.error === `No assessment found with id ${unknownAssessmentId}`,
+    'unknown assessmentId error matches getBlueprintAssessmentAnalytics()\'s exact !assessment message'
+  );
+
+  if (!unknownPdfResult.error) {
+    const { getPdfPath } = require('../services/pdfService');
+    const filePath = getPdfPath(unknownPdfResult.fileId);
+    assert(!fs.existsSync(filePath), 'no PDF file was written for an unknown assessmentId');
+  }
+
+  console.log('\n── Section 6: Published blueprint, zero learner results ──────────────');
+
+  // A second blueprint, published but never given any learner_results rows —
+  // exercises getBlueprintAssessmentAnalytics()'s learnerRows.length === 0
+  // branch specifically, distinct from both Section 4 and Section 5's guards.
+  const emptyDraft = createBlueprint(
+    PHONE,
+    { title: 'Term 3 Empty Test', subject: 'Mathematics', grade: 5, term: 3, totalMarks: 10 },
+    [
+      { questionNumber: 1, topic: 'Fractions', maxMarks: 10 },
+    ],
+  );
+  publishBlueprint(emptyDraft.blueprintId, PHONE);
+
+  const emptyAssessment = _db.prepare(`
+    INSERT INTO assessments (phone_hash, title, total_marks, blueprint_id, blueprint_version)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(PHONE, 'Term 3 Empty Test', 10, emptyDraft.blueprintId, 1);
+
+  const emptyPdfResult = await generateBlueprintAssessmentPdf(emptyAssessment.lastInsertRowid);
+  assert(!!emptyPdfResult.error, 'blueprint-backed assessment with zero learner results returns an error, not a PDF');
+  assert(
+    emptyPdfResult.error === 'No learner results found for this assessment',
+    'zero-learner-results error matches getBlueprintAssessmentAnalytics()\'s exact message'
+  );
+
+  if (!emptyPdfResult.error) {
+    const { getPdfPath } = require('../services/pdfService');
+    const filePath = getPdfPath(emptyPdfResult.fileId);
+    assert(!fs.existsSync(filePath), 'no PDF file was written for a zero-learner-results assessment');
+  }
+
   console.log(`\n${'─'.repeat(60)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);
   if (failed > 0) process.exit(1);
