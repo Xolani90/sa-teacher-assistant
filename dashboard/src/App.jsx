@@ -6,6 +6,7 @@ import Login from './pages/Login';
 import Home from './pages/Home';
 import Classes from './pages/Classes';
 import ClassDetail from './pages/ClassDetail';
+import LearnerDetail from './pages/LearnerDetail';
 
 export default function App() {
   return (
@@ -35,6 +36,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <ClassDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/learners/:learnerId"
+              element={
+                <ProtectedRoute>
+                  <LearnerDetail />
                 </ProtectedRoute>
               }
             />

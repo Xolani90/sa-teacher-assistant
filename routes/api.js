@@ -298,6 +298,61 @@ function createGetClassDetailHandler({ getClassDetail }) {
   };
 }
 
+/**
+ * Builds the GET /learners/:learnerId/detail handler — learner-scoped
+ * counterpart to createGetClassDetailHandler above. Exposes
+ * services/learnerDetailService.js's getLearnerDetail(phoneHash,
+ * learnerId), which composes existing reads (learner profile, class
+ * name, assessment history, observation history, mastery, intervention
+ * plan) into one payload. Same layering discipline as every other
+ * handler here: this handler does no aggregation of its own, only
+ * auth/shape concerns (learnerId validation, 404 vs 500) — ownership
+ * enforcement lives inside getLearnerDetail() itself via the
+ * learner.phoneHash comparison, the same pattern
+ * createGetInterventionPlanHandler above already uses.
+ *
+ * Dependency-injected for the same reason as the handlers above: tests
+ * stub getLearnerDetail directly, no database required.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, learnerId:number) => Object|null} deps.getLearnerDetail
+ * @returns {(req, res) => void}
+ */
+function createGetLearnerDetailHandler({ getLearnerDetail }) {
+  /**
+   * GET /api/learners/:learnerId/detail
+   *
+   * @returns 400 if learnerId is not a positive integer
+   * @returns 404 if no learner with that id exists, OR if the learner
+   *          exists but belongs to a different teacher (identical
+   *          response to "not found", same convention as every other
+   *          ownership-scoped route in this file)
+   * @returns 200 the full aggregated Learner Detail payload
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetLearnerDetail(req, res) {
+    const learnerId = Number(req.params.learnerId);
+
+    if (!Number.isInteger(learnerId) || learnerId <= 0) {
+      return res.status(400).json({ error: 'learnerId must be a positive integer.' });
+    }
+
+    let detail;
+    try {
+      detail = getLearnerDetail(req.teacher.phoneHash, learnerId);
+    } catch (err) {
+      console.error('[API] getLearnerDetail failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!detail) {
+      return res.status(404).json({ error: 'Learner not found.' });
+    }
+
+    return res.status(200).json(detail);
+  };
+}
+
 // Real wiring — the only place this file touches actual services.
 const { getLearnerById, getTeacherLearners } = require('../services/learnerRepository');
 const { getLearnerInterventionPlan } = require('../services/interventionService');
@@ -305,6 +360,7 @@ const { getTeacherClasses } = require('../services/teacherWorkspaceService');
 const { getActiveRosterCounts } = require('../services/learnerRosterService');
 const { getStatusSnapshot } = require('../services/tseEvidenceService');
 const { getClassDetail } = require('../services/classDetailService');
+const { getLearnerDetail } = require('../services/learnerDetailService');
 
 router.get(
   '/learners/:learnerId/intervention-plan',
@@ -322,6 +378,11 @@ router.get(
 );
 
 router.get(
+  '/learners/:learnerId/detail',
+  createGetLearnerDetailHandler({ getLearnerDetail })
+);
+
+router.get(
   '/learners',
   createGetLearnersHandler({ getTeacherLearners })
 );
@@ -335,6 +396,7 @@ module.exports.__testExports = {
   createGetInterventionPlanHandler,
   createGetClassesHandler,
   createGetClassDetailHandler,
+  createGetLearnerDetailHandler,
   createGetLearnersHandler,
   createGetTseStatusHandler,
 };

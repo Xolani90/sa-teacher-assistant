@@ -200,7 +200,11 @@ export default function ClassDetail() {
             {filtered.length > 0 && (
               <div style={styles.cardList}>
                 {filtered.map((l) => (
-                  <Card key={l.learnerId} style={styles.rowCard}>
+                  <Card
+                    key={l.learnerId}
+                    onClick={() => navigate(`/learners/${l.learnerId}`)}
+                    style={styles.rowCard}
+                  >
                     <span style={{ fontWeight: 500 }}>{l.learnerName}</span>
                     {l.average != null ? (
                       <Pill tone={l.passing ? 'success' : 'warning'}>
