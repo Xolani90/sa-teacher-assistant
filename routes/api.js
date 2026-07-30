@@ -353,6 +353,57 @@ function createGetLearnerDetailHandler({ getLearnerDetail }) {
   };
 }
 
+/**
+ * Builds the GET /observations/:assessmentId handler — session-scoped
+ * counterpart to createGetLearnerDetailHandler above. Exposes
+ * services/observationDetailService.js's getObservationDetail(phoneHash,
+ * assessmentId), which composes observationRepository's existing
+ * getObservationAssessment() with its correction-lineage neighbors.
+ * Same layering discipline as every other handler here: no aggregation
+ * of its own, only auth/shape concerns — ownership enforcement lives
+ * inside getObservationDetail() itself.
+ *
+ * Dependency-injected for the same reason as the handlers above: tests
+ * stub getObservationDetail directly, no database required.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, assessmentId:number) => Object|null} deps.getObservationDetail
+ * @returns {(req, res) => void}
+ */
+function createGetObservationDetailHandler({ getObservationDetail }) {
+  /**
+   * GET /api/observations/:assessmentId
+   *
+   * @returns 400 if assessmentId is not a positive integer
+   * @returns 404 if no session with that id exists, OR if it belongs to
+   *          a different teacher (identical response to "not found",
+   *          same convention as every other ownership-scoped route)
+   * @returns 200 the full aggregated Observation Detail payload
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetObservationDetail(req, res) {
+    const assessmentId = Number(req.params.assessmentId);
+
+    if (!Number.isInteger(assessmentId) || assessmentId <= 0) {
+      return res.status(400).json({ error: 'assessmentId must be a positive integer.' });
+    }
+
+    let detail;
+    try {
+      detail = getObservationDetail(req.teacher.phoneHash, assessmentId);
+    } catch (err) {
+      console.error('[API] getObservationDetail failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!detail) {
+      return res.status(404).json({ error: 'Observation session not found.' });
+    }
+
+    return res.status(200).json(detail);
+  };
+}
+
 // Real wiring — the only place this file touches actual services.
 const { getLearnerById, getTeacherLearners } = require('../services/learnerRepository');
 const { getLearnerInterventionPlan } = require('../services/interventionService');
@@ -361,6 +412,7 @@ const { getActiveRosterCounts } = require('../services/learnerRosterService');
 const { getStatusSnapshot } = require('../services/tseEvidenceService');
 const { getClassDetail } = require('../services/classDetailService');
 const { getLearnerDetail } = require('../services/learnerDetailService');
+const { getObservationDetail } = require('../services/observationDetailService');
 
 router.get(
   '/learners/:learnerId/intervention-plan',
@@ -383,6 +435,11 @@ router.get(
 );
 
 router.get(
+  '/observations/:assessmentId',
+  createGetObservationDetailHandler({ getObservationDetail })
+);
+
+router.get(
   '/learners',
   createGetLearnersHandler({ getTeacherLearners })
 );
@@ -397,6 +454,7 @@ module.exports.__testExports = {
   createGetClassesHandler,
   createGetClassDetailHandler,
   createGetLearnerDetailHandler,
+  createGetObservationDetailHandler,
   createGetLearnersHandler,
   createGetTseStatusHandler,
 };

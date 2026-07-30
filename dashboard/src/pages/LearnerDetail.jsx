@@ -183,11 +183,16 @@ export default function LearnerDetail() {
             ) : (
               <div style={styles.cardList}>
                 {detail.observations.recent.map((o) => (
-                  <Card key={o.assessmentId} style={styles.rowCard}>
+                  <Card
+                    key={o.assessmentId}
+                    onClick={() => navigate(`/observations/${o.assessmentId}`)}
+                    style={styles.rowCard}
+                  >
                     <div>
                       <div style={{ fontWeight: 600 }}>{o.title}</div>
                       <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>{o.createdAt}</div>
                     </div>
+                    <Pill>View Session →</Pill>
                   </Card>
                 ))}
               </div>

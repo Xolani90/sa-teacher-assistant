@@ -7,6 +7,7 @@ import Home from './pages/Home';
 import Classes from './pages/Classes';
 import ClassDetail from './pages/ClassDetail';
 import LearnerDetail from './pages/LearnerDetail';
+import ObservationDetail from './pages/ObservationDetail';
 
 export default function App() {
   return (
@@ -44,6 +45,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <LearnerDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/observations/:assessmentId"
+              element={
+                <ProtectedRoute>
+                  <ObservationDetail />
                 </ProtectedRoute>
               }
             />
