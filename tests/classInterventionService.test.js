@@ -1,26 +1,26 @@
 'use strict';
 /**
- * Class Intervention Rollup Service (ADR-009, PR11)
+ * Class Intervention Service (ADR-009, PR11)
  *
- * classInterventionService.js composes exactly one seam:
- * interventionService.getLearnerInterventionPlan — it issues no SQL of
- * its own beyond the roster read, and performs no new mastery/progress/
- * coverage/intervention calculations. Per the same testing-isolation
- * discipline used by tests/interventionService.test.js, this suite mocks
- * interventionService and learnerRosterService directly.
+ * classInterventionService.js composes exactly two seams:
+ * learnerRosterService.getRoster and interventionService.getLearnerInterventionPlan
+ * — it issues no SQL and recomputes no mastery/progress/coverage math of
+ * its own. Per the same testing-isolation discipline used by
+ * tests/interventionService.test.js (which mocks masteryService
+ * directly), this suite mocks both seams directly by monkey-patching
+ * their exported functions rather than calling through to a real
+ * database or real InterventionService/MasteryService chain.
  *
  * Run individually:   node tests/classInterventionService.test.js
  * Run via npm:         npm test
  */
-
+const learnerRosterService = require('../services/learnerRosterService');
 const interventionService = require('../services/interventionService');
-const rosterService = require('../services/learnerRosterService');
 const classInterventionService = require('../services/classInterventionService');
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 let passed = 0;
 let failed = 0;
-
 function assert(condition, label) {
   if (condition) {
     console.log(`  ✅ ${label}`);
@@ -31,234 +31,246 @@ function assert(condition, label) {
   }
 }
 
-const realGetLearnerInterventionPlan = interventionService.getLearnerInterventionPlan;
-const realGetRoster = rosterService.getRoster;
-
-function mockRoster(roster) {
-  rosterService.getRoster = () => roster;
+function assertDeepEqual(actual, expected, label) {
+  const ok = JSON.stringify(actual) === JSON.stringify(expected);
+  if (!ok) {
+    console.error(`     expected: ${JSON.stringify(expected)}`);
+    console.error(`     actual:   ${JSON.stringify(actual)}`);
+  }
+  assert(ok, label);
 }
 
-function mockPlans(byLearnerId) {
-  // byLearnerId: Map<learnerId, InterventionPlan[] | Error>
-  interventionService.getLearnerInterventionPlan = (learnerId) => {
-    const result = byLearnerId.get(learnerId);
-    if (result instanceof Error) throw result;
-    return result;
-  };
-}
-
-function restoreAll() {
-  interventionService.getLearnerInterventionPlan = realGetLearnerInterventionPlan;
-  rosterService.getRoster = realGetRoster;
-}
-
-/**
- * Builds an InterventionPlan fixture matching the real shape produced by
- * interventionService.buildPlan(), with sensible defaults so each test
- * only needs to override what it cares about.
- */
-function makePlan(overrides = {}) {
-  const masteryLevel = overrides.masteryLevel || 'developing';
-  const base = {
-    learnerId: overrides.learnerId ?? 1,
-    subject: overrides.subject || 'mathematics',
-    priority: overrides.priority || 'medium',
-    focusTopics: overrides.focusTopics || [],
-    recommendedActions: overrides.recommendedActions || ['Continue monitoring.'],
+/** Minimal InterventionPlan factory for test setup. */
+function makePlan({ learnerId, subject, priority, masteryLevel = 'developing', focusTopics = [] }) {
+  return {
+    learnerId,
+    subject,
+    priority,
+    focusTopics,
+    recommendedActions: ['some action'],
     evidence: {
-      mastery: { masteryLevel, learnerId: overrides.learnerId ?? 1, subject: overrides.subject || 'mathematics' },
+      mastery: { learnerId, subject, masteryLevel, evidence: { progress: {}, coverage: {} } },
       progress: {},
-      coverage: { dataAvailable: false, averagePercentage: null },
+      coverage: { dataAvailable: true, averagePercentage: 70 },
     },
   };
-  return base;
 }
 
-console.log('Class Intervention Rollup Service (ADR-009, PR11)');
-console.log('='.repeat(60));
+function roster(...learners) {
+  return learners.map(([id, name]) => ({ id, name }));
+}
 
-// ── Section 1: empty class ────────────────────────────────────────────
-console.log('\n--- empty class ---');
-{
-  mockRoster([]);
-  mockPlans(new Map());
-  const result = classInterventionService.getClassInterventionPlan('hash1', 1);
-  assert(result.summary.totalLearners === 0, 'totalLearners is 0');
+const PHONE_HASH = 'test-phone-hash';
+const CLASS_ID = 42;
+
+// Save originals so each test can monkey-patch and we can restore after.
+const originalGetRoster = learnerRosterService.getRoster;
+const originalGetLearnerInterventionPlan = interventionService.getLearnerInterventionPlan;
+
+function mockRoster(...learners) {
+  learnerRosterService.getRoster = () => roster(...learners);
+}
+
+function mockPlans(fn) {
+  interventionService.getLearnerInterventionPlan = fn;
+}
+
+function restoreMocks() {
+  learnerRosterService.getRoster = originalGetRoster;
+  interventionService.getLearnerInterventionPlan = originalGetLearnerInterventionPlan;
+}
+
+// ── Tests ────────────────────────────────────────────────────────────────
+
+function testAllEvaluatedNoIssues() {
+  console.log('\nAll learners evaluated, no insufficient-data or errors');
+  mockRoster([1, 'Amahle'], [2, 'Bongani']);
+  mockPlans((learnerId) => {
+    if (learnerId === 1) return [makePlan({ learnerId, subject: 'Mathematics', priority: 'high' })];
+    return [makePlan({ learnerId, subject: 'Mathematics', priority: 'low' })];
+  });
+
+  const result = classInterventionService.getClassInterventionPlan(PHONE_HASH, CLASS_ID);
+
+  assertDeepEqual(
+    result.summary,
+    { totalLearners: 2, evaluatedLearners: 2, insufficientData: 0, erroredLearners: 0 },
+    'summary counts correct'
+  );
+  assertDeepEqual(result.priorityCounts, { high: 1, medium: 0, low: 1 }, 'priorityCounts correct');
+  assert(result.priorityLearners.high.length === 1 && result.priorityLearners.high[0].learnerId === 1, 'learner 1 in high bucket');
+  assert(result.priorityLearners.low.length === 1 && result.priorityLearners.low[0].learnerId === 2, 'learner 2 in low bucket');
+  assertDeepEqual(result.errors, [], 'no errors');
+
+  restoreMocks();
+}
+
+function testAllInsufficientData() {
+  console.log('\nLearner with every subject plan insufficient-data');
+  mockRoster([1, 'Amahle']);
+  mockPlans(() => [
+    makePlan({ learnerId: 1, subject: 'Mathematics', priority: 'medium', masteryLevel: 'insufficient-data' }),
+    makePlan({ learnerId: 1, subject: 'English', priority: 'medium', masteryLevel: 'insufficient-data' }),
+  ]);
+
+  const result = classInterventionService.getClassInterventionPlan(PHONE_HASH, CLASS_ID);
+
+  assert(result.summary.insufficientData === 1, 'insufficientData count is 1');
   assert(result.summary.evaluatedLearners === 0, 'evaluatedLearners is 0');
-  assert(result.summary.insufficientData === 0, 'insufficientData is 0');
-  assert(result.summary.erroredLearners === 0, 'erroredLearners is 0');
-  assert(result.priorityLearners.high.length === 0 && result.priorityLearners.medium.length === 0 && result.priorityLearners.low.length === 0, 'all priority buckets empty');
-  assert(result.commonFocusTopics.length === 0, 'no common focus topics');
-  assert(result.errors.length === 0, 'no errors');
-  restoreAll();
+  assertDeepEqual(result.priorityCounts, { high: 0, medium: 0, low: 0 }, 'priorityCounts all zero');
+  assert(
+    result.priorityLearners.high.length === 0 &&
+    result.priorityLearners.medium.length === 0 &&
+    result.priorityLearners.low.length === 0,
+    'no learner placed in any priority bucket'
+  );
+
+  restoreMocks();
 }
 
-// ── Section 2: all learners evaluated ─────────────────────────────────
-console.log('\n--- all learners evaluated ---');
-{
-  mockRoster([{ id: 1, name: 'Sipho' }, { id: 2, name: 'Ayanda' }]);
-  mockPlans(new Map([
-    [1, [makePlan({ learnerId: 1, subject: 'mathematics', priority: 'high' })]],
-    [2, [makePlan({ learnerId: 2, subject: 'mathematics', priority: 'low' })]],
-  ]));
-  const result = classInterventionService.getClassInterventionPlan('hash1', 1);
-  assert(result.summary.evaluatedLearners === 2, 'both learners evaluated');
-  assert(result.summary.insufficientData === 0, 'no insufficient-data learners');
-  assert(result.priorityCounts.high === 1 && result.priorityCounts.low === 1, 'priority counts correct');
-  assert(result.priorityLearners.high[0].learnerId === 1, 'Sipho in high bucket');
-  assert(result.priorityLearners.low[0].learnerId === 2, 'Ayanda in low bucket');
-  restoreAll();
-}
+function testOneLearnerThrows() {
+  console.log('\nOne learner throws; remaining learners still processed and aggregated');
+  mockRoster([1, 'Amahle'], [2, 'Bongani']);
+  mockPlans((learnerId) => {
+    if (learnerId === 1) throw new Error('mastery lookup failed');
+    return [makePlan({ learnerId, subject: 'Mathematics', priority: 'low' })];
+  });
 
-// ── Section 3: all learners insufficient-data ─────────────────────────
-console.log('\n--- all learners insufficient-data ---');
-{
-  mockRoster([{ id: 1, name: 'Sipho' }]);
-  mockPlans(new Map([
-    [1, [makePlan({ learnerId: 1, subject: 'mathematics', priority: 'medium', masteryLevel: 'insufficient-data' })]],
-  ]));
-  const result = classInterventionService.getClassInterventionPlan('hash1', 1);
-  assert(result.summary.evaluatedLearners === 0, 'evaluatedLearners is 0');
-  assert(result.summary.insufficientData === 1, 'insufficientData is 1');
-  assert(result.priorityLearners.high.length === 0 && result.priorityLearners.medium.length === 0 && result.priorityLearners.low.length === 0, 'not placed in any priority bucket despite priority=medium');
-  restoreAll();
-}
+  const result = classInterventionService.getClassInterventionPlan(PHONE_HASH, CLASS_ID);
 
-// ── Section 4: mixed evaluated/insufficient across subjects (same learner) ─
-console.log('\n--- mixed subjects: Maths high, English insufficient-data ---');
-{
-  mockRoster([{ id: 1, name: 'Sipho' }]);
-  mockPlans(new Map([
-    [1, [
-      makePlan({ learnerId: 1, subject: 'mathematics', priority: 'high' }),
-      makePlan({ learnerId: 1, subject: 'english', priority: 'medium', masteryLevel: 'insufficient-data' }),
-    ]],
-  ]));
-  const result = classInterventionService.getClassInterventionPlan('hash1', 1);
-  assert(result.priorityLearners.high[0].overallPriority === 'high', 'overall priority is high, not diluted by insufficient-data subject');
-  assert(result.summary.insufficientData === 0, 'learner is NOT double-counted as insufficientData');
-  assert(result.summary.evaluatedLearners === 1, 'learner counted once as evaluated');
-  restoreAll();
-}
-
-// ── Section 5: partial failure — one learner throws ───────────────────
-console.log('\n--- partial failure: one learner throws ---');
-{
-  mockRoster([{ id: 1, name: 'Sipho' }, { id: 2, name: 'Ayanda' }]);
-  mockPlans(new Map([
-    [1, new Error('db exploded')],
-    [2, [makePlan({ learnerId: 2, subject: 'mathematics', priority: 'low' })]],
-  ]));
-  const result = classInterventionService.getClassInterventionPlan('hash1', 1);
   assert(result.summary.erroredLearners === 1, 'erroredLearners is 1');
-  assert(result.errors[0].learnerId === 1 && result.errors[0].reason === 'db exploded', 'error entry names learner and reason');
+  assertDeepEqual(result.errors, [{ learnerId: 1, reason: 'mastery lookup failed' }], 'errors[] populated correctly');
   assert(result.summary.evaluatedLearners === 1, 'remaining learner still evaluated');
-  assert(result.priorityLearners.low[0].learnerId === 2, 'remaining learner still bucketed correctly');
-  restoreAll();
+  assert(result.priorityLearners.low.length === 1 && result.priorityLearners.low[0].learnerId === 2, 'learner 2 still in low bucket');
+
+  restoreMocks();
 }
 
-// ── Section 6: multiple failures ──────────────────────────────────────
-console.log('\n--- multiple failures ---');
-{
-  mockRoster([{ id: 1, name: 'A' }, { id: 2, name: 'B' }, { id: 3, name: 'C' }]);
-  mockPlans(new Map([
-    [1, new Error('fail 1')],
-    [2, new Error('fail 2')],
-    [3, [makePlan({ learnerId: 3, priority: 'medium' })]],
-  ]));
-  const result = classInterventionService.getClassInterventionPlan('hash1', 1);
-  assert(result.summary.erroredLearners === 2, 'two errored learners');
-  assert(result.errors.length === 2, 'two error entries recorded');
-  assert(result.summary.totalLearners === 3, 'totalLearners reflects full roster regardless of errors');
-  restoreAll();
+function testMultipleLearnersThrow() {
+  console.log('\nMultiple learners throw');
+  mockRoster([1, 'Amahle'], [2, 'Bongani'], [3, 'Cebo']);
+  mockPlans((learnerId) => {
+    if (learnerId === 1) throw new Error('error one');
+    if (learnerId === 2) throw new Error('error two');
+    return [makePlan({ learnerId, subject: 'Mathematics', priority: 'medium' })];
+  });
+
+  const result = classInterventionService.getClassInterventionPlan(PHONE_HASH, CLASS_ID);
+
+  assert(result.summary.erroredLearners === 2, 'erroredLearners is 2');
+  assertDeepEqual(
+    result.errors,
+    [{ learnerId: 1, reason: 'error one' }, { learnerId: 2, reason: 'error two' }],
+    'errors[] contains both failures in order'
+  );
+  assert(result.summary.evaluatedLearners === 1, 'remaining learner still evaluated');
+
+  restoreMocks();
 }
 
-// ── Section 7: priority ordering — High -> Medium -> Low, alphabetical within bucket ─
-console.log('\n--- priority ordering ---');
-{
-  mockRoster([
-    { id: 1, name: 'Zanele' },
-    { id: 2, name: 'Alice' },
-    { id: 3, name: 'Sipho' },
+function testMixedSubjectsWorstWins() {
+  console.log('\nMixed subjects: Maths high, English insufficient-data -> overall high, not double-counted');
+  mockRoster([1, 'Amahle']);
+  mockPlans(() => [
+    makePlan({ learnerId: 1, subject: 'Mathematics', priority: 'high', masteryLevel: 'beginning' }),
+    makePlan({ learnerId: 1, subject: 'English', priority: 'medium', masteryLevel: 'insufficient-data' }),
   ]);
-  mockPlans(new Map([
-    [1, [makePlan({ learnerId: 1, priority: 'high' })]],
-    [2, [makePlan({ learnerId: 2, priority: 'high' })]],
-    [3, [makePlan({ learnerId: 3, priority: 'high' })]],
-  ]));
-  const result = classInterventionService.getClassInterventionPlan('hash1', 1);
-  const names = result.priorityLearners.high.map((l) => l.learnerName);
-  assert(JSON.stringify(names) === JSON.stringify(['Alice', 'Sipho', 'Zanele']), 'high bucket sorted alphabetically');
-  restoreAll();
+
+  const result = classInterventionService.getClassInterventionPlan(PHONE_HASH, CLASS_ID);
+
+  assert(result.summary.evaluatedLearners === 1, 'evaluatedLearners is 1');
+  assert(result.summary.insufficientData === 0, 'not double-counted as insufficientData');
+  assertDeepEqual(result.priorityCounts, { high: 1, medium: 0, low: 0 }, 'priorityCounts reflects overall high');
+  assert(result.priorityLearners.high[0].overallPriority === 'high', 'overallPriority is high');
+  assert(result.priorityLearners.high[0].subjectPlans.length === 2, 'both subject plans retained on the learner entry');
+
+  restoreMocks();
 }
 
-// ── Section 8: common topic threshold ─────────────────────────────────
-console.log('\n--- common focus topic threshold (0.5) ---');
-{
-  mockRoster([
-    { id: 1, name: 'A' }, { id: 2, name: 'B' }, { id: 3, name: 'C' }, { id: 4, name: 'D' },
-  ]);
-  mockPlans(new Map([
-    [1, [makePlan({ learnerId: 1, subject: 'mathematics', focusTopics: ['Fractions'] })]],
-    [2, [makePlan({ learnerId: 2, subject: 'mathematics', focusTopics: ['Fractions'] })]],
-    [3, [makePlan({ learnerId: 3, subject: 'mathematics', focusTopics: [] })]],
-    [4, [makePlan({ learnerId: 4, subject: 'mathematics', focusTopics: [] })]],
-  ]));
-  const result = classInterventionService.getClassInterventionPlan('hash1', 1);
-  const fractions = result.commonFocusTopics.find((t) => t.topic === 'Fractions');
-  assert(fractions !== undefined, 'Fractions included at exactly 50% (2/4)');
-  assert(fractions.affectedLearners === 2 && fractions.percentage === 0.5, 'affectedLearners and percentage correct');
-  restoreAll();
-}
-{
-  mockRoster([
-    { id: 1, name: 'A' }, { id: 2, name: 'B' }, { id: 3, name: 'C' },
-  ]);
-  mockPlans(new Map([
-    [1, [makePlan({ learnerId: 1, subject: 'mathematics', focusTopics: ['Fractions'] })]],
-    [2, [makePlan({ learnerId: 2, subject: 'mathematics', focusTopics: [] })]],
-    [3, [makePlan({ learnerId: 3, subject: 'mathematics', focusTopics: [] })]],
-  ]));
-  const result = classInterventionService.getClassInterventionPlan('hash1', 1);
-  const fractions = result.commonFocusTopics.find((t) => t.topic === 'Fractions');
-  assert(fractions === undefined, 'Fractions excluded below 50% (1/3)');
-  restoreAll();
-}
+function testCommonFocusTopicsExcludeInsufficientData() {
+  console.log('\ncommonFocusTopics excludes insufficient-data subject plans from numerator and denominator');
+  mockRoster([1, 'Amahle'], [2, 'Bongani'], [3, 'Cebo']);
+  mockPlans((learnerId) => {
+    if (learnerId === 3) {
+      return [makePlan({
+        learnerId,
+        subject: 'Mathematics',
+        priority: 'medium',
+        masteryLevel: 'insufficient-data',
+        focusTopics: ['Fractions'],
+      })];
+    }
+    return [makePlan({
+      learnerId,
+      subject: 'Mathematics',
+      priority: 'high',
+      focusTopics: ['Fractions'],
+    })];
+  });
 
-// ── Section 9: insufficient-data subjects excluded from topic aggregation ─
-console.log('\n--- insufficient-data subjects excluded from topic aggregation ---');
-{
-  mockRoster([{ id: 1, name: 'A' }, { id: 2, name: 'B' }]);
-  mockPlans(new Map([
-    [1, [makePlan({ learnerId: 1, subject: 'mathematics', focusTopics: ['Fractions'], masteryLevel: 'insufficient-data', priority: 'medium' })]],
-    [2, [makePlan({ learnerId: 2, subject: 'mathematics', focusTopics: ['Fractions'] })]],
-  ]));
-  const result = classInterventionService.getClassInterventionPlan('hash1', 1);
-  const fractions = result.commonFocusTopics.find((t) => t.topic === 'Fractions');
-  // Only learner 2 is evaluated for mathematics -> denominator 1, affected 1 -> 100%, included.
-  assert(fractions.affectedLearners === 1 && fractions.percentage === 1, 'insufficient-data subject excluded from both numerator and denominator');
-  restoreAll();
+  const result = classInterventionService.getClassInterventionPlan(PHONE_HASH, CLASS_ID);
+
+  assert(result.summary.evaluatedLearners === 2, 'evaluatedLearners excludes the insufficient-data learner');
+  assertDeepEqual(
+    result.commonFocusTopics,
+    [{ subject: 'Mathematics', topic: 'Fractions', affectedLearners: 2, percentage: 1 }],
+    'commonFocusTopics computed only from evaluated learners'
+  );
+
+  restoreMocks();
 }
 
-// ── Section 10: priorityLearners retains all contributing subject plans ─
-console.log('\n--- priorityLearners retains subjectPlans ---');
-{
-  mockRoster([{ id: 1, name: 'Sipho' }]);
-  const plans = [
-    makePlan({ learnerId: 1, subject: 'mathematics', priority: 'high' }),
-    makePlan({ learnerId: 1, subject: 'english', priority: 'low' }),
-  ];
-  mockPlans(new Map([[1, plans]]));
-  const result = classInterventionService.getClassInterventionPlan('hash1', 1);
-  assert(result.priorityLearners.high[0].subjectPlans.length === 2, 'both subject plans retained, not just the winning one');
-  restoreAll();
+function testPriorityBucketOrdering() {
+  console.log('\nPriority bucket ordering: High -> Medium -> Low, alphabetical by learnerName within each bucket');
+  mockRoster([1, 'Zanele'], [2, 'Amahle'], [3, 'Mpho']);
+  mockPlans((learnerId) => [makePlan({ learnerId, subject: 'Mathematics', priority: 'high' })]);
+
+  const result = classInterventionService.getClassInterventionPlan(PHONE_HASH, CLASS_ID);
+
+  assertDeepEqual(
+    result.priorityLearners.high.map((l) => l.learnerName),
+    ['Amahle', 'Mpho', 'Zanele'],
+    'high bucket sorted alphabetically by learnerName'
+  );
+
+  restoreMocks();
 }
 
-// ── Summary ──────────────────────────────────────────────────────────────
-console.log('\n' + '─'.repeat(51));
-console.log(`✅ Passed: ${passed}`);
-console.log(`❌ Failed: ${failed}`);
-console.log(`📊 Total:  ${passed + failed}`);
-console.log('─'.repeat(51));
+function testEmptyRoster() {
+  console.log('\nEmpty class roster returns a well-formed ClassInterventionPlan with all counts at zero');
+  mockRoster();
+  let called = false;
+  mockPlans(() => { called = true; return []; });
 
+  const result = classInterventionService.getClassInterventionPlan(PHONE_HASH, CLASS_ID);
+
+  assertDeepEqual(
+    result.summary,
+    { totalLearners: 0, evaluatedLearners: 0, insufficientData: 0, erroredLearners: 0 },
+    'all summary counts zero'
+  );
+  assertDeepEqual(result.priorityCounts, { high: 0, medium: 0, low: 0 }, 'priorityCounts all zero');
+  assertDeepEqual(result.priorityLearners, { high: [], medium: [], low: [] }, 'all priority buckets empty');
+  assertDeepEqual(result.commonFocusTopics, [], 'commonFocusTopics empty');
+  assertDeepEqual(result.errors, [], 'errors empty');
+  assert(!called, 'getLearnerInterventionPlan never called for an empty roster');
+
+  restoreMocks();
+}
+
+// ── Run ──────────────────────────────────────────────────────────────────
+console.log('Class Intervention Service tests (ADR-009, PR11)');
+console.log('='.repeat(75));
+
+testAllEvaluatedNoIssues();
+testAllInsufficientData();
+testOneLearnerThrows();
+testMultipleLearnersThrow();
+testMixedSubjectsWorstWins();
+testCommonFocusTopicsExcludeInsufficientData();
+testPriorityBucketOrdering();
+testEmptyRoster();
+
+console.log('\n' + '='.repeat(75));
+console.log(`Passed: ${passed}, Failed: ${failed}`);
 if (failed > 0) process.exit(1);
