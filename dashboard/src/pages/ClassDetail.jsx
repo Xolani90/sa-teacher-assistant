@@ -131,7 +131,7 @@ export default function ClassDetail() {
             ) : (
               <div style={styles.cardList}>
                 {detail.recentAssessments.map((a) => (
-                  <Card key={a.assessmentId} style={styles.rowCard}>
+                  <Card key={a.assessmentId} style={styles.rowCard} onClick={() => navigate(`/assessments/${a.assessmentId}`)}>
                     <div>
                       <div style={{ fontWeight: 600 }}>{a.title}</div>
                       <div style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>

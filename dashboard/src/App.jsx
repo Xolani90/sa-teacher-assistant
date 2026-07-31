@@ -8,6 +8,7 @@ import Classes from './pages/Classes';
 import ClassDetail from './pages/ClassDetail';
 import LearnerDetail from './pages/LearnerDetail';
 import ObservationDetail from './pages/ObservationDetail';
+import AssessmentDetail from './pages/AssessmentDetail';
 
 export default function App() {
   return (
@@ -53,6 +54,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <ObservationDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/assessments/:assessmentId"
+              element={
+                <ProtectedRoute>
+                  <AssessmentDetail />
                 </ProtectedRoute>
               }
             />
