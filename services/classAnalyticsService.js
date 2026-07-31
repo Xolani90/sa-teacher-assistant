@@ -118,8 +118,15 @@ function getClassAnalytics(phoneHash, classId, options = {}) {
     }
 
     // --- Progress: average this learner's per-subject averagePercentage,
-    // excluding subjects with no numeric average (insufficient-data).
+    // excluding subjects marked trend === "insufficient-data" (a single
+    // data point still carries a numeric averagePercentage, but ADR-013
+    // §3.2 treats "insufficient-data" subjects as excluded from averages
+    // and counted in distributions instead — same rule mastery/coverage
+    // already apply on their own insufficient-data signal. A trend-based
+    // exclusion (not just != null) keeps classSummary.averageProgress
+    // consistent with distributions.progress rather than contradicting it.
     const learnerProgressVals = progressReports
+      .filter((r) => r.trend !== 'insufficient-data')
       .map((r) => r.averagePercentage)
       .filter((v) => v != null);
     const learnerProgressAvg = average(learnerProgressVals);
@@ -168,7 +175,7 @@ function getClassAnalytics(phoneHash, classId, options = {}) {
       acc.count += 1;
     }
     for (const r of progressReports) {
-      if (r.averagePercentage == null) continue;
+      if (r.trend === 'insufficient-data' || r.averagePercentage == null) continue;
       if (!bySubjectAccum.has(r.subject)) {
         bySubjectAccum.set(r.subject, { sum: 0, count: 0, progressSum: 0, progressCount: 0, coverageSum: 0, coverageCount: 0 });
       }

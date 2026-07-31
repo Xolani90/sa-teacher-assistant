@@ -236,6 +236,26 @@ function testEmptyRoster() {
   restoreMocks();
 }
 
+function testInsufficientDataTrendExcludedFromAverage() {
+  console.log('\nREGRESSION: a single-data-point ProgressReport (trend=insufficient-data, non-null averagePercentage) is excluded from averageProgress, not silently averaged in');
+  mockRoster([1, 'Amahle']);
+  // Single event -> ProgressService correctly reports trend
+  // "insufficient-data" while still returning a non-null averagePercentage
+  // for that one point. This must NOT feed classSummary.averageProgress,
+  // or it contradicts distributions.progress showing 100% insufficient-data.
+  mockProgress(() => [progressReport({ subject: 'Mathematics', averagePercentage: 80, trend: 'insufficient-data' })]);
+  mockCoverage(() => []);
+  mockMastery(() => []);
+
+  const result = classAnalyticsService.getClassAnalytics(PHONE_HASH, CLASS_ID);
+
+  assert(result.classSummary.averageProgress === null, 'averageProgress is null, not 80, when the only report is insufficient-data trend');
+  assert(result.distributions.progress['insufficient-data'] === 1, 'distributions.progress still counts the insufficient-data report');
+  assert(result.breakdowns.bySubject.length === 0, 'bySubject has no entry for a subject with zero evaluated reports of any kind');
+
+  restoreMocks();
+}
+
 // ── Run ──────────────────────────────────────────────────────────────────
 console.log('Class Analytics Snapshot tests (ADR-013)');
 console.log('='.repeat(75));
@@ -246,6 +266,7 @@ testOneLearnerServiceThrows();
 testMultipleLearnersThrowAcrossServices();
 testSubjectOptionScoping();
 testStrongestWeakestExcludeZeroEvaluated();
+testInsufficientDataTrendExcludedFromAverage();
 testEmptyRoster();
 
 console.log('\n' + '='.repeat(75));
