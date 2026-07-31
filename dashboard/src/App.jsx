@@ -9,6 +9,7 @@ import ClassDetail from './pages/ClassDetail';
 import LearnerDetail from './pages/LearnerDetail';
 import ObservationDetail from './pages/ObservationDetail';
 import AssessmentDetail from './pages/AssessmentDetail';
+import QMS from './pages/QMS';
 
 export default function App() {
   return (
@@ -62,6 +63,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <AssessmentDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/qms"
+              element={
+                <ProtectedRoute>
+                  <QMS />
                 </ProtectedRoute>
               }
             />
