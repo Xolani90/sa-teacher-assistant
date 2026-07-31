@@ -43,7 +43,7 @@ function seed() {
   const insertRecord = db.prepare(`
     INSERT INTO observation_records
       (assessment_id, learner_name, domain, developmental_status, notes, learner_id, resolved)
-    VALUES (?, ?, ?, ?, ?, ?, 0)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
   `);
 
   const seedTxn = db.transaction(() => {
@@ -66,7 +66,8 @@ function seed() {
         domain,
         status,
         `Observed during group activity — ${status.replace('_', ' ')} expectations in ${domain.toLowerCase()} domain.`,
-        learner.id
+        learner.id,
+        0
       );
 
       // Add a second domain for the first two learners to test multi-domain rendering
@@ -79,10 +80,23 @@ function seed() {
           domain2,
           status2,
           `Follow-up note on ${domain2.toLowerCase()} — ${status2}.`,
-          learner.id
+          learner.id,
+          0
         );
       }
     });
+
+    // Add one resolved record so the UI's "resolved" state gets visual coverage too
+    // (all records above are unresolved / "Follow-up required").
+    insertRecord.run(
+      assessmentId,
+      'Kagisho Van Wyk',
+      'Physical',
+      'meeting',
+      'Follow-up complete — now meeting physical domain expectations.',
+      5,
+      1
+    );
 
     return assessmentId;
   });

@@ -242,6 +242,39 @@ function createGetTseStatusHandler({ getStatusSnapshot }) {
 }
 
 /**
+ * Dependency-injected for the same reason as every other handler in
+ * this file: tests stub listReflections directly, no database required.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, options?:Object) => Object[]} deps.listReflections
+ * @returns {(req, res) => void}
+ */
+function createGetReflectionsHandler({ listReflections }) {
+  /**
+   * GET /api/reflections
+   * Optional query param: ?term=<n> to scope to a single term, matching
+   * listReflections()'s own { term } option (services/reflectionService.js).
+   *
+   * @returns 200 { reflections: [...] } — scoped to req.teacher.phoneHash,
+   *          most recent first, excluding soft-deleted rows
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetReflections(req, res) {
+    const termParam = req.query.term;
+    const term = termParam !== undefined ? Number(termParam) : null;
+
+    let reflections;
+    try {
+      reflections = listReflections(req.teacher.phoneHash, { term });
+    } catch (err) {
+      console.error('[API] listReflections failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+    return res.status(200).json({ reflections: reflections || [] });
+  };
+}
+
+/**
  * Builds the GET /classes/:classId/detail handler (dashboard "Class
  * Detail" / command-center view — PROJECT_STATUS.md's post-branding
  * milestone).
@@ -530,6 +563,7 @@ const { getLearnerInterventionPlan } = require('../services/interventionService'
 const { getTeacherClasses } = require('../services/teacherWorkspaceService');
 const { getActiveRosterCounts } = require('../services/learnerRosterService');
 const { getStatusSnapshot } = require('../services/tseEvidenceService');
+const { listReflections } = require('../services/reflectionService');
 const { getClassDetail } = require('../services/classDetailService');
 const { getLearnerDetail } = require('../services/learnerDetailService');
 const { getObservationDetail } = require('../services/observationDetailService');
@@ -580,6 +614,11 @@ router.get(
   createGetTseStatusHandler({ getStatusSnapshot })
 );
 
+router.get(
+  '/reflections',
+  createGetReflectionsHandler({ listReflections })
+);
+
 module.exports = router;
 module.exports.__testExports = {
   createGetInterventionPlanHandler,
@@ -591,4 +630,5 @@ module.exports.__testExports = {
   createGetAssessmentPdfHandler,
   createGetLearnersHandler,
   createGetTseStatusHandler,
+  createGetReflectionsHandler,
 };
