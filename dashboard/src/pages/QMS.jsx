@@ -117,7 +117,7 @@ export default function QMS() {
 
       {gaps.length > 0 && <GapsSection gaps={gaps} />}
 
-      <ReflectionPanel reflections={reflections} />
+      <ReflectionPanel reflections={reflections} onChange={load} />
     </Layout>
   );
 }

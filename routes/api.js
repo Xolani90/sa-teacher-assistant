@@ -275,6 +275,137 @@ function createGetReflectionsHandler({ listReflections }) {
 }
 
 /**
+ * Builds the POST /reflections handler — thin wrapper around
+ * reflectionService.createReflection(phoneHash, params). No new
+ * business logic: validation (empty content, non-array
+ * evidenceLinkIds) already lives in the service and is surfaced here
+ * as a 400, matching the service's own thrown Error messages.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, params:Object) => Object} deps.createReflection
+ * @returns {(req, res) => void}
+ */
+function createPostReflectionHandler({ createReflection }) {
+  /**
+   * POST /api/reflections
+   * Body: { content, term?, aiAssisted?, evidenceLinkIds? }
+   *
+   * @returns 201 { reflection } on success
+   * @returns 400 if content is missing/blank or evidenceLinkIds isn't an array
+   * @returns 500 if the underlying service throws for any other reason
+   */
+  return function handlePostReflection(req, res) {
+    const { content, term, aiAssisted, evidenceLinkIds } = req.body || {};
+
+    let reflection;
+    try {
+      reflection = createReflection(req.teacher.phoneHash, { content, term, aiAssisted, evidenceLinkIds });
+    } catch (err) {
+      // createReflection's own guard clauses (missing content, bad
+      // evidenceLinkIds shape) are caller-input errors, not server
+      // failures — distinguish by message prefix rather than adding a
+      // second validation layer here.
+      if (/^createReflection:/.test(err.message)) {
+        return res.status(400).json({ error: err.message });
+      }
+      console.error('[API] createReflection failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    return res.status(201).json({ reflection });
+  };
+}
+
+/**
+ * Builds the PATCH /reflections/:id handler — thin wrapper around
+ * reflectionService.updateReflection(phoneHash, id, params).
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, id:number, params:Object) => Object|null} deps.updateReflection
+ * @returns {(req, res) => void}
+ */
+function createPatchReflectionHandler({ updateReflection }) {
+  /**
+   * PATCH /api/reflections/:id
+   * Body: any subset of { content, aiAssisted, evidenceLinkIds }
+   *
+   * @returns 200 { reflection } on success
+   * @returns 400 for a non-positive-integer :id, or empty content
+   * @returns 404 if the reflection doesn't exist, isn't owned by this
+   *          teacher, or is already soft-deleted (service returns null
+   *          for all three — no existence oracle, same convention as
+   *          the intervention-plan route)
+   * @returns 500 if the underlying service throws for any other reason
+   */
+  return function handlePatchReflection(req, res) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid reflection id' });
+    }
+
+    const { content, aiAssisted, evidenceLinkIds } = req.body || {};
+
+    let reflection;
+    try {
+      reflection = updateReflection(req.teacher.phoneHash, id, { content, aiAssisted, evidenceLinkIds });
+    } catch (err) {
+      if (/^updateReflection:/.test(err.message)) {
+        return res.status(400).json({ error: err.message });
+      }
+      console.error('[API] updateReflection failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!reflection) {
+      return res.status(404).json({ error: 'Reflection not found' });
+    }
+
+    return res.status(200).json({ reflection });
+  };
+}
+
+/**
+ * Builds the DELETE /reflections/:id handler — thin wrapper around
+ * reflectionService.deleteReflection(phoneHash, id) (soft delete,
+ * ADR-011 §7 — never a hard DELETE).
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, id:number) => boolean} deps.deleteReflection
+ * @returns {(req, res) => void}
+ */
+function createDeleteReflectionHandler({ deleteReflection }) {
+  /**
+   * DELETE /api/reflections/:id
+   *
+   * @returns 204 on success (no body)
+   * @returns 400 for a non-positive-integer :id
+   * @returns 404 if the reflection doesn't exist, isn't owned by this
+   *          teacher, or is already soft-deleted
+   * @returns 500 if the underlying service throws
+   */
+  return function handleDeleteReflection(req, res) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid reflection id' });
+    }
+
+    let deleted;
+    try {
+      deleted = deleteReflection(req.teacher.phoneHash, id);
+    } catch (err) {
+      console.error('[API] deleteReflection failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!deleted) {
+      return res.status(404).json({ error: 'Reflection not found' });
+    }
+
+    return res.status(204).send();
+  };
+}
+
+/**
  * Builds the GET /classes/:classId/detail handler (dashboard "Class
  * Detail" / command-center view — PROJECT_STATUS.md's post-branding
  * milestone).
@@ -684,7 +815,7 @@ const { getLearnerInterventionPlan } = require('../services/interventionService'
 const { getTeacherClasses } = require('../services/teacherWorkspaceService');
 const { getActiveRosterCounts } = require('../services/learnerRosterService');
 const { getStatusSnapshot } = require('../services/tseEvidenceService');
-const { listReflections } = require('../services/reflectionService');
+const { listReflections, createReflection, updateReflection, deleteReflection } = require('../services/reflectionService');
 const { getClassDetail } = require('../services/classDetailService');
 const { getClassSnapshot } = require('../services/classSnapshotService');
 const { getClass } = require('../services/teacherWorkspaceService');
@@ -751,6 +882,18 @@ router.get(
   '/reflections',
   createGetReflectionsHandler({ listReflections })
 );
+router.post(
+  '/reflections',
+  createPostReflectionHandler({ createReflection })
+);
+router.patch(
+  '/reflections/:id',
+  createPatchReflectionHandler({ updateReflection })
+);
+router.delete(
+  '/reflections/:id',
+  createDeleteReflectionHandler({ deleteReflection })
+);
 
 module.exports = router;
 module.exports.__testExports = {
@@ -766,4 +909,7 @@ module.exports.__testExports = {
   createGetLearnersHandler,
   createGetTseStatusHandler,
   createGetReflectionsHandler,
+  createPostReflectionHandler,
+  createPatchReflectionHandler,
+  createDeleteReflectionHandler,
 };
