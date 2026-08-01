@@ -1,7 +1,12 @@
 # ADR-014: Dashboard Snapshot Orchestration Service
 
 ## Status
-Proposed
+Accepted — Implemented
+
+Verified against real seeded data in the dashboard UI. Analytics and
+Intervention sections render live values correctly. QMS/TSE gracefully
+reports "Not available" when class-scoped data cannot be derived
+because growth insights remain teacher-scoped.
 
 ## Context
 The dashboard currently needs data from multiple independent backend services:
