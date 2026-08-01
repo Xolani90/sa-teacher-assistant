@@ -66,11 +66,12 @@ Log at the bottom for how this document came to look the way it does.
 - ✅ Observation Detail (`observationDetailService` →
   `GET /api/observations/:assessmentId` → `ObservationDetail.jsx`),
   supported by `observationAnalysisService`, `observationGroupingService`.
-- 🟡 Observation Workspace — no browse/list page or `/observations` index
-  route exists. Observations are currently only reachable by drilling in
-  from a learner's detail page (`LearnerDetail.jsx`'s Observations card).
-  The detail/analysis layer is complete; what's missing is a list view
-  with filtering (class, learner, date) and its own route.
+- ✅ Observation Workspace (`ObservationWorkspace.jsx` → `/observations`,
+  backed by `GET /api/observations`, a thin route wrapping
+  `observationRepository.getObservationHistory`) — grade/subject filters,
+  free-text search, links into `ObservationDetail.jsx`. No new service or
+  ADR needed; composed an existing, already-tested repository read.
+  Nav entry added to `Layout.jsx`. (commit `2148502`)
 
 ---
 
@@ -97,17 +98,14 @@ Full detail and acceptance criteria tracked in:
 
 ## Next Milestones
 
-1. **Observation Workspace** — browse/list page, filtering, navigation
-   into the existing `ObservationDetail.jsx`. Mostly composition; no new
-   analysis logic required.
-2. **Reflection editing** — expose `createReflection`/`updateReflection`/
+1. **Reflection editing** — expose `createReflection`/`updateReflection`/
    `deleteReflection` via thin routes, add edit UI to `ReflectionPanel.jsx`.
-3. **Reporting Centre** — likely the largest genuine gap remaining.
+2. **Reporting Centre** — likely the largest genuine gap remaining.
    Orchestrates existing PDF/export generators (class, learner, blueprint,
    intervention) behind a single workspace. Deserves its own ADR, since
    it introduces a new workspace rather than composing an existing
    aggregation contract.
-4. **Curriculum expansion** — populate Grades R–6 CAPS data. Content
+3. **Curriculum expansion** — populate Grades R–6 CAPS data. Content
    project, not a redesign; see backlog doc for acceptance criteria.
 
 ---
@@ -168,3 +166,18 @@ New findings from the same investigation pass:
   Dashboard Snapshot service being fully implemented, tested, and
   browser-verified against real seeded data. Corrected to
   "Accepted — Implemented" (commit `c33f06b`).
+
+### 2026-08-01 (later)
+
+- Investigated Observation and QMS Workspaces before assuming either was
+  a genuine gap, per the discipline established above.
+- QMS: Action Centre confirmed complete. Reflection viewing complete.
+  Reflection editing found to be a small, scoped gap — backend functions
+  (`createReflection`/`updateReflection`/`deleteReflection`) already
+  exist in `reflectionService.js`, but are not exposed via API routes or
+  the read-only `ReflectionPanel.jsx` UI. Logged as a Next Milestone, not
+  a new workspace.
+- Observation: confirmed genuine gap (no browse/list page). Built
+  `ObservationWorkspace.jsx` + `GET /api/observations` as a thin route
+  wrapping `observationRepository.getObservationHistory` — composition
+  only, no new service, no ADR. Shipped and pushed (commit `2148502`).
