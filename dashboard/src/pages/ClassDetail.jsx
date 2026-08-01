@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTeacher } from '../auth/TeacherContext';
 import { ApiError } from '../api/client';
 import Layout from '../components/Layout';
 import { Card, EmptyState, ErrorBanner, Spinner, IconBadge, SectionHeader, Pill } from '../components/ui';
+import ClassSnapshotSection from '../components/ClassSnapshotSection';
 
 const STATUS_LOADING = 'loading';
 const STATUS_READY = 'ready';
@@ -29,6 +30,10 @@ export default function ClassDetail() {
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
 
+  const [snapshotStatus, setSnapshotStatus] = useState(STATUS_LOADING);
+  const [snapshot, setSnapshot] = useState(null);
+  const [snapshotError, setSnapshotError] = useState(null);
+
   useEffect(() => {
     let cancelled = false;
 
@@ -52,6 +57,29 @@ export default function ClassDetail() {
       cancelled = true;
     };
   }, [authedFetch, classId]);
+
+  // Independent of the /detail load above (deliberately not Promise.all'd
+  // together): GET /api/classes/:classId/snapshot (ADR-014) is a newer,
+  // separate endpoint. Keeping the fetch/error state isolated means a
+  // snapshot failure never blocks the rest of the page from rendering,
+  // and vice versa — same fault-isolation principle classSnapshotService
+  // itself applies at the section level.
+  const loadSnapshot = useCallback(async () => {
+    setSnapshotStatus(STATUS_LOADING);
+    setSnapshotError(null);
+    try {
+      const res = await authedFetch(`/api/classes/${classId}/snapshot`);
+      setSnapshot(res);
+      setSnapshotStatus(STATUS_READY);
+    } catch (err) {
+      setSnapshotError(err instanceof ApiError ? err.message : 'Something went wrong loading the class snapshot.');
+      setSnapshotStatus(STATUS_ERROR);
+    }
+  }, [authedFetch, classId]);
+
+  useEffect(() => {
+    loadSnapshot();
+  }, [loadSnapshot]);
 
   const learners = detail?.learners || [];
   const filtered = useMemo(() => {
@@ -92,6 +120,14 @@ export default function ClassDetail() {
             <HealthStat icon="⚠️" tone="amber" label="At risk" value={health?.atRisk ?? '—'} />
             <HealthStat icon="🎯" tone="lavender" label="Active interventions" value={health?.activeInterventions ?? '—'} />
           </div>
+
+          {/* ADR-014 class snapshot (analytics/intervention/qms) */}
+          <ClassSnapshotSection
+            status={snapshotStatus}
+            error={snapshotError}
+            snapshot={snapshot}
+            onRetry={loadSnapshot}
+          />
 
           {/* Curriculum coverage */}
           <Card style={{ padding: 'var(--space-5)', marginBottom: 'var(--space-6)' }}>
