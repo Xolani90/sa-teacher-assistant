@@ -559,6 +559,48 @@ function createGetAssessmentDetailHandler({ getAssessmentDetail }) {
 }
 
 /**
+ * Builds the GET /observations handler — thin wrapper around
+ * observationRepository.getObservationHistory(phoneHash, filters).
+ * No service layer needed: getObservationHistory is already a
+ * repository-level read with its own filtering, ownership scoping, and
+ * test coverage (used today by learnerDetailService.js). This route
+ * exposes the same call directly to the dashboard for the Observation
+ * Workspace list/browse view.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, filters:Object) => Object[]} deps.getObservationHistory
+ * @returns {(req, res) => void}
+ */
+function createGetObservationsHandler({ getObservationHistory }) {
+  /**
+   * GET /api/observations?grade=&subject=&learnerName=&includeSuperseded=&limit=
+   *
+   * @returns 200 { observations: [...] } — scoped to req.teacher.phoneHash;
+   *          an empty array for a teacher with no observations, not an error
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetObservations(req, res) {
+    const filters = {
+      grade: req.query.grade || undefined,
+      subject: req.query.subject || undefined,
+      learnerName: req.query.learnerName || undefined,
+      includeSuperseded: req.query.includeSuperseded === 'true',
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+    };
+
+    let observations;
+    try {
+      observations = getObservationHistory(req.teacher.phoneHash, filters);
+    } catch (err) {
+      console.error('[API] getObservationHistory failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    return res.status(200).json({ observations: observations || [] });
+  };
+}
+
+/**
  * Builds the GET /assessments/:assessmentId/pdf handler. Generates the
  * Blueprint Assessment PDF on demand (not pre-generated/cached — same
  * on-demand convention as every other PDF route in this codebase, e.g.
@@ -648,6 +690,7 @@ const { getClassSnapshot } = require('../services/classSnapshotService');
 const { getClass } = require('../services/teacherWorkspaceService');
 const { getLearnerDetail } = require('../services/learnerDetailService');
 const { getObservationDetail } = require('../services/observationDetailService');
+const { getObservationHistory } = require('../services/observationRepository');
 const { getAssessmentDetail } = require('../services/assessmentDetailService');
 const { generateBlueprintAssessmentPdf } = require('../services/pdfService');
 const { buildPdfUrl } = require('../core/generationPipeline');
@@ -677,6 +720,10 @@ router.get(
   createGetLearnerDetailHandler({ getLearnerDetail })
 );
 
+router.get(
+  '/observations',
+  createGetObservationsHandler({ getObservationHistory })
+);
 router.get(
   '/observations/:assessmentId',
   createGetObservationDetailHandler({ getObservationDetail })
@@ -713,6 +760,7 @@ module.exports.__testExports = {
   createGetClassSnapshotHandler,
   createGetLearnerDetailHandler,
   createGetObservationDetailHandler,
+  createGetObservationsHandler,
   createGetAssessmentDetailHandler,
   createGetAssessmentPdfHandler,
   createGetLearnersHandler,

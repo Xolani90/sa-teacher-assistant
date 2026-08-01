@@ -7,6 +7,7 @@ import Home from './pages/Home';
 import Classes from './pages/Classes';
 import ClassDetail from './pages/ClassDetail';
 import LearnerDetail from './pages/LearnerDetail';
+import ObservationWorkspace from './pages/ObservationWorkspace';
 import ObservationDetail from './pages/ObservationDetail';
 import AssessmentDetail from './pages/AssessmentDetail';
 import QMS from './pages/QMS';
@@ -47,6 +48,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <LearnerDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/observations"
+              element={
+                <ProtectedRoute>
+                  <ObservationWorkspace />
                 </ProtectedRoute>
               }
             />
