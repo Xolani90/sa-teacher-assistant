@@ -332,6 +332,85 @@ function createGetClassDetailHandler({ getClassDetail }) {
 }
 
 /**
+ * Builds the GET /classes/:classId/snapshot handler (ADR-014, dashboard
+ * class overview).
+ *
+ * Exposes services/classSnapshotService.js's getClassSnapshot(phoneHash,
+ * classId, options, classInfo), which composes classAnalyticsService
+ * (ADR-013), classInterventionService (ADR-009), and — currently always
+ * "unavailable", per ADR-014 §3.4 — a qms section, into one
+ * fault-isolated payload. Same layering discipline as every other route
+ * here: this handler does no aggregation of its own, only auth/shape
+ * concerns (classId validation, 404 vs 500, req.teacher.phoneHash
+ * scoping).
+ *
+ * classSnapshotService has no direct classes-table access of its own
+ * (see its JSDoc), so this handler resolves classInfo via
+ * teacherWorkspaceService.getClass(classId, phoneHash) first — the same
+ * ownership-scoped lookup getClassDetail() uses internally — and 404s
+ * before calling getClassSnapshot() if the class doesn't exist or
+ * belongs to a different teacher (ADR-008 §8, identical response to
+ * "not found").
+ *
+ * Dependency-injected for the same reason as the handlers above: tests
+ * stub getClassSnapshot / getClass directly, no database required.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, classId:number, options:Object, classInfo:Object) => Object} deps.getClassSnapshot
+ * @param {(classId:number, phoneHash:string) => Object|null} deps.getClass
+ * @returns {(req, res) => void}
+ */
+function createGetClassSnapshotHandler({ getClassSnapshot, getClass }) {
+  /**
+   * GET /api/classes/:classId/snapshot
+   *
+   * @returns 400 if classId is not a positive integer
+   * @returns 404 if no class with that id exists, OR if the class
+   *          exists but belongs to a different teacher (ADR-008 §8 —
+   *          identical response to "not found", same convention as the
+   *          detail route above)
+   * @returns 200 the ClassSnapshot payload (ADR-014 §3.3) — individual
+   *          sections may independently be "ok" | "error" | "unavailable";
+   *          this endpoint itself only 500s if class ownership resolution
+   *          throws, not if a child service inside the snapshot fails
+   * @returns 500 if the underlying class lookup throws
+   */
+  return function handleGetClassSnapshot(req, res) {
+    const classId = Number(req.params.classId);
+
+    if (!Number.isInteger(classId) || classId <= 0) {
+      return res.status(400).json({ error: 'classId must be a positive integer.' });
+    }
+
+    let classRecord;
+    try {
+      classRecord = getClass(classId, req.teacher.phoneHash);
+    } catch (err) {
+      console.error('[API] getClass failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!classRecord) {
+      return res.status(404).json({ error: 'Class not found.' });
+    }
+
+    const options = {};
+    if (typeof req.query.subject === 'string' && req.query.subject.trim() !== '') {
+      options.subject = req.query.subject;
+    }
+
+    const snapshot = getClassSnapshot(
+      req.teacher.phoneHash,
+      classId,
+      options,
+      { name: classRecord.name }
+    );
+
+    return res.status(200).json(snapshot);
+  };
+}
+
+/**
  * Builds the GET /learners/:learnerId/detail handler — learner-scoped
  * counterpart to createGetClassDetailHandler above. Exposes
  * services/learnerDetailService.js's getLearnerDetail(phoneHash,
@@ -565,6 +644,8 @@ const { getActiveRosterCounts } = require('../services/learnerRosterService');
 const { getStatusSnapshot } = require('../services/tseEvidenceService');
 const { listReflections } = require('../services/reflectionService');
 const { getClassDetail } = require('../services/classDetailService');
+const { getClassSnapshot } = require('../services/classSnapshotService');
+const { getClass } = require('../services/teacherWorkspaceService');
 const { getLearnerDetail } = require('../services/learnerDetailService');
 const { getObservationDetail } = require('../services/observationDetailService');
 const { getAssessmentDetail } = require('../services/assessmentDetailService');
@@ -584,6 +665,11 @@ router.get(
 router.get(
   '/classes/:classId/detail',
   createGetClassDetailHandler({ getClassDetail })
+);
+
+router.get(
+  '/classes/:classId/snapshot',
+  createGetClassSnapshotHandler({ getClassSnapshot, getClass })
 );
 
 router.get(
@@ -624,6 +710,7 @@ module.exports.__testExports = {
   createGetInterventionPlanHandler,
   createGetClassesHandler,
   createGetClassDetailHandler,
+  createGetClassSnapshotHandler,
   createGetLearnerDetailHandler,
   createGetObservationDetailHandler,
   createGetAssessmentDetailHandler,
