@@ -11,37 +11,10 @@
  * Run via npm:         npm test
  */
 
-// ── Shim better-sqlite3 → node:sqlite (same pattern as learnerRepository.test.js) ─
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-
-let _db = null;
-
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-const repoPath = path.resolve(__dirname, '../services/learnerRepository');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
+// ── Real-migrations test DB (see tests/helpers/createTestDb.js) ──────────
+const { createTestDb } = require('./helpers/createTestDb');
+const testDb = createTestDb(__filename);
+let _db = testDb.db;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 let passed = 0;
@@ -88,40 +61,6 @@ function assertThrows(fn, expectedMsg, label) {
   }
 }
 
-// ── Schema (mirrors utils/database.js's learners table, including the
-//    removed_at column added by migration — kept in sync manually, same
-//    convention as tests/learnerRepository.test.js) ────────────────────────
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS classes (
-      id INTEGER PRIMARY KEY,
-      phone_hash TEXT NOT NULL,
-      name TEXT,
-      grade INTEGER,
-      subject TEXT,
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
-    );
-
-    CREATE TABLE IF NOT EXISTS learners (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      class_id INTEGER,
-      canonical_name TEXT NOT NULL,
-      normalized_name TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      removed_at TEXT,
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
-      FOREIGN KEY (class_id) REFERENCES classes(id)
-    );
-  `);
-}
-
 // ── Fixture helper ──────────────────────────────────────────────────────
 function insertLearner(db, { phoneHash, classId = null, name, removedAt = null }) {
   const info = db.prepare(`
@@ -132,9 +71,6 @@ function insertLearner(db, { phoneHash, classId = null, name, removedAt = null }
 }
 
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
-
   const { getTeacherLearners } = require('../services/learnerRepository');
 
   const TEACHER_A = 'gtl_teacher_a';
@@ -215,6 +151,7 @@ async function run() {
   // ── Summary ──────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);
   console.log(`getTeacherLearners Results: ${passed} passed, ${failed} failed`);
+  testDb.cleanup();
   if (failed > 0) process.exit(1);
 }
 
