@@ -1,9 +1,10 @@
 'use strict';
 // Phase D-hardening — Replay & concurrency stress test (Task 6).
 //
-// Exercises the REAL handleWebhookEvent against a real in-memory
-// better-sqlite3 database, with genuinely concurrent JS execution via
-// Promise.all (not just sequential awaits) — this is the strongest test
+// Exercises the REAL handleWebhookEvent against a real, fully-migrated
+// SQLite test database (see tests/helpers/createTestDb.js), with
+// genuinely concurrent JS execution via Promise.all (not just
+// sequential awaits) — this is the strongest test
 // available in this single-process environment: it proves the function's
 // OWN logic is safe against concurrent callers within one process (the
 // realistic case given the documented single-instance Render deployment),
@@ -19,7 +20,6 @@ process.env.PRO_PRICE_ZAR  = '99';
 process.env.YOCO_SECRET_KEY = 'test-yoco-secret';
 process.env.APP_URL = 'https://example.test';
 
-const Database = require('better-sqlite3');
 const Module = require('module');
 const path = require('path');
 const { parseSqliteUtc } = require('../utils/dateUtils');
@@ -32,51 +32,11 @@ function check(condition, label) {
 }
 
 
-function buildDb() {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL UNIQUE,
-      name TEXT,
-      is_pro INTEGER NOT NULL DEFAULT 0,
-      pro_expires TEXT,
-      phone_enc TEXT,
-      renewal_reminder_sent_at TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE TABLE subscriptions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      yoco_checkout_id TEXT,
-      amount_zar REAL NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      phone_enc TEXT,
-      payment_failed_reason TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE TABLE payment_ledger (
-      id TEXT PRIMARY KEY,
-      checkout_id TEXT UNIQUE,
-      phone_hash TEXT,
-      amount INTEGER,
-      status TEXT NOT NULL DEFAULT 'received',
-      reason TEXT,
-      pro_expires_before TEXT,
-      pro_expires_after TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
-  return db;
-}
-
-const db = buildDb();
-
-const dbPath = path.resolve(__dirname, '../utils/database');
-require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { getDb: () => db } };
+// MUST be required before any service/repository module — see
+// tests/helpers/createTestDb.js's "Why this must be required first".
+const { createTestDb } = require('./helpers/createTestDb');
+const testDb = createTestDb(__filename);
+const db = testDb.db;
 
 const sentMessages = [];
 const whatsappPath = path.resolve(__dirname, '../services/whatsappService');
@@ -100,7 +60,6 @@ require.cache[whatsappPath] = {
 
 const origResolve = Module._resolveFilename;
 Module._resolveFilename = function (request, ...rest) {
-  if (request === '../utils/database' || request === './database') return dbPath;
   if (request === './whatsappService' || request === '../services/whatsappService') return whatsappPath;
   return origResolve.call(this, request, ...rest);
 };
@@ -234,9 +193,11 @@ function succeededEvent(checkoutId, amountCents = 9900) {
   console.log('─────────────────────────────────\n');
 
   Module._resolveFilename = origResolve;
+  testDb.cleanup();
   process.exit(failed > 0 ? 1 : 0);
 })().catch(err => {
   console.error('UNCAUGHT ERROR IN TEST:', err);
   Module._resolveFilename = origResolve;
+  testDb.cleanup();
   process.exit(1);
 });
