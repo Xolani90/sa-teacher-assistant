@@ -25,12 +25,11 @@
 //      runs.
 //
 // This test loads the REAL routes/webhook.js (via its __testExports seam)
-// against a real in-memory better-sqlite3 database, and stubs only the
-// outbound AI and WhatsApp network calls — everything else (including the
-// real utils/usageTracker.updateTeacherProfile and the real AI rate
-// limiter) is the actual production code path. Follows the same
-// Module._resolveFilename + require.cache convention as
-// tests/phase1-delivery-rollback.test.js and tests/phase-d-payment-renewal.test.js.
+// against a real, fully-migrated SQLite test database (see
+// tests/helpers/createTestDb.js), and stubs only the outbound AI and
+// WhatsApp network calls — everything else (including the real
+// utils/usageTracker.updateTeacherProfile and the real AI rate limiter) is
+// the actual production code path.
 //
 // Run: node tests/generation-pipeline-last-intent.test.js
 
@@ -39,7 +38,6 @@ process.env.FREE_LIMIT  = '10';
 process.env.APP_URL     = 'https://example.test';
 process.env.PDF_SECRET  = 'pdf-secret';
 
-const Database = require('better-sqlite3');
 const Module = require('module');
 const path = require('path');
 
@@ -50,59 +48,11 @@ function check(condition, label) {
   else { console.error(`  ❌ FAIL: ${label}`); failed++; }
 }
 
-function buildDb() {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL UNIQUE,
-      name TEXT,
-      grade TEXT,
-      subject TEXT,
-      language TEXT,
-      is_pro INTEGER NOT NULL DEFAULT 0,
-      pro_expires TEXT,
-      phone_enc TEXT,
-      opted_out INTEGER NOT NULL DEFAULT 0,
-      last_intent TEXT,
-      last_assessment_id INTEGER,
-      renewal_reminder_sent_at TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE TABLE usage_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      month_key TEXT NOT NULL,
-      intent_type TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE TABLE rate_limit_events (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash    TEXT    NOT NULL,
-      limiter_type  TEXT    NOT NULL,
-      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX idx_rate_limit_events_lookup
-      ON rate_limit_events(phone_hash, limiter_type, created_at);
-    CREATE TABLE sessions (
-      phone_hash    TEXT    NOT NULL,
-      session_type  TEXT    NOT NULL,
-      state         TEXT    NOT NULL,
-      updated_at    REAL    NOT NULL,
-      PRIMARY KEY (phone_hash, session_type)
-    );
-    CREATE INDEX idx_sessions_updated
-      ON sessions(updated_at);
-  `);
-  return db;
-}
-
-const db = buildDb();
-
-// ── Patch utils/database to return our in-memory db ─────────────────────────
-const dbPath = path.resolve(__dirname, '../utils/database');
-require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { getDb: () => db } };
+// MUST be required before any service/repository module — see
+// tests/helpers/createTestDb.js's "Why this must be required first".
+const { createTestDb } = require('./helpers/createTestDb');
+const testDb = createTestDb(__filename);
+const db = testDb.db;
 
 // ── Stub services/whatsappService — always succeeds, just records calls ────
 const sentMessages = [];
@@ -131,16 +81,15 @@ require.cache[aiServicePath] = {
 };
 
 // ── Install the module-resolution override BEFORE requiring usageTracker,
-// so usageTracker's own internal `require('./database')` resolves to our
-// in-memory test DB rather than the real on-disk one. (Requiring
-// usageTracker first and patching resolution second — the natural-seeming
-// order — silently binds it to the real database.js instead, since Node
-// resolves and caches a module's own internal requires at require-time.)
+// so anything that requires it by request string picks up our wrapped
+// version below. (Requiring usageTracker first and patching resolution
+// second — the natural-seeming order — silently binds callers to the real
+// unwrapped module instead, since Node resolves and caches a module's own
+// internal requires at require-time.)
 const usageTrackerPath = path.resolve(__dirname, '../utils/usageTracker');
 
 const origResolve = Module._resolveFilename;
 Module._resolveFilename = function (request, ...rest) {
-  if (request === '../utils/database' || request === './database') return dbPath;
   if (request === './whatsappService' || request === '../services/whatsappService') return whatsappPath;
   if (request === './aiService' || request === '../services/aiService') return aiServicePath;
   if (request === './usageTracker' || request === '../utils/usageTracker') return usageTrackerPath;
@@ -149,8 +98,9 @@ Module._resolveFilename = function (request, ...rest) {
 
 // Require the real module by its actual file path (with extension) so this
 // specific require bypasses the request-string override above and loads
-// for real — its internal `require('./database')` still resolves through
-// the override to our in-memory test DB, since that's a different request.
+// for real — its internal `require('./database')` still resolves to the
+// same createTestDb-backed database, since that's a different request and
+// createTestDb's shim is already installed.
 const realUsageTracker = require(usageTrackerPath + '.js');
 let lastIntentCallCount = 0;
 const usageTrackerStub = {
@@ -171,11 +121,7 @@ const usageTrackerStub = {
 require.cache[usageTrackerPath] = usageTrackerStub;
 require.cache[usageTrackerPath + '.js'] = usageTrackerStub;
 
-function hashPhoneForTest(phone) {
-  const crypto = require('crypto');
-  const normalized = phone.trim().replace(/^\+/, '');
-  return crypto.createHmac('sha256', process.env.PII_SECRET).update(normalized).digest('hex');
-}
+const { hashPhone } = realUsageTracker;
 
 function getLastIntent(phoneHash) {
   const row = db.prepare(`SELECT last_intent FROM teachers WHERE phone_hash = ?`).get(phoneHash);
@@ -199,7 +145,7 @@ function makeIntent(overrides = {}) {
   console.log('\n── Section 1: a single generation call persists last_intent exactly once ──');
   {
     const phone = '+27821150001';
-    const phoneHash = hashPhoneForTest(phone);
+    const phoneHash = hashPhone(phone);
     lastIntentCallCount = 0;
     generationShouldFail = false;
 
@@ -213,7 +159,7 @@ function makeIntent(overrides = {}) {
   console.log('\n── Section 2: two calls simulate two different entry paths (main classification + follow-up) ──');
   {
     const phone = '+27821150002';
-    const phoneHash = hashPhoneForTest(phone);
+    const phoneHash = hashPhone(phone);
     generationShouldFail = false;
 
     // "Main classification path"
@@ -235,7 +181,7 @@ function makeIntent(overrides = {}) {
   console.log('\n── Section 3: last_intent is persisted even when generation itself later fails ──');
   {
     const phone = '+27821150003';
-    const phoneHash = hashPhoneForTest(phone);
+    const phoneHash = hashPhone(phone);
     lastIntentCallCount = 0;
     generationShouldFail = true;
 
@@ -250,7 +196,7 @@ function makeIntent(overrides = {}) {
   console.log('\n── Section 4: rate-limited requests never reach the persistence line ──');
   {
     const phone = '+27821150004';
-    const phoneHash = hashPhoneForTest(phone);
+    const phoneHash = hashPhone(phone);
     generationShouldFail = false;
 
     // Exhaust the AI burst rate limit (5 calls / 60s window — see
@@ -281,9 +227,11 @@ function makeIntent(overrides = {}) {
   console.log('─────────────────────────────────\n');
 
   Module._resolveFilename = origResolve;
+  testDb.cleanup();
   process.exit(failed > 0 ? 1 : 0);
 })().catch(err => {
   console.error('UNCAUGHT ERROR IN TEST:', err);
   Module._resolveFilename = origResolve;
+  testDb.cleanup();
   process.exit(1);
 });
