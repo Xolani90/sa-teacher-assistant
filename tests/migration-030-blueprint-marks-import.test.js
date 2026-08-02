@@ -23,18 +23,15 @@
  * Run via npm:       npm test
  */
 
-// ── Shim better-sqlite3 → node:sqlite, and stub the heavy downstream
-//    analysis engines diagnosticWorkflowService.js orchestrates — this
-//    test is about the blueprint import wiring, not re-testing
-//    itemAnalysisService/errorAnalysisService/etc., which already have
-//    their own test files. ─────────────────────────────────────────────
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
+
 const path = require('path');
 
-let _db = null;
-
-const dbPath = path.resolve(__dirname, '../utils/database');
+// ── Stub the heavy downstream analysis engines diagnosticWorkflowService.js
+//    orchestrates — this test is about the blueprint import wiring, not
+//    re-testing itemAnalysisService/errorAnalysisService/etc., which
+//    already have their own test files. ─────────────────────────────────
 const stubTargets = {
   [path.resolve(__dirname, '../services/itemAnalysisService.js')]: {
     performItemAnalysis: () => ({ questions: [], error: null }),
@@ -56,31 +53,8 @@ const stubTargets = {
   },
   [path.resolve(__dirname, '../services/curriculumCoverageService.js')]: {
     updateCoverageFromAssessment: () => {},
+    getExpectedTopics: () => [],
   },
-};
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
 };
 
 for (const [resolvedPath, exportsObj] of Object.entries(stubTargets)) {
@@ -137,110 +111,10 @@ function assertThrows(fn, expectedMsg, label) {
   }
 }
 
-// ── Schema (mirrors Migrations 029 + 030, plus minimal supporting tables) ──
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS learners (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash      TEXT NOT NULL,
-      class_id        INTEGER,
-      canonical_name  TEXT NOT NULL,
-      normalized_name TEXT NOT NULL,
-      created_at      TEXT NOT NULL,
-      updated_at      TEXT NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_classed
-      ON learners(phone_hash, class_id, normalized_name) WHERE class_id IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_unclassed
-      ON learners(phone_hash, normalized_name) WHERE class_id IS NULL;
-
-    CREATE TABLE IF NOT EXISTS assessments (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash      TEXT NOT NULL,
-      title           TEXT,
-      grade           INTEGER,
-      subject         TEXT,
-      term            INTEGER,
-      assessment_type TEXT,
-      total_marks     INTEGER,
-      atp_topics      TEXT,
-      class_id        INTEGER,
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
-    );
-
-    CREATE TABLE IF NOT EXISTS learner_results (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      assessment_id INTEGER NOT NULL,
-      learner_name  TEXT,
-      mark          REAL,
-      total_marks   REAL,
-      percentage    REAL,
-      question_data TEXT,
-      learner_id    INTEGER,
-      FOREIGN KEY (assessment_id) REFERENCES assessments(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS assessment_blueprints (
-      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash           TEXT    NOT NULL,
-      title                TEXT    NOT NULL,
-      subject              TEXT    NOT NULL,
-      grade                INTEGER NOT NULL,
-      term                 INTEGER,
-      total_marks          INTEGER NOT NULL,
-      version              INTEGER NOT NULL DEFAULT 1,
-      previous_version_id  INTEGER REFERENCES assessment_blueprints(id),
-      status               TEXT    NOT NULL DEFAULT 'draft',
-      created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
-      updated_at           TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
-    );
-
-    CREATE TABLE IF NOT EXISTS blueprint_questions (
-      id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-      blueprint_id            INTEGER NOT NULL,
-      question_number         INTEGER NOT NULL,
-      topic                   TEXT    NOT NULL,
-      subtopic                TEXT,
-      bloom_level             TEXT,
-      atp_reference           TEXT,
-      expected_misconception  TEXT,
-      max_marks               INTEGER NOT NULL,
-      created_at              TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (blueprint_id) REFERENCES assessment_blueprints(id)
-        ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_assessment_blueprints_phone
-      ON assessment_blueprints(phone_hash);
-    CREATE INDEX IF NOT EXISTS idx_blueprint_questions_blueprint
-      ON blueprint_questions(blueprint_id);
-  `);
-
-  // Migration 029 + 030 (ALTER TABLEs, run outside the base db.exec block,
-  // matching runMigrations()'s real additive-migration pattern).
-  try {
-    db.exec(`ALTER TABLE assessments ADD COLUMN blueprint_id INTEGER REFERENCES assessment_blueprints(id)`);
-  } catch (_) { /* already exists */ }
-  try {
-    db.exec(`ALTER TABLE assessments ADD COLUMN blueprint_version INTEGER`);
-  } catch (_) { /* already exists */ }
-
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_assessments_blueprint
-      ON assessments(blueprint_id);
-  `);
-}
-
 // ── Test runner ─────────────────────────────────────────────────────────
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  const testDb = createTestDb(__filename);
+  const _db = testDb.db;
 
   const { createBlueprint, publishBlueprint } = require('../services/blueprintRepository');
   const {
@@ -258,8 +132,9 @@ async function run() {
   console.log('\n── Section 1: Migration 030 (blueprint_version column) ──────────────');
 
   const plainAssessment = _db.prepare(`
-    INSERT INTO assessments (phone_hash, title, total_marks) VALUES (?, ?, ?)
-  `).run(PHONE, 'Non-blueprint assessment', 20);
+    INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(PHONE, 'Non-blueprint assessment', 6, 'Life Orientation', 2, 'test', 20);
   const plainRow = _db.prepare(`SELECT blueprint_id, blueprint_version FROM assessments WHERE id = ?`)
     .get(plainAssessment.lastInsertRowid);
   assertEq(plainRow.blueprint_id, null, 'non-blueprint assessment: blueprint_id reads back NULL');
@@ -271,9 +146,9 @@ async function run() {
   `).run(PHONE, 'Seed Blueprint', 'Life Orientation', 6, 2, 20);
 
   const bpAssessment = _db.prepare(`
-    INSERT INTO assessments (phone_hash, title, total_marks, blueprint_id, blueprint_version)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(PHONE, 'Blueprint-backed assessment', 20, seedBlueprint.lastInsertRowid, 3);
+    INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks, blueprint_id, blueprint_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(PHONE, 'Blueprint-backed assessment', 6, 'Life Orientation', 2, 'test', 20, seedBlueprint.lastInsertRowid, 3);
   const bpRow = _db.prepare(`SELECT blueprint_id, blueprint_version FROM assessments WHERE id = ?`)
     .get(bpAssessment.lastInsertRowid);
   assertEq(bpRow.blueprint_id, seedBlueprint.lastInsertRowid, 'blueprint-backed assessment: blueprint_id round-trips');
@@ -351,7 +226,7 @@ async function run() {
   // ═══════════════════════════════════════════════════════════════════
   console.log('\n── Section 4: processAssessmentData() with a published blueprint ────');
 
-  const diagnosticResult = processAssessmentData(PHONE, {
+  const diagnosticResult = await processAssessmentData(PHONE, {
     title: 'Fractions Test',
     grade: 6,
     subject: 'Life Orientation',
@@ -386,6 +261,9 @@ async function run() {
   // ── Summary ─────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);
   console.log(`Migration 030 / Blueprint Marks Import Results: ${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 
