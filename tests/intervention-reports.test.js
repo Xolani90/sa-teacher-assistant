@@ -1,104 +1,17 @@
 'use strict';
-// Integration test for interventionReportsService.js — uses better-sqlite3
-// directly (same lib production uses) against an in-memory DB.
+// Integration test for interventionReportsService.js — uses the REAL
+// migration chain (tests/helpers/createTestDb.js) against a throwaway
+// file-backed SQLite database, so it exercises the actual production
+// schema instead of a hand-rolled subset.
 // Run via: npm test, or directly: node tests/intervention-reports.test.js
 
-const Database = require('better-sqlite3');
-const Module = require('module');
-const path = require('path');
 const assert = require('assert');
 
-const db = new Database(':memory:');
-
-db.exec(`
-  CREATE TABLE teachers (phone_hash TEXT PRIMARY KEY, last_assessment_id INTEGER);
-  CREATE TABLE assessments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone_hash TEXT NOT NULL,
-    title TEXT NOT NULL,
-    grade INTEGER NOT NULL,
-    subject TEXT NOT NULL,
-    term INTEGER NOT NULL,
-    assessment_type TEXT NOT NULL,
-    total_marks INTEGER NOT NULL,
-    atp_topics TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE TABLE learner_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    assessment_id INTEGER NOT NULL,
-    learner_name TEXT NOT NULL,
-    mark INTEGER NOT NULL,
-    total_marks INTEGER NOT NULL,
-    percentage REAL NOT NULL,
-    question_data TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE TABLE reports (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone_hash TEXT NOT NULL,
-    assessment_id INTEGER NOT NULL,
-    report_type TEXT NOT NULL,
-    learner_name TEXT,
-    content TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE TABLE item_analysis (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    assessment_id INTEGER NOT NULL,
-    question_number INTEGER NOT NULL,
-    topic TEXT NOT NULL,
-    difficulty REAL NOT NULL,
-    success_rate REAL NOT NULL,
-    cognitive_level TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE TABLE error_analysis (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    assessment_id INTEGER NOT NULL,
-    error_type TEXT NOT NULL,
-    topic TEXT NOT NULL,
-    frequency INTEGER NOT NULL,
-    description TEXT,
-    reteach_action TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE TABLE intervention_plans (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone_hash TEXT NOT NULL,
-    assessment_id INTEGER,
-    problem_area TEXT NOT NULL,
-    target_group TEXT NOT NULL,
-    goals TEXT NOT NULL,
-    duration_days INTEGER NOT NULL,
-    strategies TEXT NOT NULL,
-    resources TEXT,
-    monitoring_plan TEXT,
-    success_indicators TEXT,
-    status TEXT NOT NULL DEFAULT 'active',
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-`);
-
-// fakeDb is just an alias for clarity in the require.cache injection below —
-// better-sqlite3's Database instance already has the .prepare().get/.all/.run()
-// shape that utils/database.js's getDb() consumers expect.
-const fakeDb = db;
-
-// Intercept require('../utils/database') across all services to return our fakeDb.
-const stubPath = path.join(__dirname, '__stub_database.js');
-require('fs').writeFileSync(stubPath, `module.exports = { getDb: () => require(${JSON.stringify(path.join(__dirname, '__test_db_holder.js'))}).db };`);
-require('fs').writeFileSync(path.join(__dirname, '__test_db_holder.js'), '// placeholder');
-require.cache[path.join(__dirname, '__test_db_holder.js')] = { exports: { db: fakeDb }, id: path.join(__dirname, '__test_db_holder.js'), filename: path.join(__dirname, '__test_db_holder.js'), loaded: true };
-
-const origResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, ...rest) {
-  if (request === '../utils/database') {
-    return stubPath;
-  }
-  return origResolve.call(this, request, ...rest);
-};
+// MUST be required before any service/repository module — see
+// tests/helpers/createTestDb.js's "Why this must be required first".
+const { createTestDb } = require('./helpers/createTestDb');
+const testDb = createTestDb(__filename);
+const db = testDb.db;
 
 try {
   const phoneHash = 'testhash123';
@@ -220,7 +133,5 @@ try {
 
   console.log('\n🎉 All 11 tests passed.');
 } finally {
-  Module._resolveFilename = origResolve;
-  try { require('fs').unlinkSync(stubPath); } catch {}
-  try { require('fs').unlinkSync(path.join(__dirname, '__test_db_holder.js')); } catch {}
+  testDb.cleanup();
 }
