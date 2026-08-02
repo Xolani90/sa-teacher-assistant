@@ -12,35 +12,10 @@
  * Run via npm:        npm test
  */
 
-// ── Shim better-sqlite3 → node:sqlite ────────────────────────────────────────
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
 
 let _db = null;
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 let passed = 0;
@@ -87,40 +62,6 @@ function assertThrows(fn, expectedMsg, label) {
   }
 }
 
-// ── Schema (mirrors production migrations) ────────────────────────────────────
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL,
-      name TEXT,
-      school TEXT,
-      grade INTEGER,
-      subject TEXT,
-      is_pro INTEGER DEFAULT 0,
-      default_class_id INTEGER,
-      saved_resources_count INTEGER DEFAULT 0,
-      last_assessment_id TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS saved_resources (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      resource_type TEXT,
-      title TEXT,
-      content TEXT,
-      grade INTEGER,
-      subject TEXT,
-      topic TEXT,
-      metadata TEXT,
-      generation_id TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-  `);
-}
-
 // ── SessionStore stub ─────────────────────────────────────────────────────────
 // A minimal in-memory SessionStore replica for unit-testing the SAVE lifecycle
 // without requiring the full webhook environment.
@@ -133,8 +74,8 @@ class MemorySessionStore {
 
 // ── Test runner ───────────────────────────────────────────────────────────────
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  const testDb = createTestDb(__filename);
+  _db = testDb.db;
 
   const { saveResource, getSavedResources } = require('../services/teacherWorkspaceService');
 
@@ -446,6 +387,9 @@ async function run() {
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);
   console.log(`Phase B2 Results: ${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 

@@ -30,44 +30,19 @@
  * Run via npm:       npm test
  */
 
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
+
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 
 let _db = null;
 
-const dbPath = path.resolve(__dirname, '../utils/database');
 const workspaceServicePath = path.resolve(__dirname, '../services/teacherWorkspaceService.js');
 const classInterventionServicePath = path.resolve(__dirname, '../services/classInterventionService.js');
 
 let classStub = null;
 let planStub = null;
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
 
 require.cache[workspaceServicePath] = {
   id: workspaceServicePath,
@@ -83,9 +58,6 @@ require.cache[classInterventionServicePath] = {
   exports: { getClassInterventionPlan: (phoneHash, classId) => planStub(phoneHash, classId) },
 };
 
-// Route PDF output to a throwaway temp dir instead of ./data/pdfs.
-process.env.DB_PATH = path.join(os.tmpdir(), `class-pdf-test-${Date.now()}`, 'teacher_assistant.db');
-
 // ── Helpers ───────────────────────────────────────────────────────────────
 let passed = 0;
 let failed = 0;
@@ -98,17 +70,6 @@ function assert(condition, label) {
     console.error(`  ❌ FAIL: ${label}`);
     failed++;
   }
-}
-
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL,
-      name TEXT,
-      school TEXT
-    );
-  `);
 }
 
 // Fixture matching classifyLearner()'s real output shape — a subjectPlan
@@ -152,8 +113,8 @@ function fixturePlan(overrides = {}) {
 }
 
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  const testDb = createTestDb(__filename);
+  _db = testDb.db;
 
   const PHONE = 'ci_pdf_test_hash_001';
   _db.prepare(`INSERT INTO teachers (phone_hash, name, school) VALUES (?, ?, ?)`)
@@ -248,6 +209,9 @@ async function run() {
 
   console.log(`\n${'─'.repeat(60)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 
