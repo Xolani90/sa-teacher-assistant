@@ -11,88 +11,24 @@
  * Run via npm:       npm test
  */
 
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-const path = require('path');
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
 
-let _db = null;
-const dbPath = path.resolve(__dirname, '../utils/database');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
-
-function freshDb() {
-  const db = new DatabaseSync(':memory:');
+// getDb() (utils/database.js) is a true process-wide singleton once
+// migrated — it can't be swapped for a fresh db mid-run the way the old
+// hand-rolled shim allowed. resetDb() clears rows from just the tables
+// this service reads instead. No cross-scenario id reuse is relied on
+// here (unlike tests/pr22-whatsapp-otp.test.js), so no sqlite_sequence
+// reset is needed.
+function resetDb(db) {
   db.exec(`
-    CREATE TABLE teachers (phone_hash TEXT PRIMARY KEY);
-
-    CREATE TABLE assessments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      title TEXT NOT NULL,
-      grade INTEGER NOT NULL,
-      subject TEXT NOT NULL,
-      term INTEGER NOT NULL,
-      assessment_type TEXT,
-      total_marks INTEGER,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE curriculum_coverage (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      grade INTEGER NOT NULL,
-      subject TEXT NOT NULL,
-      term INTEGER NOT NULL,
-      topic TEXT NOT NULL,
-      covered INTEGER NOT NULL DEFAULT 0
-    );
-
-    CREATE TABLE intervention_plans (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      assessment_id INTEGER,
-      problem_area TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE observation_assessments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
+    DELETE FROM intervention_plans;
+    DELETE FROM curriculum_coverage;
+    DELETE FROM observation_assessments;
+    DELETE FROM assessments;
+    DELETE FROM teachers;
   `);
-  // better-sqlite3-compatible wrapper over node:sqlite's DatabaseSync API
-  return {
-    prepare(sql) {
-      const stmt = db.prepare(sql);
-      return {
-        all: (...params) => stmt.all(...params),
-        get: (...params) => stmt.get(...params),
-        run: (...params) => stmt.run(...params),
-      };
-    },
-    exec: (sql) => db.exec(sql),
-  };
+  return db;
 }
 
 let passed = 0;
@@ -108,34 +44,38 @@ function assert(cond, msg) {
 }
 
 function run() {
+  const testDb = createTestDb(__filename);
+  let _db = testDb.db;
+
   const { getGrowthInsights } = require('../services/tseGrowthInsightService');
   const TERM = 3;
 
   console.log('\n\u2500\u2500 Scenario 1: complete evidence \u2500\u2500');
-  _db = freshDb();
+  resetDb(_db);
   _db.prepare(`INSERT INTO teachers (phone_hash) VALUES (?)`).run('t1');
   _db.prepare(
     `INSERT INTO curriculum_coverage (phone_hash, grade, subject, term, topic, covered) VALUES (?,?,?,?,?,1)`
   ).run('t1', 7, 'mathematics', TERM, 'Fractions');
   const aId = _db
     .prepare(
-      `INSERT INTO assessments (phone_hash, title, grade, subject, term) VALUES (?,?,?,?,?)`
+      `INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks) VALUES (?,?,?,?,?,?,?)`
     )
-    .run('t1', 'Fractions Test', 7, 'mathematics', TERM).lastInsertRowid;
-  _db.prepare(`INSERT INTO intervention_plans (phone_hash, assessment_id) VALUES (?,?)`).run(
+    .run('t1', 'Fractions Test', 7, 'mathematics', TERM, 'formal', 50).lastInsertRowid;
+  _db.prepare(`INSERT INTO intervention_plans (phone_hash, assessment_id, problem_area, target_group, goals, duration_days, strategies) VALUES (?,?,?,?,?,?,?)`).run(
     't1',
-    aId
+    aId,
+    'Fractions', 'Whole class', 'Improve fraction fluency', 14, 'Small-group re-teach'
   );
   let result = getGrowthInsights('t1', { term: TERM });
   assert(result.gaps.length === 0, 'no gaps when coverage -> assessment -> intervention all link up');
   assert(typeof result.strength === 'string', 'strength message present when no gaps');
 
   console.log('\n\u2500\u2500 Scenario 2: missing intervention evidence \u2500\u2500');
-  _db = freshDb();
+  resetDb(_db);
   _db.prepare(`INSERT INTO teachers (phone_hash) VALUES (?)`).run('t2');
   _db.prepare(
-    `INSERT INTO assessments (phone_hash, title, grade, subject, term) VALUES (?,?,?,?,?)`
-  ).run('t2', 'Algebra Test', 8, 'mathematics', TERM);
+    `INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks) VALUES (?,?,?,?,?,?,?)`
+  ).run('t2', 'Algebra Test', 8, 'mathematics', TERM, 'formal', 50);
   result = getGrowthInsights('t2', { term: TERM });
   assert(
     result.gaps.some((g) => g.type === 'assessment_without_intervention'),
@@ -145,7 +85,7 @@ function run() {
   assert(result.suggestedAction !== null, 'suggestedAction populated when gaps exist');
 
   console.log('\n\u2500\u2500 Scenario 3: coverage marked, no assessment ever recorded \u2500\u2500');
-  _db = freshDb();
+  resetDb(_db);
   _db.prepare(`INSERT INTO teachers (phone_hash) VALUES (?)`).run('t3');
   _db.prepare(
     `INSERT INTO curriculum_coverage (phone_hash, grade, subject, term, topic, covered) VALUES (?,?,?,?,?,1)`
@@ -157,7 +97,7 @@ function run() {
   );
 
   console.log('\n\u2500\u2500 Scenario 4: observations with zero intervention follow-up \u2500\u2500');
-  _db = freshDb();
+  resetDb(_db);
   _db.prepare(`INSERT INTO teachers (phone_hash) VALUES (?)`).run('t4');
   _db.prepare(`INSERT INTO observation_assessments (phone_hash) VALUES (?)`).run('t4');
   result = getGrowthInsights('t4', { term: TERM });
@@ -167,14 +107,14 @@ function run() {
   );
 
   console.log('\n\u2500\u2500 Scenario 5: empty profile \u2500\u2500');
-  _db = freshDb();
+  resetDb(_db);
   _db.prepare(`INSERT INTO teachers (phone_hash) VALUES (?)`).run('t5');
   result = getGrowthInsights('t5', { term: TERM });
   assert(result.gaps.length === 0, 'a teacher with zero evidence has zero gaps (nothing to compare)');
   assert(result.strength !== null, 'empty profile still resolves to the positive/no-gaps branch');
 
   console.log('\n\u2500\u2500 Scenario 6: input guard \u2500\u2500');
-  _db = freshDb();
+  resetDb(_db);
   let threw = false;
   try {
     getGrowthInsights(null);
@@ -184,7 +124,7 @@ function run() {
   assert(threw, 'missing phoneHash throws');
 
   console.log('\n\u2500\u2500 Scenario 7: DB failure is non-fatal per rule, does not crash the call \u2500\u2500');
-  _db = freshDb();
+  resetDb(_db);
   _db.prepare(`INSERT INTO teachers (phone_hash) VALUES (?)`).run('t7');
   const origPrepare = _db.prepare.bind(_db);
   let callCount = 0;
@@ -202,6 +142,9 @@ function run() {
   assert(ok, 'a per-rule query failure is caught and logged, not thrown to the caller');
 
   console.log(`\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\nGrowth Insight Results: ${passed} passed, ${failed} failed\n\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 
