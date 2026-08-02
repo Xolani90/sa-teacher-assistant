@@ -16,37 +16,10 @@
  * Run via npm:         npm test
  */
 
-// ── Shim better-sqlite3 → node:sqlite ────────────────────────────────────────
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-
-let _db = null;
-
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
+// ── Real-migrations test DB (see tests/helpers/createTestDb.js) ──────────
+const { createTestDb } = require('./helpers/createTestDb');
+const testDb = createTestDb(__filename);
+let _db = testDb.db;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 let passed = 0;
@@ -93,30 +66,8 @@ function assertThrows(fn, expectedMsg, label) {
   }
 }
 
-// ── Schema (mirrors Migration 037 exactly) ───────────────────────────────────
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS qms_reflections (
-      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash         TEXT    NOT NULL,
-      term               INTEGER,
-      content            TEXT    NOT NULL,
-      ai_assisted        INTEGER NOT NULL DEFAULT 0,
-      evidence_link_ids  TEXT,
-      created_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-      updated_at         TEXT    NOT NULL DEFAULT (datetime('now')),
-      deleted_at         TEXT
-    );
-    CREATE INDEX IF NOT EXISTS idx_qms_reflections_phone_term
-      ON qms_reflections(phone_hash, term);
-  `);
-}
-
 // ── Test runner ───────────────────────────────────────────────────────────────
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
-
   const {
     createReflection,
     getReflection,
@@ -337,6 +288,7 @@ async function run() {
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);
   console.log(`Migration 037 / reflectionService Results: ${passed} passed, ${failed} failed`);
+  testDb.cleanup();
   if (failed > 0) process.exit(1);
 }
 
