@@ -1,6 +1,23 @@
 # Investigation: `[TSE] tagEvidence failed (non-fatal): no such table: school_calendar`
 
-## Status: PR A, PR B1 (7/7 files), PR C, PR B2.1 (4/4 files), and PR B2.2 (5/5 files) complete. PR B2.3 next.
+## Status: rollout complete
+
+- PR A — complete
+- PR B1 (7/7 files) — complete
+- PR C — complete
+- PR B2.1 (4/4 files) — complete
+- PR B2.2 (5/5 files) — complete
+- PR B2.3–B5 — complete (implemented after this document was last updated;
+  detailed per-file history for these batches is preserved in `git log`,
+  not reproduced here — see "Audit trail note" at the end of this
+  document)
+- Post-B5 audit — complete (see "Post-B5 audit" below)
+- PR B6 (6/6 files) — complete (see "PR B6" below)
+- **Production-backed hand-rolled-schema migration initiative: complete.**
+  No remaining test file exercises real production code (`routes/webhook`,
+  `utils/usageTracker`, or any service/repository) against a hand-rolled,
+  non-migrated schema. See "Repository state" below for what remains on
+  direct `better-sqlite3` and why that's no longer a schema-drift risk.
 
 ## Root cause
 
@@ -190,30 +207,108 @@ hiding in the ~27 unconverted files, rather than genuinely resolved
 issues. Enable `NODE_ENV=test` once PR B2 has converted most of the
 remaining files.
 
-## Remaining work
+## Post-B5 audit
 
-**PR B2.3 (TSE Evidence) — next incremental migration batch.** No
-behavioral changes, infrastructure only. Candidates confirmed as
-genuine DB-shim conversions (still hand-roll a schema via
-`better-sqlite3`/`DatabaseSync`):
+After PR B2.3–B5 (see "Audit trail note" below), 8 test files remained
+that either required the native `better-sqlite3` addon directly or
+otherwise hadn't been swept by the earlier batches. Before declaring the
+rollout complete, each was audited against four questions: does it
+`require('better-sqlite3')` directly, does it hand-roll its own
+`CREATE TABLE` schema, does it manually stub `../utils/database`, and does
+it exercise real production code that should instead run through
+`createTestDb()`.
 
-- `tests/tseEvidenceService.test.js`
-- `tests/tseGrowthInsightService.test.js`
-- `tests/backfillTseEvidence.test.js`
+| File | Direct `better-sqlite3` | Hand-rolled schema | Exercises real production code | Classification |
+|---|---|---|---|---|
+| `cancel-pending-save.test.js` | ✓ | ✓ (`teachers`, `sessions`, `saved_resources`) | ✓ `routes/webhook` | Convert |
+| `generation-pipeline-last-intent.test.js` | ✓ | ✓ (`teachers`, `usage_events`, `rate_limit_events`, `sessions`) | ✓ `routes/webhook` | Convert |
+| `menu-help-session-reset.test.js` | ✓ | ✓ (`teachers`, `sessions`) | ✓ `routes/webhook` | Convert |
+| `phase1-delivery-rollback.test.js` | ✓ | ✓ (`teachers`, `usage_events`, `rate_limit_events`, `sessions`) | ✓ `routes/webhook` | Convert |
+| `mark-user-as-pro.test.js` | ✓ | ✓ (`teachers`) | ✓ `utils/usageTracker` | Convert |
+| `phase-e-usage-rollback.test.js` | ✓ | ✓ (`teachers`, `usage_events`) | ✓ `utils/usageTracker` | Convert |
+| `learnerIdentityService.test.js` | ✗ | ✗ — already calls real `runMigrations()` | ✓ `services/learnerIdentityService` | Leave as-is |
+| `migration-036-learner-intervention-writer.test.js` | ✗ | ✗ — already calls real `runMigrations()` | ✓ `services/interventionService` | Leave as-is |
 
-~29 files remain across all batches after B2.1 + B2.2. Same priority
-order as before: TSE Evidence / Assessments / Observations /
-Reporting / QMS, since those are what the upcoming Reporting Centre
-will build on.
+**Outcome:** 6 of the 8 were genuine, production-backed hand-rolled-schema
+debt — the same pattern PR B5 and earlier batches existed to eliminate.
+The other 2 were already correct: they call the real `runMigrations()`
+directly (predating the shared `createTestDb()` helper, same as
+`tests/adr003-learners-migration.test.js`), and their sandbox failures were
+purely environmental — the uncompiled native `better-sqlite3` addon
+hitting the sandbox's known `invalid ELF header` constraint — not schema
+drift. This distinction is why the rollout wasn't marked complete at the
+audit stage: 6 files still had real architectural debt, scoped as PR B6.
 
-Note: `tests/adr003-learners-migration.test.js` uses the same
-real-migrations pattern independently (it predates the shared
-`createTestDb()` helper — see "Fix: shared migrated-test-db helper"
-above) rather than a hand-rolled schema. It still shows up in a raw
-grep for `DatabaseSync`/`better-sqlite3`, but it's not a conversion
-candidate in the same sense as the others; it could optionally be
-switched to call the shared helper for consistency, but there's no
-schema-drift risk to fix there.
+## PR B6 — final production-backed schema conversions (6/6 files, complete)
+
+- `mark-user-as-pro.test.js`
+- `phase-e-usage-rollback.test.js`
+- `menu-help-session-reset.test.js`
+- `cancel-pending-save.test.js`
+- `generation-pipeline-last-intent.test.js`
+- `phase1-delivery-rollback.test.js`
+
+All six were production-backed tests (four exercising `routes/webhook`,
+two exercising `utils/usageTracker`) previously using a hand-rolled
+schema plus a manual `Module._resolveFilename` + `require.cache` stub for
+`../utils/database`, and in most cases a direct
+`require('better-sqlite3')` that couldn't run in the sandbox at all
+(`invalid ELF header`).
+
+Conversion pattern, applied identically to each file, matching PR B1–B2.2:
+
+1. Remove the hand-rolled `CREATE TABLE` schema and the direct
+   `require('better-sqlite3')`.
+2. Require `tests/helpers/createTestDb.js` first (before any
+   service/repository module) and use its `db` instead.
+3. Remove the database half of the manual `Module._resolveFilename`
+   override; keep any stubs for other modules (`whatsappService`,
+   `aiService`, `usageTracker`) as-is, since `createTestDb()` only shims
+   `better-sqlite3`, not application services.
+4. Add `testDb.cleanup()` on both the success and error exit paths.
+5. Run each file three times to confirm stability, then spot-check
+   against every previously-converted file in the batch for regressions.
+
+No schema-drift findings turned up in this batch — all six hand-rolled
+schemas already matched the real migrated schema's constraints. Two
+smaller cleanups: `phase-e-usage-rollback.test.js`'s local
+`hashPhoneForTest()` duplicate was dropped in favor of the real exported
+`hashPhone()` from `utils/usageTracker` (same for
+`generation-pipeline-last-intent.test.js` and
+`phase1-delivery-rollback.test.js`), now that the real module is loaded
+end to end.
+
+**Verification:** each file passed individually (13, 5, 19, 13, 12, and 7
+assertions respectively) and stably across 3 repeat runs. Running all six
+converted files together as a final sweep: **69/69 assertions pass, zero
+regressions.**
+
+## Repository state
+
+After PR B6, the only test files still directly requiring
+`better-sqlite3` or `node:sqlite`'s `DatabaseSync` are ones that already
+call the real `runMigrations()` chain rather than hand-rolling a schema
+(`learnerIdentityService.test.js`,
+`migration-036-learner-intervention-writer.test.js`,
+`tests/adr003-learners-migration.test.js`). These are not schema-drift
+risks — any future migration automatically appears in them the same way
+it does in every `createTestDb()`-converted file — so they are
+intentionally out of scope for this initiative rather than remaining
+debt.
+
+**The production-backed hand-rolled-schema migration initiative is
+complete.** No test file exercising real production code (`routes/webhook`,
+`utils/usageTracker`, or any service/repository) does so against a
+hand-rolled, non-migrated schema.
+
+## Audit trail note
+
+Detailed implementation history for PRs B2.3 through B5 is preserved in
+the repository commit history rather than reproduced here. This document
+records the verified end state — the post-B5 audit and PR B6 — rather
+than reconstructing intermediate implementation notes (file lists,
+assertion counts, individual findings) for batches that predate this
+update.
 
 **Original PR C plan (implemented above, kept for reference):**
 
