@@ -1,6 +1,6 @@
 # Investigation: `[TSE] tagEvidence failed (non-fatal): no such table: school_calendar`
 
-## Status: PR A, PR B1 (7/7 files), PR C, and PR B2.1 (4/4 files) complete. PR B2.2 (Auth) in progress.
+## Status: PR A, PR B1 (7/7 files), PR C, PR B2.1 (4/4 files), and PR B2.2 (5/5 files) complete. PR B2.3 next.
 
 ## Root cause
 
@@ -132,6 +132,45 @@ hand-rolled schema to drift, so there's nothing for `createTestDb()`
 to fix. Confirmed by grepping all test files for the DB-shim pattern;
 this file doesn't match it. B2.1 is complete at 4 real conversions.
 
+## PR B2.2 — Auth batch (5 files, complete)
+
+- `tests/authCodeRepository.test.js`
+- `tests/teacherAuth.test.js`
+- `tests/pr22-whatsapp-otp.test.js`
+- `tests/pr25-dev-otp-bypass.test.js`
+- `tests/update-teacher-profile.test.js`
+
+All five pass in full against the real migrated schema, no
+regressions (33, 48, 39, 12, and 2 assertions respectively). Unlike
+B2.1, this batch wasn't uniformly mechanical — three files needed
+real thought beyond a find-and-replace:
+
+- **`pr22-whatsapp-otp.test.js`** called `resetDb()` 16 times mid-run,
+  each originally swapping in a brand-new in-memory db. Since the real
+  `utils/database.js`'s `getDb()` is a true process-wide singleton,
+  `createTestDb()` can only run once per file — `resetDb()` now clears
+  rows via `DELETE FROM` instead. That surfaced a real test-only bug:
+  `DELETE` doesn't reset SQLite's autoincrement sequence, and one
+  section (`VC-08`) relied on `insertTeacher()` reproducing an id
+  captured by an earlier section under the old always-fresh-db
+  semantics. Fixed by also clearing `sqlite_sequence` on every reset.
+- **`update-teacher-profile.test.js`** previously couldn't run in the
+  sandbox at all — it required the native `better-sqlite3` addon
+  directly (with a hand-written two-file module-resolution stub)
+  instead of going through any shim, hitting the sandbox's known
+  `invalid ELF header` constraint. Converting it fixed that as a side
+  effect. It also surfaced a genuine schema-drift finding: the
+  hand-rolled schema declared `teachers.grade` as `INTEGER`, but the
+  real migrated column is `TEXT` — `utils/usageTracker.js` deliberately
+  stringifies integer grades before writing (a documented fix for a
+  prior `"7.0"` coercion bug). The `INTEGER` hand-rolled schema masked
+  that this codepath is ever exercised. Fixed the test assertion to
+  expect the string `'7'`, matching real production behavior; no
+  production code changed.
+- `authCodeRepository.test.js`, `teacherAuth.test.js`, and
+  `pr25-dev-otp-bypass.test.js` were clean, mechanical conversions —
+  hand-rolled schemas already matched the real migrated schema exactly.
+
 ## PR C — `tagEvidence()` diagnostics (complete)
 
 Implemented as originally proposed below: distinguishes missing-table
@@ -153,22 +192,28 @@ remaining files.
 
 ## Remaining work
 
-**PR B2.2 (Auth) — next incremental migration batch.** No behavioral
-changes, infrastructure only. Candidates confirmed as genuine
-DB-shim conversions (still hand-roll a schema via `better-sqlite3`/
-`DatabaseSync`):
+**PR B2.3 (TSE Evidence) — next incremental migration batch.** No
+behavioral changes, infrastructure only. Candidates confirmed as
+genuine DB-shim conversions (still hand-roll a schema via
+`better-sqlite3`/`DatabaseSync`):
 
-- `tests/authCodeRepository.test.js`
-- `tests/teacherAuth.test.js`
-- `tests/pr22-whatsapp-otp.test.js`
-- `tests/pr25-dev-otp-bypass.test.js`
-- `tests/update-teacher-profile.test.js`
+- `tests/tseEvidenceService.test.js`
+- `tests/tseGrowthInsightService.test.js`
+- `tests/backfillTseEvidence.test.js`
 
-~32 files remain across all batches after B2.1. Same priority order
-as before: TSE Evidence / Assessments / Observations / Reporting /
-QMS first, since those are what the upcoming Reporting Centre will
-build on; Auth is being pulled forward as its own focused batch
-(B2.2) since it's a small, self-contained cluster.
+~29 files remain across all batches after B2.1 + B2.2. Same priority
+order as before: TSE Evidence / Assessments / Observations /
+Reporting / QMS, since those are what the upcoming Reporting Centre
+will build on.
+
+Note: `tests/adr003-learners-migration.test.js` uses the same
+real-migrations pattern independently (it predates the shared
+`createTestDb()` helper — see "Fix: shared migrated-test-db helper"
+above) rather than a hand-rolled schema. It still shows up in a raw
+grep for `DatabaseSync`/`better-sqlite3`, but it's not a conversion
+candidate in the same sense as the others; it could optionally be
+switched to call the shared helper for consistency, but there's no
+schema-drift risk to fix there.
 
 **Original PR C plan (implemented above, kept for reference):**
 
