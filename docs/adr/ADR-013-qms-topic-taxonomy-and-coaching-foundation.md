@@ -9,6 +9,18 @@ model), ADR-012 (QMS action centre).
 **Blocks:** PR33 (deterministic coaching engine) cannot begin until PR32
 (this ADR's schema/flow decisions) is implemented and merged.
 
+**Section ownership** — which PR implements which part of this ADR:
+
+| Section | Implemented in |
+|---|---|
+| §3 Taxonomy | PR32 |
+| §4 Architecture (helper, service contract, schema) | PR32 |
+| §5 Flow Changes | PR32 |
+| §6 Coaching Engine Foundation | PR33 |
+| §7 Implementation Requirements | PR32 |
+| §8 Testing Strategy — Sections 1–3.5, 4–7, migration | PR32 |
+| §8 Testing Strategy — coaching engine sections | PR33 |
+
 ---
 
 ## 1. Status & Context
@@ -92,10 +104,10 @@ for both PRs; §3–5 govern PR32, §6 governs PR33.
 This list is a provisional default for initial release, not a frozen
 value set — see §3.4. Changes to the canonical taxonomy (adding, removing,
 or renaming a `topicId`) require their own ADR or explicit architectural
-review — never an unreviewed edit to the constants module. The taxonomy is
-a shared dependency of both flows and the coaching engine; casual expansion
-("it's only a constants file") would undermine the same determinism this
-ADR exists to protect.
+review; an unreviewed edit to the constants module is not sufficient. The
+taxonomy is a shared dependency of both flows and the coaching engine, so
+casual expansion ("it's only a constants file") would undermine the same
+determinism this ADR exists to protect.
 
 ### 3.2 `topicId` contract
 
@@ -111,7 +123,12 @@ Each taxonomy entry carries:
 ```
 
 `id` is the only value ever persisted. `label`/`description`/`order` may
-change without a migration; `id` changing requires a migration.
+change without a migration; `id` changing requires a migration. `order` is
+schema-free but not behavior-free: it is a direct input to the coaching
+engine's recommendation tie-break (§6.4). A change to `order` is a
+behavioral change to coaching output, not a cosmetic UI edit, and should
+go through the same review as any other change affecting recommendation
+ranking — even though no migration is required to make it.
 
 ### 3.3 Validation rules
 
@@ -120,9 +137,11 @@ change without a migration; `id` changing requires a migration.
 - Unknown `topicId` values are rejected at the service layer (same
   validation posture as `growthPlanService.js`'s existing `VALID_STATUSES`
   check).
-- `topic_id` is nullable at the schema level (to permit legacy rows to
-  remain unmigrated), but no *new* write may persist a null or invalid
-  `topicId`.
+- `topic_id` is nullable at the schema level, but that nullability exists
+  solely to permit pre-PR32 legacy rows to remain unmigrated. New
+  application writes must always provide a valid `topicId`; null is
+  reserved exclusively for legacy rows and is never a valid value for a
+  write originating from this PR onward.
 
 ### 3.4 Future extensibility
 
@@ -158,7 +177,10 @@ what they've entered so far) remains owned entirely by each flow's own
 state map (`reflectionState`, `growthPlanState`), exactly as today. The
 helper must not be extended later to own any part of session state — if a
 future change seems to require that, it belongs in the flow, not the
-helper.
+helper. When rendering the numbered topic list, the helper must sort
+topics by ascending `order` (§3.2) — never by module insertion order,
+which is an implementation detail of §4.1's shared module and not a
+guaranteed ordering.
 
 ### 4.3 Service-layer contract change
 
@@ -175,6 +197,19 @@ After:
 createGrowthPlan(phoneHash, { goalText, term, topicId, status })
 ```
 
+The reflection service takes the equivalent change, added here explicitly
+rather than left implicit, since PR32 touches both services equally:
+
+Before:
+```js
+createReflection(phoneHash, { lesson, wentWell, improvement })
+```
+
+After:
+```js
+createReflection(phoneHash, { lesson, wentWell, improvement, topicId })
+```
+
 **Canonical terminology:** the system standardizes on `topicId` as the
 canonical identifier for instructional focus areas. Legacy free-text
 concepts such as `targetArea` are replaced at the service boundary to
@@ -182,6 +217,15 @@ prevent semantic ambiguity between user-entered text and controlled
 taxonomy identifiers. No parameter or column named `targetArea` may hold a
 `topicId` value — the rename is atomic across flow, service, validation,
 and persistence (§7.2).
+
+**Analytics ownership boundary:** `qmsAnalyticsService` remains
+responsible only for retrieving validated, tagged reflection and growth
+plan data (i.e. querying by `topicId`, filtering nulls/mismatches per
+§6.1). Topic aggregation, pattern detection, confidence scoring, and
+recommendation generation belong exclusively to the coaching engine (PR33,
+§6). `qmsAnalyticsService` does not compute confidence, does not rank, and
+does not generate recommendations — it is a data-retrieval layer the
+coaching engine sits on top of, not a partial implementation of it.
 
 ### 4.4 Database schema changes
 
@@ -192,6 +236,17 @@ and persistence (§7.2).
   detail for the PR32 migration script, not frozen here, but the *service
   layer* must expose only `topicId` regardless of underlying column
   strategy.
+
+**Database-level integrity:** `topic_id` is a plain `TEXT` column, not a
+foreign key into a taxonomy lookup table, and no `CHECK` constraint
+enforces membership in the current taxonomy. Validation is the service
+layer's responsibility only (§3.3); the database will accept any string,
+including one written outside the application (manual SQL, a future
+migration, etc.). This is an accepted trade-off, not an oversight — it
+avoids a lookup-table migration every time §3.4 adds a topic — and it is
+exactly why §6.1 requires the coaching engine to treat any
+taxonomy-mismatched `topic_id` as equivalent to null rather than trusting
+the column's contents.
 
 ### 4.5 Migration strategy
 
@@ -290,6 +345,18 @@ following findings:
 Every rule in this section assumes `topicId` is present, validated, and
 comparable across records. None of it is implementable against free text.
 
+**Resilience against stale or invalid persisted `topicId` values.** §3.3
+guarantees validation at write time, but does not guarantee every row the
+coaching engine later reads still matches the *current* active taxonomy —
+a topic could in principle be removed (§3.4) after rows referencing it
+already exist, or a row could be modified outside the application (manual
+SQL, data migration error). The coaching engine treats any persisted
+`topic_id` that is not present in the current active taxonomy exactly like
+a null `topic_id`: excluded from evidence, never surfaced, never a source
+of an error or a recovery/inference attempt. This keeps the engine
+resilient to data it doesn't fully control without weakening the
+determinism guaranteed for data it does.
+
 ### 6.2 Evidence object shape
 
 ```json
@@ -316,14 +383,14 @@ confidence = 0.40 × evidenceScore
 
 **evidenceScore** — normalized amount of supporting evidence:
 ```
-evidenceScore = min(supportingEvidenceCount / REQUIRED_EVIDENCE, 1.0)
+evidenceScore = min(supportingEvidenceCount / DEFAULT_REQUIRED_EVIDENCE, 1.0)
 ```
-where `REQUIRED_EVIDENCE = DEFAULT_REQUIRED_EVIDENCE = 5`, a named
-configuration default (not a bare magic number), defined alongside
-`DEFAULT_MAX_INSIGHTS` (§6.4). Like the taxonomy and the insufficient-data
-thresholds, this value is a provisional default rather than a calibrated
-one, but it must still be a single named constant, not an inline literal,
-so the formula is reproducible from the ADR without guessing.
+where `DEFAULT_REQUIRED_EVIDENCE = 5`, a named configuration default (not
+an inline magic number), defined alongside `DEFAULT_MAX_INSIGHTS` (§6.4).
+Like the taxonomy and the insufficient-data thresholds, this value is a
+provisional default rather than a calibrated one, but it must still be a
+single named constant so the formula is reproducible from the ADR without
+guessing.
 
 **recencyScore** — freshness of the *newest* supporting evidence item only
 (not averaged across evidence — a single recent item is often exactly why
@@ -356,7 +423,7 @@ of data.
 
 **Worked example** (multi-evidence, not single-item):
 
-- 5 supporting evidence items, `REQUIRED_EVIDENCE = 5` → `evidenceScore = 1.00`
+- 5 supporting evidence items, `DEFAULT_REQUIRED_EVIDENCE = 5` → `evidenceScore = 1.00`
 - Newest supporting item is 14 days old → `recencyScore = 1.00`
 - 7 of the last 10 tagged reflections match this topic → `consistencyScore = 0.70`
 
@@ -367,6 +434,17 @@ confidence = 0.40×1.00 + 0.30×0.70 + 0.30×1.00 = 0.91
 Tests assert this exact value (`assertEq(confidence, 0.91)`), not a
 threshold check.
 
+**confidenceLabel** — a deterministic label derived from the numeric score,
+exposed in the API (§6.7) so presentation layers never need to duplicate
+thresholds or parse the `explanation` string to recover it. Evaluated in
+this order, first match wins:
+
+```
+confidence >= 0.75             → "High"
+0.45 <= confidence < 0.75      → "Medium"
+confidence < 0.45              → "Low"
+```
+
 ### 6.4 Recommendation precedence / conflict resolution
 
 ```
@@ -374,7 +452,9 @@ Generate all applicable candidate recommendations
   → attach confidence (§6.3)
   → group by topicId
   → keep only the highest-confidence recommendation per topic
-  → sort remaining candidates by confidence, descending
+  → sort remaining candidates by confidence, descending;
+    ties broken by topic `order` (§3.2) ascending, and any remaining tie
+    broken by `topicId` ascending (lexicographic)
   → return the first DEFAULT_MAX_INSIGHTS
 ```
 
@@ -382,7 +462,26 @@ Generate all applicable candidate recommendations
 hardcoded magic number in the rules engine. This guarantees the engine
 never emits two contradictory recommendations for the same topic (e.g.
 "keep focusing on X" and "move on from X") — only the strongest survives
-deduplication.
+deduplication. The three-level tie-break (confidence → order → topicId)
+guarantees stable ordering even if two topics are ever accidentally
+assigned the same `order` value; `order` values are expected to be unique,
+but the `topicId` fallback means uniqueness is a convention to maintain,
+not a precondition the sort depends on.
+
+Multiple rule types may emit candidate recommendations for the same topic.
+Deduplication (§6.4, "keep only the highest-confidence recommendation per
+topic") happens after all rules have run and produced their candidates —
+never inside an individual rule. No rule may short-circuit or suppress
+another rule's output; the deduplication step alone is responsible for
+resolving same-topic conflicts.
+
+**Rules execute independently of one another and of registration/execution
+order.** Whatever order rules run in, each produces its candidates without
+reading or depending on another rule's output, and final output (post
+dedup, sort, truncate) must be identical regardless of that order. This is
+what makes deduplication-after-generation (rather than short-circuiting
+inside a rule) safe: order-independence is a property the pipeline design
+guarantees, not an incidental behavior of today's implementation.
 
 ### 6.5 Explanation field (deterministic, not free text)
 
@@ -408,6 +507,13 @@ IF reflections < 3 OR activeGrowthPlans < 1
 THEN return { status: "insufficient_data", recommendations: [] }
 ```
 
+`activeGrowthPlans` is defined precisely as: growth plans whose `status`
+equals `'active'` (per `growthPlanService.js`'s existing
+`VALID_STATUSES` — not `in_progress`, `completed`, or `abandoned`). This
+is stated explicitly so the guard's implementation counts the same set
+of rows regardless of who writes it, rather than leaving "active" open to
+interpretation against the four-value status enum.
+
 **Note:** these thresholds are configuration defaults chosen for initial
 release, not derived from usage data. They are expected to be revisited
 once real usage volume exists. This is stated explicitly so the values are
@@ -419,7 +525,7 @@ never mistaken for a calibrated product decision.
 getCoachingInsights(phoneHash, options) → {
   status,
   summary,
-  recommendations,   // [{ topicId, topicLabel, recommendation, confidence, evidence, explanation }]
+  recommendations,   // [{ topicId, topicLabel, recommendation, confidence, confidenceLabel, evidence, explanation }]
   generatedAt
 }
 ```
@@ -483,6 +589,11 @@ function's output and must never block or alter it.
   extraction; recommendation rules (exact recommendations fire, unrelated
   ones do not); confidence (exact value assertions per §6.3); evidence
   traceability; ownership isolation — mirroring the rigor of PR30/PR31.
+- **(PR33) Unknown persisted `topic_id` regression (§6.1):** a reflection
+  or growth plan with a `topic_id` not present in the active taxonomy
+  loads without error; is excluded from evidence/consistency counts, same
+  as a null `topic_id`; does not throw; does not affect confidence
+  calculated for other, validly-tagged topics.
 
 ---
 
