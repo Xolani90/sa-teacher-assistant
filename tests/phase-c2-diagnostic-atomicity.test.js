@@ -13,162 +13,17 @@
 // used in teacherWorkspaceService.saveResource), so a mid-loop throw rolls
 // back to zero new rows instead of leaving a partial set.
 //
-// Uses better-sqlite3 directly (same lib production uses) against an
-// in-memory DB, with the REAL service files loaded via Module._resolveFilename
-// patching -- same convention as tests/intervention-reports.test.js.
+// Uses tests/helpers/createTestDb.js (real runMigrations(), same function
+// server.js calls at startup) against a throwaway file-backed DB, instead
+// of a hand-rolled mock schema + direct better-sqlite3. See
+// docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md for why: the native better-sqlite3
+// addon can't load in this sandbox (invalid ELF header), and the previous
+// hand-rolled schema was reverse-engineered from other test files' usage
+// rather than the real migrations, per this file's own prior comments.
 //
 // Run: node tests/phase-c2-diagnostic-atomicity.test.js
 
-const Database = require('better-sqlite3');
-const Module = require('module');
-const path = require('path');
-const assert = require('assert');
-
-const db = new Database(':memory:');
-
-db.exec(`
-  CREATE TABLE teachers (phone_hash TEXT PRIMARY KEY);
-
-  -- Added for ADR-003 PR 3: storeLearnerResults() now calls resolveLearner()
-  -- before every insert, which requires classes (FK target of learners.class_id)
-  -- and learners to exist. Column shape mirrors the INSERT/SELECT statements
-  -- already exercised in tests/learnerIdentityService.test.js -- not invented
-  -- fresh here, just replicated so this suite's schema doesn't drift from that
-  -- one. NOTE: I have not seen utils/database.js's actual migration source for
-  -- these two tables; this is inferred from test-file usage, not confirmed
-  -- against the real migration. Flagging so it gets checked against a real
-  -- .schema dump before this is trusted as authoritative.
-  CREATE TABLE classes (
-    id INTEGER PRIMARY KEY,
-    phone_hash TEXT NOT NULL,
-    name TEXT,
-    grade INTEGER,
-    subject TEXT,
-    FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
-  );
-  CREATE TABLE learners (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone_hash TEXT NOT NULL,
-    class_id INTEGER,
-    canonical_name TEXT NOT NULL,
-    normalized_name TEXT NOT NULL,
-    created_at TEXT NOT NULL DEFAULT (datetime('now')),
-    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-    FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
-    FOREIGN KEY (class_id) REFERENCES classes(id)
-  );
-  CREATE UNIQUE INDEX idx_learners_identity_classed
-    ON learners(phone_hash, class_id, normalized_name) WHERE class_id IS NOT NULL;
-  CREATE UNIQUE INDEX idx_learners_identity_unclassed
-    ON learners(phone_hash, normalized_name) WHERE class_id IS NULL;
-
-  CREATE TABLE assessments (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone_hash TEXT NOT NULL,
-    title TEXT NOT NULL,
-    grade INTEGER NOT NULL,
-    subject TEXT NOT NULL,
-    term INTEGER NOT NULL,
-    assessment_type TEXT NOT NULL,
-    total_marks INTEGER NOT NULL,
-    atp_topics TEXT,
-    class_id INTEGER REFERENCES classes(id),
-    blueprint_id INTEGER,
-    blueprint_version INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE TABLE learner_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    assessment_id INTEGER NOT NULL,
-    learner_name TEXT NOT NULL,
-    mark INTEGER NOT NULL,
-    total_marks INTEGER NOT NULL,
-    percentage REAL NOT NULL,
-    question_data TEXT,
-    learner_id INTEGER,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE TABLE item_analysis (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    assessment_id INTEGER NOT NULL,
-    question_number INTEGER NOT NULL,
-    topic TEXT NOT NULL,
-    difficulty REAL NOT NULL,
-    success_rate REAL NOT NULL,
-    cognitive_level TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE TABLE error_analysis (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    assessment_id INTEGER NOT NULL,
-    error_type TEXT NOT NULL,
-    topic TEXT NOT NULL,
-    frequency INTEGER NOT NULL,
-    description TEXT,
-    reteach_action TEXT,
-    created_at TEXT NOT NULL DEFAULT (datetime('now'))
-  );
-  -- The following three tables were missing from this mock schema even
-  -- though processAssessmentData's real pipeline (Steps 6-8) touches all
-  -- of them via generateInterventionPlan, updateCoverageFromAssessment,
-  -- and generateInterventionReport. Production's utils/database.js does
-  -- create these (runMigrations() at server startup), so this was a test
-  -- fixture gap, not a production bug -- but it meant this suite was
-  -- failing for the wrong reason (missing table) rather than testing what
-  -- it was meant to test (atomicity). Definitions copied verbatim from
-  -- utils/database.js so the mock stays a faithful stand-in for the real
-  -- schema.
-  CREATE TABLE intervention_plans (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone_hash      TEXT    NOT NULL,
-    assessment_id   INTEGER,
-    problem_area    TEXT    NOT NULL,
-    target_group    TEXT NOT NULL,
-    goals           TEXT NOT NULL,
-    duration_days   INTEGER NOT NULL,
-    strategies      TEXT NOT NULL,
-    resources       TEXT,
-    monitoring_plan TEXT,
-    success_indicators TEXT,
-    status          TEXT NOT NULL DEFAULT 'active',
-    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
-  );
-  CREATE TABLE curriculum_coverage (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone_hash      TEXT    NOT NULL,
-    grade           INTEGER NOT NULL,
-    subject         TEXT    NOT NULL,
-    term            INTEGER NOT NULL,
-    topic           TEXT    NOT NULL,
-    covered         INTEGER NOT NULL DEFAULT 0,
-    date_covered    TEXT,
-    created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-    updated_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-    UNIQUE(phone_hash, grade, subject, term, topic)
-  );
-  CREATE TABLE reports (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    phone_hash      TEXT    NOT NULL,
-    assessment_id   INTEGER NOT NULL,
-    report_type     TEXT    NOT NULL,
-    learner_name    TEXT,
-    content         TEXT    NOT NULL,
-    created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
-  );
-`);
-
-const dbPath = path.resolve(__dirname, '../utils/database');
-require.cache[dbPath] = {
-  id: dbPath, filename: dbPath, loaded: true,
-  exports: { getDb: () => db },
-};
-
-const origResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, ...rest) {
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return origResolve.call(this, request, ...rest);
-};
+const { createTestDb } = require('./helpers/createTestDb');
 
 let passed = 0;
 let failed = 0;
@@ -176,6 +31,9 @@ function check(condition, label) {
   if (condition) { console.log(`  ✅ ${label}`); passed++; }
   else { console.error(`  ❌ FAIL: ${label}`); failed++; }
 }
+
+const testDb = createTestDb(__filename);
+const db = testDb.db;
 
 try {
   const diagnosticService = require('../services/diagnosticWorkflowService');
@@ -296,5 +154,5 @@ try {
 
   process.exitCode = failed > 0 ? 1 : 0;
 } finally {
-  Module._resolveFilename = origResolve;
+  testDb.cleanup();
 }
