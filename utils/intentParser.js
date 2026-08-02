@@ -215,9 +215,15 @@ function parseIntent(text) {
   // assessment or "struggling learner" support-planning language)
   } else if (/\b(record\s+(an\s+)?observation|log\s+(an\s+)?observation|capture\s+(an\s+)?observation|developmental\s+observation|foundation\s+phase\s+observation|observation\s+(notes?|record)|observe\s+(a\s+)?learner)\b/i.test(lower)) {
     type = INTENT_TYPES.OBSERVATION;
+  // REFLECT — bare shortcut command, alias for the natural-language reflection phrases
+  } else if (/^reflect\.?$/i.test(lower)) {
+    type = INTENT_TYPES.REFLECTION;
   // REFLECTION detection (narrow phrasing only — do not expand yet)
   } else if (/log\s+(a\s+)?reflection|record\s+(a\s+)?reflection|reflect\s+on\s+(my|this)\s+lesson/i.test(lower)) {
     type = INTENT_TYPES.REFLECTION;
+  // NEW GOAL — bare shortcut command, alias for the natural-language growth-plan phrases
+  } else if (/^new\s+goal\.?$/i.test(lower)) {
+    type = INTENT_TYPES.GROWTH_PLAN;
   // GROWTH_PLAN detection (narrow phrasing only, mirrors REFLECTION above — do not expand yet)
   } else if (/create\s+(a\s+)?growth\s+plan|\bgrowth\s+plan\b|development\s+plan|professional\s+growth/i.test(lower)) {
     type = INTENT_TYPES.GROWTH_PLAN;
