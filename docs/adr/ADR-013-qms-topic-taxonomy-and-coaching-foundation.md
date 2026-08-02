@@ -90,7 +90,12 @@ for both PRs; §3–5 govern PR32, §6 governs PR33.
 | `TOPIC_PROFESSIONAL_PRACTICE` | Professional Practice |
 
 This list is a provisional default for initial release, not a frozen
-value set — see §3.4.
+value set — see §3.4. Changes to the canonical taxonomy (adding, removing,
+or renaming a `topicId`) require their own ADR or explicit architectural
+review — never an unreviewed edit to the constants module. The taxonomy is
+a shared dependency of both flows and the coaching engine; casual expansion
+("it's only a constants file") would undermine the same determinism this
+ADR exists to protect.
 
 ### 3.2 `topicId` contract
 
@@ -196,6 +201,12 @@ its evidence set (§6.6) — this is a deliberate product decision to avoid
 speculative classification of historical free text, not an oversight.
 
 ---
+
+The remainder of this ADR (§5–8) is normative rather than descriptive: it
+exists to preserve behavioural compatibility already established by PR31
+and PR31a, and to make PR32/PR33 implementable without further
+interpretation. Where it reads like an implementation spec rather than a
+typical ADR, that specificity is intentional.
 
 ## 5. Flow Changes
 
@@ -307,6 +318,12 @@ confidence = 0.40 × evidenceScore
 ```
 evidenceScore = min(supportingEvidenceCount / REQUIRED_EVIDENCE, 1.0)
 ```
+where `REQUIRED_EVIDENCE = DEFAULT_REQUIRED_EVIDENCE = 5`, a named
+configuration default (not a bare magic number), defined alongside
+`DEFAULT_MAX_INSIGHTS` (§6.4). Like the taxonomy and the insufficient-data
+thresholds, this value is a provisional default rather than a calibrated
+one, but it must still be a single named constant, not an inline literal,
+so the formula is reproducible from the ADR without guessing.
 
 **recencyScore** — freshness of the *newest* supporting evidence item only
 (not averaged across evidence — a single recent item is often exactly why
