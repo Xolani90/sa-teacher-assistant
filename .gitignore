@@ -19,3 +19,4 @@ desktop.ini
 tests/*.db
 tests/*.db-shm
 tests/*.db-wal
+tests/.tmp-db/

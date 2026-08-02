@@ -4,49 +4,21 @@
  *   - teacherWorkspaceService (classes, assessment history)
  *   - curriculumCoverageService (topic tracking, dataAvailable flag, broader CAPS table)
  *
- * Uses better-sqlite3 (same as other test files in this project) against an in-memory
- * database seeded with the same schema as the real migrations.
+ * Uses the REAL migration chain (see tests/helpers/createTestDb.js) rather
+ * than a hand-rolled schema mock, so this test can never drift from what
+ * production actually creates (e.g. school_calendar / tse_evidence_links,
+ * missing here previously — see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md).
  *
  * Run individually:   node tests/workspace.test.js
  * Run via npm:        npm test  (included in the test script)
  */
 
-// ── Shim better-sqlite3 → node:sqlite ────────────────────────────────────────
-// The production environment compiles better-sqlite3 normally; this shim exists
-// only for CI/sandbox environments where native compilation is unavailable.
-// The API surface used (exec, prepare().get/all/run, lastInsertRowid) is identical.
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
+// MUST be required first — installs the better-sqlite3 → node:sqlite shim
+// before utils/database.js (or any service that transitively requires it)
+// is loaded. See tests/helpers/createTestDb.js for why.
+const { createTestDb } = require('./helpers/createTestDb');
 
 let _db = null;
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    // node:sqlite's DatabaseSync doesn't have .pragma() — add a no-op shim
-    // since database.js calls it for WAL/synchronous/foreign_keys settings
-    // that have no effect on an in-memory test database anyway.
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-
-// Stub the database module so services get the shared in-memory DB
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 let passed = 0;
@@ -75,120 +47,10 @@ function assertEq(a, b, label) {
   }
 }
 
-// ── Schema (mirrors the real migrations) ─────────────────────────────────────
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL,
-      name TEXT,
-      school TEXT,
-      grade INTEGER,
-      subject TEXT,
-      is_pro INTEGER DEFAULT 0,
-      default_class_id INTEGER,
-      saved_resources_count INTEGER DEFAULT 0,
-      last_assessment_id TEXT,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS classes (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      name TEXT NOT NULL,
-      grade INTEGER,
-      subject TEXT,
-      learner_count INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS saved_resources (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      resource_type TEXT,
-      title TEXT,
-      content TEXT,
-      grade INTEGER,
-      subject TEXT,
-      topic TEXT,
-      metadata TEXT,
-      generation_id TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS assessments (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      title TEXT,
-      grade INTEGER,
-      subject TEXT,
-      term INTEGER,
-      total_marks INTEGER,
-      atp_topics TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS learner_results (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      assessment_id INTEGER NOT NULL,
-      learner_name TEXT,
-      percentage REAL,
-      question_data TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS curriculum_coverage (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      grade INTEGER NOT NULL,
-      subject TEXT NOT NULL,
-      term INTEGER NOT NULL,
-      topic TEXT NOT NULL,
-      covered INTEGER DEFAULT 0,
-      date_covered TEXT,
-      updated_at TEXT DEFAULT (datetime('now')),
-      UNIQUE(phone_hash, grade, subject, term, topic)
-    );
-
-    CREATE TABLE IF NOT EXISTS item_analysis (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      assessment_id INTEGER NOT NULL,
-      question_number INTEGER,
-      question_text TEXT,
-      facility_value REAL,
-      discrimination_index REAL,
-      cognitive_level TEXT,
-      correct_count INTEGER DEFAULT 0,
-      total_count INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS intervention_plans (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      assessment_id INTEGER,
-      plan_text TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS reports (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      assessment_id INTEGER,
-      report_type TEXT NOT NULL,
-      content TEXT,
-      ai_intervention_plan TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-  `);
-}
-
 // ── Test runner ───────────────────────────────────────────────────────────────
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  const testDb = createTestDb(__filename);
+  _db = testDb.db;
 
   const HASH = 'testhash_workspace_001';
 
@@ -243,12 +105,12 @@ async function run() {
   // ── Test 6: getAssessmentHistory returns real data ────────────────────────
   console.log('\nTest 6: getAssessmentHistory returns seeded assessments with averages');
   const asmtId = _db.prepare(`
-    INSERT INTO assessments (phone_hash, title, grade, subject, term, total_marks)
-    VALUES (?, 'Term 2 Test', 10, 'Mathematics', 2, 100)
+    INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks)
+    VALUES (?, 'Term 2 Test', 10, 'Mathematics', 2, 'test', 100)
   `).run(HASH).lastInsertRowid;
-  _db.prepare(`INSERT INTO learner_results (assessment_id, learner_name, percentage) VALUES (?, ?, ?)`).run(asmtId, 'Learner A', 72);
-  _db.prepare(`INSERT INTO learner_results (assessment_id, learner_name, percentage) VALUES (?, ?, ?)`).run(asmtId, 'Learner B', 58);
-  _db.prepare(`INSERT INTO learner_results (assessment_id, learner_name, percentage) VALUES (?, ?, ?)`).run(asmtId, 'Learner C', 80);
+  _db.prepare(`INSERT INTO learner_results (assessment_id, learner_name, mark, total_marks, percentage) VALUES (?, ?, ?, ?, ?)`).run(asmtId, 'Learner A', 72, 100, 72);
+  _db.prepare(`INSERT INTO learner_results (assessment_id, learner_name, mark, total_marks, percentage) VALUES (?, ?, ?, ?, ?)`).run(asmtId, 'Learner B', 58, 100, 58);
+  _db.prepare(`INSERT INTO learner_results (assessment_id, learner_name, mark, total_marks, percentage) VALUES (?, ?, ?, ?, ?)`).run(asmtId, 'Learner C', 80, 100, 80);
 
   const history2 = getAssessmentHistory(HASH);
   assertEq(history2.length, 1, 'one assessment in history');
@@ -284,8 +146,8 @@ async function run() {
   const HASH2 = 'testhash_workspace_002';
   _db.prepare(`INSERT INTO teachers (phone_hash, name, grade, subject) VALUES (?, 'Mr Khumalo', 7, 'Mathematics')`).run(HASH2);
   const asmtId2 = _db.prepare(`
-    INSERT INTO assessments (phone_hash, title, grade, subject, term, total_marks, atp_topics)
-    VALUES (?, 'Term 1 Test', 7, 'Mathematics', 1, 50, ?)
+    INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks, atp_topics)
+    VALUES (?, 'Term 1 Test', 7, 'Mathematics', 1, 'test', 50, ?)
   `).run(HASH2, JSON.stringify(['Number operations', 'Integers'])).lastInsertRowid;
 
   updateCoverageFromAssessment(asmtId2);
@@ -446,6 +308,7 @@ async function run() {
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(50)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);
+  testDb.cleanup();
   if (failed > 0) process.exit(1);
 }
 
