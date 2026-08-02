@@ -21,36 +21,8 @@
  * Run via npm:         npm test
  */
 
-// ── Shim better-sqlite3 → node:sqlite (same pattern as phase-6) ────────────
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-
-let _db = null;
-
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 let passed = 0;
@@ -97,78 +69,9 @@ function assertThrows(fn, expectedMsg, label) {
   }
 }
 
-// ── Schema (mirrors Migration 022 + Migration 027 + the corrections/
-//    resolved migration — kept identical to phase-6's schema so the two
-//    suites don't silently diverge) ─────────────────────────────────────
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS classes (
-      id INTEGER PRIMARY KEY,
-      phone_hash TEXT NOT NULL,
-      name TEXT,
-      grade INTEGER,
-      subject TEXT,
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
-    );
-    CREATE TABLE IF NOT EXISTS learners (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      class_id INTEGER,
-      canonical_name TEXT NOT NULL,
-      normalized_name TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
-      FOREIGN KEY (class_id) REFERENCES classes(id)
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_classed
-      ON learners(phone_hash, class_id, normalized_name) WHERE class_id IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_unclassed
-      ON learners(phone_hash, normalized_name) WHERE class_id IS NULL;
-
-    CREATE TABLE IF NOT EXISTS observation_assessments (
-      id                        INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash                TEXT    NOT NULL,
-      grade                     TEXT,
-      subject                   TEXT,
-      assessment_name           TEXT,
-      class_id                  INTEGER,
-      corrects_assessment_id    INTEGER REFERENCES observation_assessments(id),
-      created_at                TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
-      FOREIGN KEY (class_id) REFERENCES classes(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS observation_records (
-      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-      assessment_id         INTEGER NOT NULL,
-      learner_name          TEXT    NOT NULL,
-      domain                TEXT    NOT NULL,
-      developmental_status  TEXT    NOT NULL,
-      notes                 TEXT,
-      learner_id            INTEGER,
-      resolved              INTEGER NOT NULL DEFAULT 0,
-      created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (assessment_id) REFERENCES observation_assessments(id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_observation_assessments_phone
-      ON observation_assessments(phone_hash);
-    CREATE INDEX IF NOT EXISTS idx_observation_assessments_corrects
-      ON observation_assessments(corrects_assessment_id);
-    CREATE INDEX IF NOT EXISTS idx_observation_records_assessment
-      ON observation_records(assessment_id);
-  `);
-}
-
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  const testDb = createTestDb(__filename);
+  const _db = testDb.db;
 
   const {
     saveObservationSubmission,
@@ -359,6 +262,9 @@ async function run() {
   // ── Summary ──────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);
   console.log(`Observation Repository (corrections/delete/resolve) Results: ${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 
