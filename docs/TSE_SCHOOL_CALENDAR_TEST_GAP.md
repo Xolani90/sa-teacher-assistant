@@ -1,6 +1,6 @@
 # Investigation: `[TSE] tagEvidence failed (non-fatal): no such table: school_calendar`
 
-## Status: PR A, PR B1 (7/7 files), and PR C complete. PR B2 in progress.
+## Status: PR A, PR B1 (7/7 files), PR C, and PR B2.1 (4/4 files) complete. PR B2.2 (Auth) in progress.
 
 ## Root cause
 
@@ -106,6 +106,32 @@ defect; it was test-schema drift, resolved by the same conversion that
 surfaced it. Recorded here rather than amending the (already-pushed)
 commit message, to preserve the investigation's audit trail.
 
+## PR B2.1 — assessment-session batch (4 files, complete)
+
+- `tests/assessment-session-flow.test.js`
+- `tests/assessment-session-bulk-dispatch.test.js`
+- `tests/assessment-session-print.test.js`
+- `tests/assessment-session-undo-dispatch.test.js`
+
+All four pass in full against the real migrated schema, no
+regressions (34, 22, 27, and 22 assertions respectively). Clean
+conversions across the board — the hand-rolled `sessions` table in
+each of these files already matched the real migrated schema
+exactly, so no `NOT NULL` drift or stub gaps surfaced. That's a
+useful signal in its own right: for this batch, the schema debt was
+purely about not running real migrations, not about the fake schema
+being wrong.
+
+**Inventory correction:** the batch was originally scoped at 5 files,
+including `tests/routing-order-assessment-session-priority.test.js`.
+That file is a source-inspection test — it reads
+`core/messageProcessor.js` and `core/commandHandler.js` as text and
+asserts dispatch-order invariants via string search. It never
+instantiates `better-sqlite3` or `DatabaseSync` and has no
+hand-rolled schema to drift, so there's nothing for `createTestDb()`
+to fix. Confirmed by grepping all test files for the DB-shim pattern;
+this file doesn't match it. B2.1 is complete at 4 real conversions.
+
 ## PR C — `tagEvidence()` diagnostics (complete)
 
 Implemented as originally proposed below: distinguishes missing-table
@@ -127,11 +153,22 @@ remaining files.
 
 ## Remaining work
 
-**PR B2 — continue incremental migration of the remaining ~27 files.**
-No behavioral changes, infrastructure only. Same priority order as
-before: TSE Evidence / Assessments / Observations / Reporting / QMS
-first, since those are what the upcoming Reporting Centre will build
-on.
+**PR B2.2 (Auth) — next incremental migration batch.** No behavioral
+changes, infrastructure only. Candidates confirmed as genuine
+DB-shim conversions (still hand-roll a schema via `better-sqlite3`/
+`DatabaseSync`):
+
+- `tests/authCodeRepository.test.js`
+- `tests/teacherAuth.test.js`
+- `tests/pr22-whatsapp-otp.test.js`
+- `tests/pr25-dev-otp-bypass.test.js`
+- `tests/update-teacher-profile.test.js`
+
+~32 files remain across all batches after B2.1. Same priority order
+as before: TSE Evidence / Assessments / Observations / Reporting /
+QMS first, since those are what the upcoming Reporting Centre will
+build on; Auth is being pulled forward as its own focused batch
+(B2.2) since it's a small, self-contained cluster.
 
 **Original PR C plan (implemented above, kept for reference):**
 
