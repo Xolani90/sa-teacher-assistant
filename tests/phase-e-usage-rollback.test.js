@@ -23,18 +23,15 @@
 // created on the free-tier path), and the rollback call site deletes by
 // that exact ID instead of MAX(id).
 //
-// This test exercises the REAL checkAndIncrementUsage function (not a
-// simulator) against a real in-memory better-sqlite3 database, with genuine
-// Promise-based async interleaving to force the exact race condition.
+// This test exercises the REAL checkAndIncrementUsage function against a
+// real, fully-migrated SQLite test database (see
+// tests/helpers/createTestDb.js), with genuine Promise-based async
+// interleaving to force the exact race condition.
 //
 // Run: node tests/phase-e-usage-rollback.test.js
 
 process.env.PII_SECRET = 'test-secret-key-32-bytes-long!!';
 process.env.FREE_LIMIT = '10';
-
-const Database = require('better-sqlite3');
-const Module = require('module');
-const path = require('path');
 
 let passed = 0;
 let failed = 0;
@@ -43,43 +40,11 @@ function check(condition, label) {
   else { console.error(`  ❌ FAIL: ${label}`); failed++; }
 }
 
-function buildDb() {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE teachers (
-      phone_hash TEXT PRIMARY KEY,
-      is_pro INTEGER NOT NULL DEFAULT 0,
-      pro_expires TEXT
-    );
-    CREATE TABLE usage_events (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      month_key TEXT NOT NULL,
-      intent_type TEXT NOT NULL,
-      tokens_used INTEGER,
-      created_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX idx_usage_phone_month ON usage_events(phone_hash, month_key);
-  `);
-  return db;
-}
-
-const db = buildDb();
-
-const dbPath = path.resolve(__dirname, '../utils/database');
-require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { getDb: () => db } };
-
-const origResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, ...rest) {
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return origResolve.call(this, request, ...rest);
-};
-
-function hashPhoneForTest(phone) {
-  const crypto = require('crypto');
-  const normalized = phone.trim().replace(/^\+/, '');
-  return crypto.createHmac('sha256', process.env.PII_SECRET).update(normalized).digest('hex');
-}
+// MUST be required before any service/repository module — see
+// tests/helpers/createTestDb.js's "Why this must be required first".
+const { createTestDb } = require('./helpers/createTestDb');
+const testDb = createTestDb(__filename);
+const db = testDb.db;
 
 // Mirrors the EXACT rollback logic from routes/webhook.js's AI-generation
 // .catch() handler (post-fix version) — delete by insertedRowId, not MAX(id).
@@ -108,12 +73,12 @@ function fakeAiCall(delayMs, shouldFail) {
 }
 
 (async () => {
-  const { checkAndIncrementUsage, currentMonthKey } = require('../utils/usageTracker');
+  const { checkAndIncrementUsage, currentMonthKey, hashPhone } = require('../utils/usageTracker');
 
   console.log('\n── Phase E: usage rollback deletes the EXACT failing row, not MAX(id) ──');
   {
     const phone = '+27821140001';
-    const phoneHash = hashPhoneForTest(phone);
+    const phoneHash = hashPhone(phone);
     db.prepare(`INSERT INTO teachers (phone_hash, is_pro) VALUES (?, 0)`).run(phoneHash);
     const monthKey = currentMonthKey();
 
@@ -156,7 +121,7 @@ function fakeAiCall(delayMs, shouldFail) {
     // Same interleaving, but using the pre-fix rollback mechanism, to prove
     // this test harness would have caught the original defect.
     const phone = '+27821140002';
-    const phoneHash = hashPhoneForTest(phone);
+    const phoneHash = hashPhone(phone);
     db.prepare(`INSERT INTO teachers (phone_hash, is_pro) VALUES (?, 0)`).run(phoneHash);
     const monthKey = currentMonthKey();
 
@@ -192,10 +157,10 @@ function fakeAiCall(delayMs, shouldFail) {
   console.log(`📊 Total:  ${passed + failed}`);
   console.log('─────────────────────────────────\n');
 
-  Module._resolveFilename = origResolve;
+  testDb.cleanup();
   process.exit(failed > 0 ? 1 : 0);
 })().catch(err => {
   console.error('UNCAUGHT ERROR IN TEST:', err);
-  Module._resolveFilename = origResolve;
+  testDb.cleanup();
   process.exit(1);
 });
