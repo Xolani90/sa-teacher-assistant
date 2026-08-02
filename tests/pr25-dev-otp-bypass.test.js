@@ -16,37 +16,8 @@
  * Run via npm:      npm test
  */
 
-// ── Shim better-sqlite3 → node:sqlite (mirrors tests/pr22-whatsapp-otp.test.js) ──
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-
-let _db = null;
-
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
 
 // ── Environment setup ─────────────────────────────────────────────────────
 process.env.TEACHER_JWT_SECRET = 'test-teacher-jwt-secret';
@@ -66,36 +37,8 @@ function assert(condition, label) {
   }
 }
 
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL,
-      name TEXT
-    );
-    CREATE TABLE IF NOT EXISTS auth_codes (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash    TEXT    NOT NULL,
-      code_hash     TEXT    NOT NULL,
-      expires_at    TEXT    NOT NULL,
-      attempts      INTEGER NOT NULL DEFAULT 0,
-      consumed_at   TEXT,
-      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_auth_codes_phone
-      ON auth_codes(phone_hash);
-    CREATE INDEX IF NOT EXISTS idx_auth_codes_lookup
-      ON auth_codes(phone_hash, expires_at);
-  `);
-}
-
-function resetDb() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
-}
-
-function insertTeacher(phoneHash, name = null) {
-  const info = _db.prepare('INSERT INTO teachers (phone_hash, name) VALUES (?, ?)').run(phoneHash, name);
+function insertTeacher(db, phoneHash, name = null) {
+  const info = db.prepare('INSERT INTO teachers (phone_hash, name) VALUES (?, ?)').run(phoneHash, name);
   return Number(info.lastInsertRowid);
 }
 
@@ -119,14 +62,15 @@ async function run() {
   console.log('\nPR25 Dev-Only OTP Bypass Tests');
   console.log('='.repeat(75));
 
-  resetDb();
+  const testDb = createTestDb(__filename);
+  const db = testDb.db;
 
   const { handleRequestCode } = require('../routes/auth').__testExports;
   const { hashPhone } = require('../utils/usageTracker');
 
   const REGISTERED_PHONE = '27821112222';
   const UNKNOWN_PHONE = '27899999999';
-  insertTeacher(hashPhone(REGISTERED_PHONE), 'Dev Bypass Teacher');
+  insertTeacher(db, hashPhone(REGISTERED_PHONE), 'Dev Bypass Teacher');
 
   // Stub sendMessage so no real WhatsApp call is attempted during this test.
   const whatsappService = require('../services/whatsappService');
@@ -204,6 +148,8 @@ async function run() {
   console.log('\n─────────────────────────────────────────────────────');
   console.log(`PR25 Dev OTP Bypass Results: ${passed} passed, ${failed} failed`);
   console.log('─────────────────────────────────────────────────────');
+
+  testDb.cleanup();
 
   if (failed > 0) {
     process.exitCode = 1;
