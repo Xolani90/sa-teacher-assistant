@@ -93,8 +93,20 @@ function tagEvidence(phoneHash, category, sourceTable, sourceId, term = null) {
 
     return result.changes > 0;
   } catch (err) {
-    // Never let evidence tagging break the caller's primary write.
-    console.error('[TSE] tagEvidence failed (non-fatal):', err.message);
+    // Never let evidence tagging break the caller's primary write — but
+    // don't let a genuine bug hide behind the same catch block as a
+    // missing-table condition either (see PR C,
+    // docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md). A missing table is expected
+    // in some test setups and stays a quiet, non-fatal skip; anything
+    // else is a real defect and gets rethrown under NODE_ENV=test so it
+    // can't be silently swallowed in the suite that's supposed to catch it.
+    const isMissingTable = err.code === 'SQLITE_ERROR' && /no such table/i.test(err.message);
+    if (isMissingTable) {
+      console.error('[TSE] tagEvidence: schema not ready (missing table), skipping:', err.message);
+    } else {
+      console.error('[TSE] tagEvidence failed (non-fatal):', err.message);
+      if (process.env.NODE_ENV === 'test') throw err;
+    }
     return false;
   }
 }
