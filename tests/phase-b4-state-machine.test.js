@@ -16,35 +16,10 @@
  * Run:  node tests/phase-b4-state-machine.test.js
  */
 
-// ── Shim better-sqlite3 → node:sqlite ────────────────────────────────────────
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-
-let _db = null;
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
+// ── Real-migrations test DB (see tests/helpers/createTestDb.js) ──────────
+const { createTestDb } = require('./helpers/createTestDb');
+const testDb = createTestDb(__filename);
+let _db = testDb.db;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 let passed = 0;
@@ -79,37 +54,6 @@ class MemorySessionStore {
   get(key)        { return this._data.get(key) || null; }
   set(key, value) { this._data.set(key, value); }
   delete(key)     { this._data.delete(key); }
-}
-
-// ── Schema (mirrors production including B3 generation_id column + partial index)
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL,
-      name TEXT,
-      saved_resources_count INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS saved_resources (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      resource_type TEXT,
-      title TEXT,
-      content TEXT,
-      grade INTEGER,
-      subject TEXT,
-      topic TEXT,
-      metadata TEXT,
-      generation_id TEXT,
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_saved_resources_generation
-      ON saved_resources(phone_hash, generation_id)
-      WHERE generation_id IS NOT NULL;
-  `);
 }
 
 // ── B4-aware SAVE lifecycle simulator ────────────────────────────────────────
@@ -234,9 +178,6 @@ function simulateGenerate({ store, phoneHash, intent, content }) {
 
 // ── Test runner ───────────────────────────────────────────────────────────────
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
-
   const { saveResource, getSavedResourceByGenerationId } = require('../services/teacherWorkspaceService');
   const { randomUUID } = require('crypto');
 
@@ -583,6 +524,7 @@ async function run() {
   console.log('\n───────────────────────────────────────────────────────');
   console.log(`Phase B4 Results: ${passed} passed, ${failed} failed`);
 
+  testDb.cleanup();
   if (failed > 0) {
     process.exit(1);
   }
