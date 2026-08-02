@@ -21,37 +21,10 @@
 const TEST_SECRET = 'test-teacher-jwt-secret';
 process.env.TEACHER_JWT_SECRET = TEST_SECRET;
 
-// ── Shim better-sqlite3 → node:sqlite (same pattern as learnerRepository.test.js) ─
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-
-let _db = null;
-
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
 const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
 const authPath = path.resolve(__dirname, '../utils/teacherAuth');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 let passed = 0;
@@ -67,24 +40,8 @@ function assert(condition, label) {
   }
 }
 
-// ── Schema (mirrors utils/database.js's teachers table only — this
-//    middleware needs nothing else) ────────────────────────────────────
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL
-    );
-  `);
-}
-
-function resetDb() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
-}
-
-function insertTeacher(phoneHash) {
-  const info = _db.prepare('INSERT INTO teachers (phone_hash) VALUES (?)').run(phoneHash);
+function insertTeacher(db, phoneHash) {
+  const info = db.prepare('INSERT INTO teachers (phone_hash) VALUES (?)').run(phoneHash);
   return Number(info.lastInsertRowid);
 }
 
@@ -107,7 +64,8 @@ async function run() {
   console.log('Teacher JWT Auth Middleware tests (ADR-008, PR16)');
   console.log('='.repeat(75));
 
-  resetDb();
+  const testDb = createTestDb(__filename);
+  const db = testDb.db;
   // Loaded AFTER the resolve shim + secret env var are in place, and after
   // the schema exists, so getDb() inside the module returns our in-memory db.
   const { requireTeacherAuth, extractBearerToken, resolveTeacherById } = require(authPath);
@@ -132,7 +90,7 @@ async function run() {
   // ── Section 2: resolveTeacherById ──
   console.log('\n── Section 2: resolveTeacherById ──');
   {
-    const id = insertTeacher('hash_resolve_001');
+    const id = insertTeacher(db, 'hash_resolve_001');
     const found = resolveTeacherById(id);
     assert(found !== null, 'existing teacher id resolves');
     assert(found && found.id === id, 'resolved id matches');
@@ -145,7 +103,7 @@ async function run() {
   // ── Section 3: happy path — valid token, known teacher ──
   console.log('\n── Section 3: happy path ──');
   {
-    const teacherId = insertTeacher('hash_happy_001');
+    const teacherId = insertTeacher(db, 'hash_happy_001');
     const token = signToken({ sub: teacherId });
     const { req, res, next, calledNext } = makeReqRes(`Bearer ${token}`);
 
@@ -184,7 +142,7 @@ async function run() {
   // ── Section 6: invalid signature ──
   console.log('\n── Section 6: invalid signature ──');
   {
-    const teacherId = insertTeacher('hash_badsig_001');
+    const teacherId = insertTeacher(db, 'hash_badsig_001');
     const tokenSignedWithWrongSecret = jwt.sign({ sub: teacherId }, 'wrong-secret', { expiresIn: '1h' });
     const { req, res, next, calledNext } = makeReqRes(`Bearer ${tokenSignedWithWrongSecret}`);
 
@@ -197,7 +155,7 @@ async function run() {
   // ── Section 7: expired token ──
   console.log('\n── Section 7: expired token ──');
   {
-    const teacherId = insertTeacher('hash_expired_001');
+    const teacherId = insertTeacher(db, 'hash_expired_001');
     const expiredToken = signToken({ sub: teacherId }, { expiresIn: '-10s' });
     const { req, res, next, calledNext } = makeReqRes(`Bearer ${expiredToken}`);
 
@@ -243,7 +201,7 @@ async function run() {
     const original = process.env.TEACHER_JWT_SECRET;
     delete process.env.TEACHER_JWT_SECRET;
 
-    const teacherId = insertTeacher('hash_misconfig_001');
+    const teacherId = insertTeacher(db, 'hash_misconfig_001');
     // Sign with the secret the middleware SHOULD have used, to isolate
     // this test to the "secret missing" path rather than a signature failure.
     const token = jwt.sign({ sub: teacherId }, TEST_SECRET, { expiresIn: '1h' });
@@ -260,8 +218,8 @@ async function run() {
   // ── Section 11: two different teachers resolve to two different identities ──
   console.log('\n── Section 11: teacher isolation ──');
   {
-    const teacherA = insertTeacher('hash_isolation_a');
-    const teacherB = insertTeacher('hash_isolation_b');
+    const teacherA = insertTeacher(db, 'hash_isolation_a');
+    const teacherB = insertTeacher(db, 'hash_isolation_b');
 
     const tokenA = signToken({ sub: teacherA });
     const tokenB = signToken({ sub: teacherB });
@@ -287,6 +245,9 @@ async function run() {
 
   console.log('\n' + '='.repeat(75));
   console.log(`${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 
