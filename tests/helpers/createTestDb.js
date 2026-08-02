@@ -82,6 +82,28 @@ function installShim() {
       // calls it for WAL/synchronous/foreign_keys settings that have no
       // effect on an in-memory/throwaway test database anyway.
       if (!_db.pragma) _db.pragma = () => {};
+      // node:sqlite's DatabaseSync has no better-sqlite3-style
+      // .transaction(fn) wrapper. Production code (e.g.
+      // services/yocoService.js) uses db.transaction(() => {...})()
+      // to run a block atomically. Provide a compatible shim: returns
+      // a function that, when called, runs fn() inside BEGIN/COMMIT,
+      // rolling back and rethrowing on error — same contract as
+      // better-sqlite3's transaction().
+      if (!_db.transaction) {
+        _db.transaction = (fn) => {
+          return (...args) => {
+            _db.exec('BEGIN');
+            try {
+              const result = fn(...args);
+              _db.exec('COMMIT');
+              return result;
+            } catch (err) {
+              try { _db.exec('ROLLBACK'); } catch { /* already rolled back */ }
+              throw err;
+            }
+          };
+        };
+      }
       return _db;
     },
   };
