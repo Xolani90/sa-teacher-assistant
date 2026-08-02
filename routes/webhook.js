@@ -73,6 +73,7 @@ const observationHistoryState = new SessionStore('observationHistory',  15 * 60 
 const assessmentSessionState  = new SessionStore('assessmentSession',   24 * 60 * 60 * 1000); // ADR-006 — long TTL: a teacher may resume marks capture the next day
 const rosterState             = new SessionStore('roster',              30 * 60 * 1000); // ADR-006 PR3 — ROSTER/ADD/REMOVE/CLEAR
 const reflectionState          = new SessionStore('reflection',          30 * 60 * 1000);
+const growthPlanState          = new SessionStore('growthPlan',          30 * 60 * 1000);
 const saveLock = new Set(); // B5-F1: per-phone SAVE in-flight lock (try/finally in SAVE handler)
 
 // ── Observation flow module (extracted from this file) ─────────────────────
@@ -116,6 +117,21 @@ function buildReflectionDeps() {
     parseIntent,
     hashPhone,
     createReflection,
+    getCurrentTerm,
+  });
+}
+
+// ── Growth plan flow module ─────────────────────────────────────────────────
+const { handleGrowthPlanFlow } = require('../flows/growthPlanFlow');
+const { createGrowthPlan } = require('../services/growthPlanService');
+
+function buildGrowthPlanDeps() {
+  return Object.freeze({
+    growthPlanState,
+    safeSendMessage,
+    parseIntent,
+    hashPhone,
+    createGrowthPlan,
     getCurrentTerm,
   });
 }
@@ -424,11 +440,14 @@ function buildProcessMessageDeps() {
     assessmentSessionState,
     rosterState,
     reflectionState,
+    growthPlanState,
     handleObservationFlow,
     buildObservationDeps,
     handleObservationHistoryFlow,
     handleReflectionFlow,
     buildReflectionDeps,
+    handleGrowthPlanFlow,
+    buildGrowthPlanDeps,
     handleAssessmentSessionFlow,
     buildAssessmentSessionDeps,
     handleRosterFlow,

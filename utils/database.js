@@ -898,6 +898,36 @@ function runMigrations() {
       ON qms_reflections(phone_hash, term);
   `);
 
+  // Migration 038: qms_growth_plans (ADR-011 §2, §9). Second QMS-owned
+  // table — a goal/target-area a teacher is tracking over time, with a
+  // status lifecycle (active -> in_progress -> completed, or abandoned).
+  // Schema is frozen exactly as specified in ADR-011's Data Model
+  // section: phone_hash, term, goal_text, target_area, status, and
+  // timestamps/soft-delete only. No reflection_id linkage or additional
+  // planning fields (planned_actions, success_criteria, target_date) —
+  // those were explicitly deferred to a future ADR once real usage
+  // justifies the added relational/schema complexity (see PR29
+  // discussion). Do not add columns here without amending ADR-011 first.
+  //
+  // deleted_at is a nullable soft-delete marker (ADR-011 §7), same
+  // rationale as qms_reflections — a completed/abandoned plan may
+  // already be referenced by a generated portfolio snapshot.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS qms_growth_plans (
+      id           INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash   TEXT    NOT NULL,
+      term         INTEGER,
+      goal_text    TEXT    NOT NULL,
+      target_area  TEXT,
+      status       TEXT    NOT NULL DEFAULT 'active',
+      created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+      deleted_at   TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_qms_growth_plans_phone_term
+      ON qms_growth_plans(phone_hash, term);
+  `);
+
   console.log('[DB] Migrations complete');
 }
 

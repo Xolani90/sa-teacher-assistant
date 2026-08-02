@@ -19,6 +19,7 @@ const INTENT_TYPES = {
   OBSERVATION: 'observation',
   OBSERVATION_HISTORY: 'observationHistory',
   REFLECTION: 'reflection',
+  GROWTH_PLAN: 'growth_plan',
   CURRICULUM_QUERY: 'curriculumQuery',
   GREETING: 'greeting',
   SMALL_TALK: 'smallTalk',
@@ -217,6 +218,9 @@ function parseIntent(text) {
   // REFLECTION detection (narrow phrasing only — do not expand yet)
   } else if (/log\s+(a\s+)?reflection|record\s+(a\s+)?reflection|reflect\s+on\s+(my|this)\s+lesson/i.test(lower)) {
     type = INTENT_TYPES.REFLECTION;
+  // GROWTH_PLAN detection (narrow phrasing only, mirrors REFLECTION above — do not expand yet)
+  } else if (/create\s+(a\s+)?growth\s+plan|\bgrowth\s+plan\b|development\s+plan|professional\s+growth/i.test(lower)) {
+    type = INTENT_TYPES.GROWTH_PLAN;
   // Intervention planning / SBA support (sba\s+task removed — now handled by SBA_TASK above)
   } else if (/\b(intervention\s+plan|intervention\s+strategy|sba\s+support|sba\s+(schedule|plan)|reteach(ing)?\s+plan|catch[\s-]?up\s+plan|support\s+plan|remedial\s+plan|struggling\s+learners?|learners?\s+(are\s+)?(struggling|falling\s+behind)|school[\s-]based\s+assessment)\b/i.test(lower)) {
     type = INTENT_TYPES.INTERVENTION_PLAN;
