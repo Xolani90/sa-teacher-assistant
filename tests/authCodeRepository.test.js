@@ -17,37 +17,8 @@
  * Run via npm:        npm test
  */
 
-// ── Shim better-sqlite3 → node:sqlite ────────────────────────────────────────
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-
-let _db = null;
-
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 let passed = 0;
@@ -94,29 +65,10 @@ function assertThrows(fn, expectedMsg, label) {
   }
 }
 
-// ── Schema (mirrors Migration 032 exactly) ───────────────────────────────────
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS auth_codes (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash    TEXT    NOT NULL,
-      code_hash     TEXT    NOT NULL,
-      expires_at    TEXT    NOT NULL,
-      attempts      INTEGER NOT NULL DEFAULT 0,
-      consumed_at   TEXT,
-      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_auth_codes_phone
-      ON auth_codes(phone_hash);
-    CREATE INDEX IF NOT EXISTS idx_auth_codes_lookup
-      ON auth_codes(phone_hash, expires_at);
-  `);
-}
-
 // ── Test runner ───────────────────────────────────────────────────────────────
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  const testDb = createTestDb(__filename);
+  const _db = testDb.db;
 
   const {
     createAuthCode,
@@ -292,6 +244,9 @@ async function run() {
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);
   console.log(`Migration 032 / authCodeRepository Results: ${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 
