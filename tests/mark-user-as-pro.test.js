@@ -12,17 +12,12 @@
 // matching the extend-from-max semantics already used by the payment
 // renewal path in services/yocoService.js.
 //
-// This test loads the REAL utils/usageTracker.js against a real in-memory
-// better-sqlite3 database, using the same Module._resolveFilename patching
-// convention as tests/phase-d-payment-renewal.test.js.
+// This test loads the REAL utils/usageTracker.js against a real,
+// fully-migrated SQLite test database (see tests/helpers/createTestDb.js).
 //
 // Run: node tests/mark-user-as-pro.test.js
 
 process.env.PII_SECRET = 'test-secret-key-32-bytes-long';
-
-const Database = require('better-sqlite3');
-const Module = require('module');
-const path = require('path');
 
 let passed = 0;
 let failed = 0;
@@ -36,35 +31,11 @@ function daysBetween(a, b) {
   return Math.round((new Date(b) - new Date(a)) / MS_PER_DAY);
 }
 
-function buildDb() {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL UNIQUE,
-      name TEXT,
-      is_pro INTEGER NOT NULL DEFAULT 0,
-      pro_expires TEXT,
-      phone_enc TEXT,
-      renewal_reminder_sent_at TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-  `);
-  return db;
-}
-
-const db = buildDb();
-
-// -- Patch utils/database to return our in-memory db --------------------
-const dbPath = path.resolve(__dirname, '../utils/database');
-require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { getDb: () => db } };
-
-const origResolve = Module._resolveFilename;
-Module._resolveFilename = function (request, ...rest) {
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return origResolve.call(this, request, ...rest);
-};
+// MUST be required before any service/repository module — see
+// tests/helpers/createTestDb.js's "Why this must be required first".
+const { createTestDb } = require('./helpers/createTestDb');
+const testDb = createTestDb(__filename);
+const db = testDb.db;
 
 const { markUserAsPro, hashPhone } = require('../utils/usageTracker');
 
@@ -148,4 +119,5 @@ console.log('-- mark-user-as-pro.test.js -----------------------------');
 }
 
 console.log(`\n${passed} passed, ${failed} failed`);
+testDb.cleanup();
 if (failed > 0) process.exit(1);
