@@ -17,37 +17,10 @@
  * Run via npm:       npm test
  */
 
-// ── Shim better-sqlite3 → node:sqlite ────────────────────────────────────────
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
 
 let _db = null;
-
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
 
 // ── Environment setup ─────────────────────────────────────────────────────────
 process.env.TEACHER_JWT_SECRET = 'test-teacher-jwt-secret';
@@ -80,33 +53,15 @@ function assertEq(a, b, label) {
   }
 }
 
-// ── Schema (mirrors teachers + auth_codes tables) ───────────────────────────
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL,
-      name TEXT
-    );
-    CREATE TABLE IF NOT EXISTS auth_codes (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash    TEXT    NOT NULL,
-      code_hash     TEXT    NOT NULL,
-      expires_at    TEXT    NOT NULL,
-      attempts      INTEGER NOT NULL DEFAULT 0,
-      consumed_at   TEXT,
-      created_at    TEXT    NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE INDEX IF NOT EXISTS idx_auth_codes_phone
-      ON auth_codes(phone_hash);
-    CREATE INDEX IF NOT EXISTS idx_auth_codes_lookup
-      ON auth_codes(phone_hash, expires_at);
-  `);
-}
-
 function resetDb() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  _db.exec('DELETE FROM auth_codes; DELETE FROM teachers;');
+  // The original resetDb() created a brand-new in-memory db each time, so
+  // autoincrement ids always restarted at 1. DELETE alone doesn't reset
+  // sqlite's internal sequence counter, and some sections below rely on
+  // insertTeacher() reproducing the same id a prior section captured
+  // (e.g. VC-08 reuses validTeacherId from VC-01) — so reset the sequence
+  // too, to keep that "fresh db" behavior intact.
+  _db.exec(`DELETE FROM sqlite_sequence WHERE name IN ('teachers', 'auth_codes')`);
 }
 
 function insertTeacher(phoneHash, name = null) {
@@ -130,6 +85,9 @@ function makeReqRes(body = {}) {
 async function run() {
   console.log('\nPR22B WhatsApp OTP Authentication Flow Tests');
   console.log('='.repeat(75));
+
+  const testDb = createTestDb(__filename);
+  _db = testDb.db;
 
   resetDb();
 
@@ -417,6 +375,9 @@ async function run() {
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);
   console.log(`PR22B WhatsApp OTP Results: ${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 
