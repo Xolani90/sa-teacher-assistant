@@ -12,37 +12,8 @@
  * Run via npm:         npm test
  */
 
-// ── Shim better-sqlite3 → node:sqlite (same pattern as phase-6 / obs-repo) ─
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-
-let _db = null;
-
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-const repoPath = path.resolve(__dirname, '../services/learnerRepository');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 let passed = 0;
@@ -87,97 +58,6 @@ function assertThrows(fn, expectedMsg, label) {
       passed++;
     }
   }
-}
-
-// ── Schema (mirrors utils/database.js's learners / learner_results /
-//    observation_records / assessments / observation_assessments tables —
-//    kept in sync manually, same convention as the other real-DB repo
-//    test files in this suite) ───────────────────────────────────────────
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS classes (
-      id INTEGER PRIMARY KEY,
-      phone_hash TEXT NOT NULL,
-      name TEXT,
-      grade INTEGER,
-      subject TEXT,
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
-    );
-
-    CREATE TABLE IF NOT EXISTS learners (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      class_id INTEGER,
-      canonical_name TEXT NOT NULL,
-      normalized_name TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
-      FOREIGN KEY (class_id) REFERENCES classes(id)
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_classed
-      ON learners(phone_hash, class_id, normalized_name) WHERE class_id IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_unclassed
-      ON learners(phone_hash, normalized_name) WHERE class_id IS NULL;
-
-    CREATE TABLE IF NOT EXISTS assessments (
-      id                INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash        TEXT    NOT NULL,
-      title             TEXT    NOT NULL,
-      grade             INTEGER NOT NULL,
-      subject           TEXT    NOT NULL,
-      term              INTEGER NOT NULL,
-      assessment_type   TEXT    NOT NULL,
-      total_marks       INTEGER NOT NULL,
-      blueprint_id      INTEGER,
-      blueprint_version INTEGER,
-      created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
-    );
-
-    CREATE TABLE IF NOT EXISTS learner_results (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      assessment_id   INTEGER NOT NULL,
-      learner_name    TEXT    NOT NULL,
-      mark            INTEGER NOT NULL,
-      total_marks     INTEGER NOT NULL,
-      percentage      REAL    NOT NULL,
-      question_data   TEXT,
-      learner_id      INTEGER,
-      created_at      TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (assessment_id) REFERENCES assessments(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS observation_assessments (
-      id                        INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash                TEXT    NOT NULL,
-      grade                     TEXT,
-      subject                   TEXT,
-      assessment_name           TEXT,
-      class_id                  INTEGER,
-      corrects_assessment_id    INTEGER REFERENCES observation_assessments(id),
-      created_at                TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
-      FOREIGN KEY (class_id) REFERENCES classes(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS observation_records (
-      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-      assessment_id         INTEGER NOT NULL,
-      learner_name          TEXT    NOT NULL,
-      domain                TEXT    NOT NULL,
-      developmental_status  TEXT    NOT NULL,
-      notes                 TEXT,
-      learner_id            INTEGER,
-      created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (assessment_id) REFERENCES observation_assessments(id)
-    );
-  `);
 }
 
 // ── Fixture helpers (direct inserts — this suite tests the repository's
@@ -236,8 +116,8 @@ function insertObsRecord(db, { assessmentId, learnerId, learnerName, domain = 'R
 }
 
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  const testDb = createTestDb(__filename);
+  const _db = testDb.db;
 
   const {
     getLearnerById,
@@ -298,12 +178,20 @@ async function run() {
   // Dedicated learner (not `sipho`) so this fixture doesn't perturb the
   // assessment counts LR-11/LR-12 rely on later in this file.
   const blueprintTestLearner = insertLearner(_db, { phoneHash: TEACHER_A, classId: classA, name: 'BlueprintFixtureLearner' });
+  // The real assessments.blueprint_id column is an enforced FK to
+  // assessment_blueprints(id) (Migration 029) — unlike the hand-rolled
+  // schema this replaces, a sentinel id like 42 with no matching row
+  // now throws. Insert a real blueprint row to reference instead.
+  const fixtureBlueprintId = _db.prepare(`
+    INSERT INTO assessment_blueprints (phone_hash, title, subject, grade, total_marks, version)
+    VALUES (?, 'Fixture Blueprint', 'Mathematics', 7, 20, 2)
+  `).run(TEACHER_A).lastInsertRowid;
   const blueprintBackedAssessmentId = insertAssessment(_db, {
-    phoneHash: TEACHER_A, title: 'Blueprint Test', term: 2, blueprintId: 42, blueprintVersion: 2,
+    phoneHash: TEACHER_A, title: 'Blueprint Test', term: 2, blueprintId: fixtureBlueprintId, blueprintVersion: 2,
   });
   insertResult(_db, { assessmentId: blueprintBackedAssessmentId, learnerId: blueprintTestLearner, learnerName: 'BlueprintFixtureLearner', mark: 18, totalMarks: 20, createdAt: '2026-05-01 09:00:00' });
   const blueprintRow = getAssessmentHistory(blueprintTestLearner).find((e) => e.title === 'Blueprint Test');
-  assertEq(blueprintRow.blueprintId, 42, 'blueprintId passes through when the assessment is blueprint-backed');
+  assertEq(blueprintRow.blueprintId, fixtureBlueprintId, 'blueprintId passes through when the assessment is blueprint-backed');
   assertEq(blueprintRow.blueprintVersion, 2, 'blueprintVersion passes through when the assessment is blueprint-backed');
 
   const obsAssessment1 = insertObsAssessment(_db, { phoneHash: TEACHER_A, assessmentName: 'Jan Observation' });
@@ -437,6 +325,9 @@ async function run() {
   // ── Summary ──────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);
   console.log(`Learner Repository Results: ${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 
