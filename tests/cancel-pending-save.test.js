@@ -14,9 +14,9 @@
 // nothing was saved.
 //
 // This test loads the REAL routes/webhook.js (via its __testExports seam)
-// against a real in-memory better-sqlite3 database, following the same
-// Module._resolveFilename + require.cache convention as
-// tests/phase1-delivery-rollback.test.js.
+// against a real, fully-migrated SQLite test database (see
+// tests/helpers/createTestDb.js), with services/whatsappService stubbed out
+// so no actual message-send calls are made.
 //
 // Run: node tests/cancel-pending-save.test.js
 
@@ -25,7 +25,6 @@ process.env.FREE_LIMIT = '10';
 process.env.APP_URL    = 'https://example.test';
 process.env.PDF_SECRET = 'pdf-secret';
 
-const Database = require('better-sqlite3');
 const Module = require('module');
 const path = require('path');
 
@@ -36,55 +35,11 @@ function check(condition, label) {
   else { console.error(`  ❌ FAIL: ${label}`); failed++; }
 }
 
-function buildDb() {
-  const db = new Database(':memory:');
-  db.exec(`
-    CREATE TABLE teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL UNIQUE,
-      name TEXT,
-      grade INTEGER,
-      subject TEXT,
-      language TEXT,
-      is_pro INTEGER NOT NULL DEFAULT 0,
-      pro_expires TEXT,
-      phone_enc TEXT,
-      opted_out INTEGER NOT NULL DEFAULT 0,
-      opted_out_at TEXT,
-      saved_resources_count INTEGER NOT NULL DEFAULT 0,
-      last_assessment_id INTEGER,
-      renewal_reminder_sent_at TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
-    );
-    CREATE TABLE sessions (
-      phone_hash    TEXT    NOT NULL,
-      session_type  TEXT    NOT NULL,
-      state         TEXT    NOT NULL,
-      updated_at    REAL    NOT NULL,
-      PRIMARY KEY (phone_hash, session_type)
-    );
-    CREATE INDEX idx_sessions_updated ON sessions(updated_at);
-    CREATE TABLE saved_resources (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      generation_id TEXT,
-      resource_type TEXT NOT NULL,
-      title TEXT NOT NULL,
-      content TEXT NOT NULL,
-      metadata TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(phone_hash, generation_id)
-    );
-  `);
-  return db;
-}
-
-const db = buildDb();
-
-// ── Patch utils/database to return our in-memory db ─────────────────────────
-const dbPath = path.resolve(__dirname, '../utils/database');
-require.cache[dbPath] = { id: dbPath, filename: dbPath, loaded: true, exports: { getDb: () => db } };
+// MUST be required before any service/repository module — see
+// tests/helpers/createTestDb.js's "Why this must be required first".
+const { createTestDb } = require('./helpers/createTestDb');
+const testDb = createTestDb(__filename);
+const db = testDb.db;
 
 // ── Stub services/whatsappService — just record sends, never actually send ──
 const sentMessages = [];
@@ -101,7 +56,6 @@ require.cache[whatsappPath] = {
 
 const origResolve = Module._resolveFilename;
 Module._resolveFilename = function (request, ...rest) {
-  if (request === '../utils/database' || request === './database') return dbPath;
   if (request === './whatsappService' || request === '../services/whatsappService') return whatsappPath;
   return origResolve.call(this, request, ...rest);
 };
@@ -208,9 +162,11 @@ function countSavedResources(phoneHash) {
   console.log('─────────────────────────────────\n');
 
   Module._resolveFilename = origResolve;
+  testDb.cleanup();
   process.exit(failed > 0 ? 1 : 0);
 })().catch(err => {
   console.error('UNCAUGHT ERROR IN TEST:', err);
   Module._resolveFilename = origResolve;
+  testDb.cleanup();
   process.exit(1);
 });
