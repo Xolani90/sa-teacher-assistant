@@ -20,36 +20,8 @@
  * Run via npm:       npm test
  */
 
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-const path = require('path');
-
-let _db = null;
-const dbPath = path.resolve(__dirname, '../utils/database');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 let passed = 0;
@@ -65,18 +37,6 @@ function assert(condition, label) {
   }
 }
 
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS sessions (
-      phone_hash    TEXT    NOT NULL,
-      session_type  TEXT    NOT NULL,
-      state         TEXT    NOT NULL,
-      updated_at    REAL    NOT NULL,
-      PRIMARY KEY (phone_hash, session_type)
-    );
-  `);
-}
-
 function fakeParseMarks({ learners = [], warnings = [], errors = [] } = {}) {
   return () => ({ learners, totalMark: 0, questionCount: 2, questionMaxMarks: {}, questionTopics: {}, warnings, errors });
 }
@@ -86,8 +46,7 @@ function learnerRecord(name, q1, q2) {
 }
 
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  const testDb = createTestDb(__filename);
 
   const { SessionStore } = require('../utils/sessionStore');
   const { handleAssessmentSessionFlow } = require('../flows/assessmentSessionFlow');
@@ -259,6 +218,9 @@ async function run() {
 
   console.log(`\n${'─'.repeat(60)}`);
   console.log(`Assessment Session Undo Dispatch Results: ${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   process.exit(failed > 0 ? 1 : 0);
 }
 
