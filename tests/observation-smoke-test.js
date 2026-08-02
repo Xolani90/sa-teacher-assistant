@@ -35,37 +35,11 @@
  * Run: node tests/observation-smoke-test.js
  */
 
-// ── Shim better-sqlite3 → node:sqlite (same convention as phase-6 /
-//    observationRepository-corrections-delete-resolve) ─────────────────────
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-const path = require('path');
+// ── Real-migrations test DB (see tests/helpers/createTestDb.js) ──────────
 const crypto = require('crypto');
-
-let _db = null;
-const dbPath = path.resolve(__dirname, '../utils/database');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
+const { createTestDb } = require('./helpers/createTestDb');
+const testDb = createTestDb(__filename);
+let _db = testDb.db;
 
 // ── Helpers ──────────────────────────────────────────────────────────────
 let passed = 0;
@@ -81,88 +55,7 @@ function assert(condition, label) {
   }
 }
 
-// ── Schema ───────────────────────────────────────────────────────────────
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS classes (
-      id INTEGER PRIMARY KEY,
-      phone_hash TEXT NOT NULL,
-      name TEXT,
-      grade INTEGER,
-      subject TEXT,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
-    );
-    CREATE TABLE IF NOT EXISTS learners (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      class_id INTEGER,
-      canonical_name TEXT NOT NULL,
-      normalized_name TEXT NOT NULL,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      updated_at TEXT NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
-      FOREIGN KEY (class_id) REFERENCES classes(id)
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_classed
-      ON learners(phone_hash, class_id, normalized_name) WHERE class_id IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_unclassed
-      ON learners(phone_hash, normalized_name) WHERE class_id IS NULL;
-
-    CREATE TABLE IF NOT EXISTS observation_assessments (
-      id                        INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash                TEXT    NOT NULL,
-      grade                     TEXT,
-      subject                   TEXT,
-      assessment_name           TEXT,
-      class_id                  INTEGER,
-      corrects_assessment_id    INTEGER REFERENCES observation_assessments(id),
-      created_at                TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
-      FOREIGN KEY (class_id) REFERENCES classes(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS observation_records (
-      id                    INTEGER PRIMARY KEY AUTOINCREMENT,
-      assessment_id         INTEGER NOT NULL,
-      learner_name          TEXT    NOT NULL,
-      domain                TEXT    NOT NULL,
-      developmental_status  TEXT    NOT NULL,
-      notes                 TEXT,
-      learner_id            INTEGER,
-      resolved              INTEGER NOT NULL DEFAULT 0,
-      created_at            TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (assessment_id) REFERENCES observation_assessments(id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_observation_assessments_phone
-      ON observation_assessments(phone_hash);
-    CREATE INDEX IF NOT EXISTS idx_observation_assessments_corrects
-      ON observation_assessments(corrects_assessment_id);
-    CREATE INDEX IF NOT EXISTS idx_observation_records_assessment
-      ON observation_records(assessment_id);
-
-    -- Required by utils/sessionStore.js (real module, used unmocked here)
-    CREATE TABLE IF NOT EXISTS sessions (
-      phone_hash    TEXT    NOT NULL,
-      session_type  TEXT    NOT NULL,
-      state         TEXT    NOT NULL,
-      updated_at    REAL    NOT NULL,
-      PRIMARY KEY (phone_hash, session_type)
-    );
-    CREATE INDEX IF NOT EXISTS idx_sessions_updated ON sessions(updated_at);
-  `);
-}
-
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
-
   // ── Real modules, wired the same way routes/webhook.js does ────────────
   const { handleObservationFlow, handleObservationHistoryFlow } = require('../flows/observationFlow');
   const { processObservationSubmission } = require('../utils/observationWorkflowService');
@@ -388,11 +281,13 @@ async function run() {
   if (failed > 0) {
     console.log('\nFull transcript (for debugging a failure):');
     sentMessages.forEach((m, i) => console.log(`\n[${i + 1}] →\n${m.text}`));
+    testDb.cleanup();
     process.exit(1);
   }
   // utils/sessionStore.js (real, unmocked module) registers a setInterval
   // for its hourly prune sweep — without an explicit exit here the process
   // would otherwise hang open after a successful run.
+  testDb.cleanup();
   process.exit(0);
 }
 
