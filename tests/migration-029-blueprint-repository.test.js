@@ -17,37 +17,8 @@
  * Run via npm:        npm test
  */
 
-// ── Shim better-sqlite3 → node:sqlite ────────────────────────────────────────
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-
-let _db = null;
-
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 let passed = 0;
@@ -94,73 +65,10 @@ function assertThrows(fn, expectedMsg, label) {
   }
 }
 
-// ── Schema (mirrors Migration 029 exactly, plus minimal teachers/assessments) ─
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS assessments (
-      id          INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash  TEXT NOT NULL,
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
-    );
-
-    CREATE TABLE IF NOT EXISTS assessment_blueprints (
-      id                INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash        TEXT    NOT NULL,
-      title             TEXT    NOT NULL,
-      subject           TEXT    NOT NULL,
-      grade             INTEGER NOT NULL,
-      term              INTEGER,
-      total_marks       INTEGER NOT NULL,
-      version           INTEGER NOT NULL DEFAULT 1,
-      previous_version_id INTEGER REFERENCES assessment_blueprints(id),
-      status            TEXT    NOT NULL DEFAULT 'draft',
-      created_at        TEXT    NOT NULL DEFAULT (datetime('now')),
-      updated_at        TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
-    );
-
-    CREATE TABLE IF NOT EXISTS blueprint_questions (
-      id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-      blueprint_id            INTEGER NOT NULL,
-      question_number         INTEGER NOT NULL,
-      topic                   TEXT    NOT NULL,
-      subtopic                TEXT,
-      bloom_level              TEXT,
-      atp_reference            TEXT,
-      expected_misconception  TEXT,
-      max_marks               INTEGER NOT NULL,
-      created_at              TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (blueprint_id) REFERENCES assessment_blueprints(id)
-        ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_assessment_blueprints_phone
-      ON assessment_blueprints(phone_hash);
-    CREATE INDEX IF NOT EXISTS idx_blueprint_questions_blueprint
-      ON blueprint_questions(blueprint_id);
-  `);
-
-  // Migration 029 Edit 2 (ALTER TABLE, run outside the base db.exec block,
-  // matching runMigrations()'s real additive-migration pattern).
-  try {
-    db.exec(`ALTER TABLE assessments ADD COLUMN blueprint_id INTEGER REFERENCES assessment_blueprints(id)`);
-  } catch (_) { /* already exists */ }
-
-  db.exec(`
-    CREATE INDEX IF NOT EXISTS idx_assessments_blueprint
-      ON assessments(blueprint_id);
-  `);
-}
-
 // ── Test runner ───────────────────────────────────────────────────────────────
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  const testDb = createTestDb(__filename);
+  const _db = testDb.db;
 
   const {
     createBlueprint,
@@ -188,7 +96,10 @@ async function run() {
   console.log('\n── Section 1: Migration 029 verification ───────────────────────────');
 
   console.log('\nTest M29-01: assessments.blueprint_id defaults to NULL for existing rows');
-  const legacyAssessment = _db.prepare(`INSERT INTO assessments (phone_hash) VALUES (?)`).run(PHONE);
+  const legacyAssessment = _db.prepare(
+    `INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks)
+     VALUES (?, 'Legacy Test', 6, 'Mathematics', 2, 'test', 20)`
+  ).run(PHONE);
   const legacyRow = _db.prepare(`SELECT blueprint_id FROM assessments WHERE id = ?`).get(legacyAssessment.lastInsertRowid);
   assertEq(legacyRow.blueprint_id, null, 'pre-existing assessment row has NULL blueprint_id, no error');
 
@@ -197,7 +108,10 @@ async function run() {
     { questionNumber: 1, topic: 'Fractions', maxMarks: 10 },
     { questionNumber: 2, topic: 'Decimals', maxMarks: 10 },
   ]);
-  const linkedAssessment = _db.prepare(`INSERT INTO assessments (phone_hash, blueprint_id) VALUES (?, ?)`).run(PHONE, setup.blueprintId);
+  const linkedAssessment = _db.prepare(
+    `INSERT INTO assessments (phone_hash, blueprint_id, title, grade, subject, term, assessment_type, total_marks)
+     VALUES (?, ?, 'Linked Test', 6, 'Mathematics', 2, 'test', 20)`
+  ).run(PHONE, setup.blueprintId);
   const linkedRow = _db.prepare(`SELECT blueprint_id FROM assessments WHERE id = ?`).get(linkedAssessment.lastInsertRowid);
   assertEq(linkedRow.blueprint_id, setup.blueprintId, 'linked assessment row reads back the correct blueprint_id');
 
@@ -451,6 +365,9 @@ async function run() {
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);
   console.log(`Migration 029 / Blueprint Repository Results: ${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 
