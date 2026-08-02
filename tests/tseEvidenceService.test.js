@@ -14,36 +14,8 @@
  * Run via npm:        npm test
  */
 
-// ── Shim better-sqlite3 → node:sqlite ────────────────────────────────────────
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-
-let _db = null;
-
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 let passed = 0;
@@ -65,36 +37,9 @@ function assertEq(a, b, label) {
   }
 }
 
-// ── Schema (mirrors Migrations 033/034 exactly) ──────────────────────────────
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS school_calendar (
-      id         INTEGER PRIMARY KEY AUTOINCREMENT,
-      year       INTEGER NOT NULL,
-      term       INTEGER NOT NULL,
-      start_date TEXT    NOT NULL,
-      end_date   TEXT    NOT NULL,
-      UNIQUE(year, term)
-    );
-    CREATE TABLE IF NOT EXISTS tse_evidence_links (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash    TEXT    NOT NULL,
-      category      TEXT    NOT NULL,
-      source_table  TEXT    NOT NULL,
-      source_id     INTEGER NOT NULL,
-      term          INTEGER,
-      created_at    TEXT    NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(source_table, source_id, category)
-    );
-    CREATE INDEX IF NOT EXISTS idx_tse_evidence_phone
-      ON tse_evidence_links(phone_hash, category);
-  `);
-  db.prepare(`INSERT INTO school_calendar (year, term, start_date, end_date) VALUES (2026, 3, '2026-07-21', '2026-10-02')`).run();
-}
-
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  const testDb = createTestDb(__filename);
+  const _db = testDb.db;
 
   const { tagEvidence, getStatusSnapshot, VALID_CATEGORIES } = require('../services/tseEvidenceService');
   const { getCurrentTerm } = require('../services/schoolCalendarRepository');
@@ -180,6 +125,9 @@ async function run() {
   // ── Summary ─────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(60)}`);
   console.log(`tseEvidenceService.test.js: ${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 
