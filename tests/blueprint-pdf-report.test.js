@@ -16,22 +16,21 @@
  *
  * This deliberately renders through real pdfkit (not stubbed) since the
  * whole point of this step is verifying the PDF actually renders — only
- * the DB layer and the heavy downstream analysis engines are stubbed,
- * same as the other blueprint test files.
+ * the heavy downstream analysis engines are stubbed, same as the other
+ * blueprint test files. The DB layer runs against the real migration
+ * chain via tests/helpers/createTestDb.js (see
+ * docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md), not a hand-rolled schema.
  *
  * Run individually: node tests/blueprint-pdf-report.test.js
  * Run via npm:       npm test
  */
 
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
+
 const path = require('path');
 const fs = require('fs');
-const os = require('os');
 
-let _db = null;
-
-const dbPath = path.resolve(__dirname, '../utils/database');
 const stubTargets = {
   [path.resolve(__dirname, '../services/itemAnalysisService.js')]: {
     performItemAnalysis: () => ({ questions: [], error: null }),
@@ -53,31 +52,8 @@ const stubTargets = {
   },
   [path.resolve(__dirname, '../services/curriculumCoverageService.js')]: {
     updateCoverageFromAssessment: () => {},
+    getExpectedTopics: () => [],
   },
-};
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
 };
 
 for (const [resolvedPath, exportsObj] of Object.entries(stubTargets)) {
@@ -88,9 +64,6 @@ for (const [resolvedPath, exportsObj] of Object.entries(stubTargets)) {
     exports: exportsObj,
   };
 }
-
-// Route PDF output to a throwaway temp dir instead of ./data/pdfs.
-process.env.DB_PATH = path.join(os.tmpdir(), `bp-pdf-test-${Date.now()}`, 'teacher_assistant.db');
 
 // ── Helpers ───────────────────────────────────────────────────────────────
 let passed = 0;
@@ -106,105 +79,9 @@ function assert(condition, label) {
   }
 }
 
-// ── Schema (mirrors blueprint-analytics.test.js, plus teachers.name/school
-//    since the PDF header pulls those for display) ─────────────────────────
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS teachers (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT UNIQUE NOT NULL,
-      name TEXT,
-      school TEXT
-    );
-
-    CREATE TABLE IF NOT EXISTS learners (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash      TEXT NOT NULL,
-      class_id        INTEGER,
-      canonical_name  TEXT NOT NULL,
-      normalized_name TEXT NOT NULL,
-      created_at      TEXT NOT NULL,
-      updated_at      TEXT NOT NULL
-    );
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_classed
-      ON learners(phone_hash, class_id, normalized_name) WHERE class_id IS NOT NULL;
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_learners_identity_unclassed
-      ON learners(phone_hash, normalized_name) WHERE class_id IS NULL;
-
-    CREATE TABLE IF NOT EXISTS assessments (
-      id              INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash      TEXT NOT NULL,
-      title           TEXT,
-      grade           INTEGER,
-      subject         TEXT,
-      term            INTEGER,
-      assessment_type TEXT,
-      total_marks     INTEGER,
-      atp_topics      TEXT,
-      class_id        INTEGER,
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
-    );
-
-    CREATE TABLE IF NOT EXISTS learner_results (
-      id            INTEGER PRIMARY KEY AUTOINCREMENT,
-      assessment_id INTEGER NOT NULL,
-      learner_name  TEXT,
-      mark          REAL,
-      total_marks   REAL,
-      percentage    REAL,
-      question_data TEXT,
-      learner_id    INTEGER,
-      FOREIGN KEY (assessment_id) REFERENCES assessments(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS assessment_blueprints (
-      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash           TEXT    NOT NULL,
-      title                TEXT    NOT NULL,
-      subject              TEXT    NOT NULL,
-      grade                INTEGER NOT NULL,
-      term                 INTEGER,
-      total_marks          INTEGER NOT NULL,
-      version              INTEGER NOT NULL DEFAULT 1,
-      previous_version_id  INTEGER REFERENCES assessment_blueprints(id),
-      status               TEXT    NOT NULL DEFAULT 'draft',
-      created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
-      updated_at           TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash)
-    );
-
-    CREATE TABLE IF NOT EXISTS blueprint_questions (
-      id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-      blueprint_id            INTEGER NOT NULL,
-      question_number         INTEGER NOT NULL,
-      topic                   TEXT    NOT NULL,
-      subtopic                TEXT,
-      bloom_level             TEXT,
-      atp_reference           TEXT,
-      expected_misconception  TEXT,
-      max_marks               INTEGER NOT NULL,
-      created_at              TEXT    NOT NULL DEFAULT (datetime('now')),
-      FOREIGN KEY (blueprint_id) REFERENCES assessment_blueprints(id)
-        ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_assessment_blueprints_phone
-      ON assessment_blueprints(phone_hash);
-    CREATE INDEX IF NOT EXISTS idx_blueprint_questions_blueprint
-      ON blueprint_questions(blueprint_id);
-  `);
-
-  try {
-    db.exec(`ALTER TABLE assessments ADD COLUMN blueprint_id INTEGER REFERENCES assessment_blueprints(id)`);
-  } catch (_) { /* already exists */ }
-  try {
-    db.exec(`ALTER TABLE assessments ADD COLUMN blueprint_version INTEGER`);
-  } catch (_) { /* already exists */ }
-}
-
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  const testDb = createTestDb(__filename);
+  const _db = testDb.db;
 
   const { createBlueprint, publishBlueprint } = require('../services/blueprintRepository');
   const { processAssessmentData } = require('../services/diagnosticWorkflowService');
@@ -275,8 +152,9 @@ async function run() {
   console.log('\n── Section 4: Error passthrough for non-blueprint assessments ───────');
 
   const plainAssessment = _db.prepare(`
-    INSERT INTO assessments (phone_hash, title, total_marks) VALUES (?, ?, ?)
-  `).run(PHONE, 'Free-form assessment', 20);
+    INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(PHONE, 'Free-form assessment', 5, 'Mathematics', 3, 'test', 20);
   const plainPdfResult = await generateBlueprintAssessmentPdf(plainAssessment.lastInsertRowid);
   assert(!!plainPdfResult.error, 'non-blueprint assessment returns analytics error, not a PDF');
 
@@ -315,9 +193,9 @@ async function run() {
   publishBlueprint(emptyDraft.blueprintId, PHONE);
 
   const emptyAssessment = _db.prepare(`
-    INSERT INTO assessments (phone_hash, title, total_marks, blueprint_id, blueprint_version)
-    VALUES (?, ?, ?, ?, ?)
-  `).run(PHONE, 'Term 3 Empty Test', 10, emptyDraft.blueprintId, 1);
+    INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks, blueprint_id, blueprint_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(PHONE, 'Term 3 Empty Test', 5, 'Mathematics', 3, 'test', 10, emptyDraft.blueprintId, 1);
 
   const emptyPdfResult = await generateBlueprintAssessmentPdf(emptyAssessment.lastInsertRowid);
   assert(!!emptyPdfResult.error, 'blueprint-backed assessment with zero learner results returns an error, not a PDF');
@@ -334,6 +212,9 @@ async function run() {
 
   console.log(`\n${'─'.repeat(60)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 
