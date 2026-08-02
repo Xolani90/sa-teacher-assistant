@@ -269,6 +269,28 @@ async function handleCommand(from, text, deps) {
 
   if (await handleWorkspaceFlow(from, text, buildWorkspaceDeps())) return true;
 
+  // ── QMS commands (MY STATS, MY STATS ALL, MY GOALS, MY REFLECTIONS) ──
+  const { handleQmsFlow } = require('../flows/qmsFlow');
+
+  function buildQmsDeps() {
+    const { getSummary, getGrowthPlanSummary, getCommonFocusAreas } = require('../services/qmsAnalyticsService');
+    const { listReflections } = require('../services/reflectionService');
+    const { getCurrentTerm } = require('../services/schoolCalendarRepository');
+
+    return Object.freeze({
+      hashPhone: deps.hashPhone,
+      getTeacherByPhone: deps.getTeacherByPhone,
+      safeSendMessage: deps.safeSendMessage,
+      getSummary,
+      getGrowthPlanSummary,
+      getCommonFocusAreas,
+      listReflections,
+      getCurrentTerm,
+    });
+  }
+
+  if (await handleQmsFlow(from, text, buildQmsDeps())) return true;
+
   // ── CANCEL a pending SAVE prompt ────────────────────────────────────────
   // deps.lastGeneratedState isn't in the `alreadyMidFlow` set (it's not a
   // multi-step conversation, just a one-shot "reply SAVE to keep this")
