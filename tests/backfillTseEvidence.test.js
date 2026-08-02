@@ -6,41 +6,14 @@
  *   1. Backfilling pre-existing rows tags them correctly
  *   2. Re-running the backfill is idempotent (no duplicate rows)
  *   3. --dry-run mode makes no writes but reports what it would do
- *   4. Rows with a NULL phone_hash are skipped, not errored on
+ *   4. Rows with a falsy phone_hash are skipped, not errored on
  *
  * Run individually:   node tests/backfillTseEvidence.test.js
  * Run via npm:        npm test
  */
 
-const Module = require('module');
-const { DatabaseSync } = require('node:sqlite');
-
-let _db = null;
-
-const path = require('path');
-const dbPath = path.resolve(__dirname, '../utils/database');
-
-const _origResolve = Module._resolveFilename.bind(Module);
-Module._resolveFilename = function (request, parent, isMain, opts) {
-  if (request === 'better-sqlite3') return request;
-  if (request === '../utils/database' || request === './database' || request === '../../utils/database') return dbPath;
-  return _origResolve(request, parent, isMain, opts);
-};
-require.cache['better-sqlite3'] = {
-  id: 'better-sqlite3',
-  filename: 'better-sqlite3',
-  loaded: true,
-  exports: function Database() {
-    if (!_db.pragma) _db.pragma = () => {};
-    return _db;
-  },
-};
-require.cache[dbPath] = {
-  id: dbPath,
-  filename: dbPath,
-  loaded: true,
-  exports: { getDb: () => _db },
-};
+// ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
+const { createTestDb } = require('./helpers/createTestDb');
 
 let passed = 0;
 let failed = 0;
@@ -56,48 +29,67 @@ function assertEq(a, b, label) {
   }
 }
 
-function buildSchema(db) {
-  db.exec(`
-    CREATE TABLE saved_resources (id INTEGER PRIMARY KEY AUTOINCREMENT, phone_hash TEXT);
-    CREATE TABLE assessments (id INTEGER PRIMARY KEY AUTOINCREMENT, phone_hash TEXT, term INTEGER);
-    CREATE TABLE reports (id INTEGER PRIMARY KEY AUTOINCREMENT, phone_hash TEXT);
-    CREATE TABLE intervention_plans (id INTEGER PRIMARY KEY AUTOINCREMENT, phone_hash TEXT);
-    CREATE TABLE curriculum_coverage (id INTEGER PRIMARY KEY AUTOINCREMENT, phone_hash TEXT, term INTEGER);
-    CREATE TABLE observation_assessments (id INTEGER PRIMARY KEY AUTOINCREMENT, phone_hash TEXT);
-    CREATE TABLE school_calendar (
-      id INTEGER PRIMARY KEY AUTOINCREMENT, year INTEGER, term INTEGER,
-      start_date TEXT, end_date TEXT, UNIQUE(year, term)
-    );
-    CREATE TABLE tse_evidence_links (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      phone_hash TEXT NOT NULL,
-      category TEXT NOT NULL,
-      source_table TEXT NOT NULL,
-      source_id INTEGER NOT NULL,
-      term INTEGER,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      UNIQUE(source_table, source_id, category)
-    );
-  `);
-}
-
 async function run() {
-  _db = new DatabaseSync(':memory:');
-  buildSchema(_db);
+  const testDb = createTestDb(__filename);
+  const _db = testDb.db;
 
   const PHONE = 'backfill_test_hash';
 
-  // Seed pre-existing rows across all six source tables, plus one row
-  // with a NULL phone_hash (edge case — should be skipped, not thrown on).
-  _db.prepare(`INSERT INTO saved_resources (phone_hash) VALUES (?)`).run(PHONE);
-  _db.prepare(`INSERT INTO assessments (phone_hash, term) VALUES (?, 3)`).run(PHONE);
-  _db.prepare(`INSERT INTO reports (phone_hash) VALUES (?)`).run(PHONE);
-  _db.prepare(`INSERT INTO intervention_plans (phone_hash) VALUES (?)`).run(PHONE);
-  _db.prepare(`INSERT INTO curriculum_coverage (phone_hash, term) VALUES (?, 3)`).run(PHONE);
-  _db.prepare(`INSERT INTO observation_assessments (phone_hash) VALUES (?)`).run(PHONE);
-  _db.prepare(`INSERT INTO saved_resources (phone_hash) VALUES (NULL)`).run();
+  // Real tables enforce FOREIGN KEY (phone_hash) REFERENCES teachers(phone_hash),
+  // unlike the hand-rolled schema this replaces — seed the teacher row first.
+  _db.prepare(`INSERT INTO teachers (phone_hash) VALUES (?)`).run(PHONE);
+  // Also seed a teacher row for the empty-phone_hash edge case below, since
+  // the real schema's FK constraint checks even a non-NULL empty string.
+  _db.prepare(`INSERT INTO teachers (phone_hash) VALUES ('')`).run();
 
-  const { run: runBackfill, backfillTable } = require('../scripts/backfillTseEvidence');
+  // Seed pre-existing rows across all six source tables, filling every
+  // NOT NULL column the real migrated schema requires (the hand-rolled
+  // schema this replaces only had id/phone_hash/term, which the real
+  // tables no longer accept).
+  const assessmentId = _db
+    .prepare(
+      `INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks)
+       VALUES (?, 'Fractions Test', 7, 'mathematics', 3, 'test', 20)`
+    )
+    .run(PHONE).lastInsertRowid;
+
+  _db.prepare(
+    `INSERT INTO saved_resources (phone_hash, resource_type, title, content)
+     VALUES (?, 'worksheet', 'Fractions — worksheet', 'content body')`
+  ).run(PHONE);
+
+  _db.prepare(
+    `INSERT INTO reports (phone_hash, assessment_id, report_type, content)
+     VALUES (?, ?, 'diagnostic', 'report body')`
+  ).run(PHONE, assessmentId);
+
+  _db.prepare(
+    `INSERT INTO intervention_plans (phone_hash, problem_area, target_group, goals, duration_days, strategies)
+     VALUES (?, 'Fractions', 'Whole class', 'Improve mastery', 14, 'Small-group revision')`
+  ).run(PHONE);
+
+  _db.prepare(
+    `INSERT INTO curriculum_coverage (phone_hash, grade, subject, term, topic)
+     VALUES (?, 7, 'mathematics', 3, 'Fractions')`
+  ).run(PHONE);
+
+  _db.prepare(
+    `INSERT INTO observation_assessments (phone_hash, grade, subject, assessment_name)
+     VALUES (?, '0', 'life skills', 'Term 3 observation')`
+  ).run(PHONE);
+
+  // Edge case: a row with a falsy (but schema-legal, since phone_hash is
+  // NOT NULL in the real tables) phone_hash — should be skipped, not
+  // thrown on. An empty string exercises backfillTable()'s `!row.phone_hash`
+  // guard the same way a literal NULL would, without violating the real
+  // schema's NOT NULL constraint (a genuine NULL is no longer insertable
+  // here — see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md).
+  _db.prepare(
+    `INSERT INTO saved_resources (phone_hash, resource_type, title, content)
+     VALUES ('', 'worksheet', 'Orphaned — worksheet', 'content body')`
+  ).run();
+
+  const { backfillTable } = require('../scripts/backfillTseEvidence');
 
   console.log('\n── Backfill: dry run ─────────────────────────────────────────────────');
 
@@ -129,10 +121,10 @@ async function run() {
     const { tagged } = realBackfillTable(target);
     totalTagged += tagged;
   }
-  // saved_resources has 2 rows (1 valid + 1 NULL phone_hash, skipped) → 1 tagged.
-  assertEq(totalTagged, 6, 'exactly 6 evidence rows tagged (one per table, NULL-phone row skipped)');
+  // saved_resources has 2 rows (1 valid + 1 empty phone_hash, skipped) → 1 tagged.
+  assertEq(totalTagged, 6, 'exactly 6 evidence rows tagged (one per table, empty-phone row skipped)');
 
-  console.log('\nTest BF-03: NULL phone_hash row was skipped, not errored on');
+  console.log('\nTest BF-03: falsy phone_hash row was skipped, not errored on');
   const resourceEvidenceCount = _db.prepare(`SELECT COUNT(*) as c FROM tse_evidence_links WHERE source_table='saved_resources'`).get();
   assertEq(resourceEvidenceCount.c, 1, 'only the valid saved_resources row was tagged');
 
@@ -148,6 +140,9 @@ async function run() {
 
   console.log(`\n${'─'.repeat(60)}`);
   console.log(`backfillTseEvidence.test.js: ${passed} passed, ${failed} failed`);
+
+  testDb.cleanup();
+
   if (failed > 0) process.exit(1);
 }
 
