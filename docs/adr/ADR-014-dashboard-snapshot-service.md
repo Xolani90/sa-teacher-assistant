@@ -11,7 +11,7 @@ because growth insights remain teacher-scoped.
 ## Context
 The dashboard currently needs data from multiple independent backend services:
 
-- `classAnalyticsService` (ADR-013) — `getClassAnalytics(phoneHash, classId, options)` — mastery, coverage, and progress aggregates for a class
+- `classAnalyticsService` (ADR-015) — `getClassAnalytics(phoneHash, classId, options)` — mastery, coverage, and progress aggregates for a class
 - `classInterventionService` (ADR-009) — `getClassInterventionPlan(phoneHash, classId, options)` — priority learners, focus topics, recommended actions
 - `tseGrowthInsightService` (TSE Phase 4) — `getGrowthInsights(phoneHash, opts)` — evidence-gap insights
 
@@ -119,7 +119,7 @@ full `snapshot` object.
 
 2. **One monolithic analytics service replacing the three.**
    Rejected — violates the single-responsibility boundaries already
-   established in ADR-013 and would require re-testing already-frozen,
+   established in ADR-015 and would require re-testing already-frozen,
    independently verified contracts.
 
 3. **Server-side caching of the snapshot.**
@@ -162,7 +162,7 @@ full `snapshot` object.
      observations, AI insights, etc.) is a one-line registry addition
      rather than new orchestration code.
    - Assembles the response contract above, including `metadata.sections`.
-2. Unit tests — mirror the fault-isolation test patterns from ADR-013
+2. Unit tests — mirror the fault-isolation test patterns from ADR-015
    (all-succeed, one-fails, all-fail cases).
 3. `GET /api/classes/:id/snapshot` — thin route, following the PR18/PR20
    thin-route convention (route only calls the service, no logic in the

@@ -21,7 +21,7 @@ Log at the bottom for how this document came to look the way it does.
 - ✅ ADR-010 — QMS/TSE relationship
 - ✅ ADR-011 — QMS domain model
 - ✅ ADR-012 — QMS Action Centre
-- ✅ ADR-013 — Class Analytics Snapshot
+- ✅ ADR-015 — Class Analytics Snapshot
 - ✅ ADR-014 — Dashboard Snapshot Orchestration Service
   — Status corrected from "Proposed" to "Accepted — Implemented"
   (commit `c33f06b`), verified against real seeded data in the browser.
@@ -41,10 +41,11 @@ Log at the bottom for how this document came to look the way it does.
 
 ### Analytics
 
-- ✅ Class Analytics (`classAnalyticsService`, ADR-013)
+- ✅ Class Analytics (`classAnalyticsService`, ADR-015)
 - ✅ Class Intervention (`classInterventionService`, ADR-009)
 - ✅ Learner Analytics — **discovered already implemented** during
-  investigation for a planned ADR-015; no new ADR or service was needed.
+  investigation for a planned analytics ADR (no number was ever
+  assigned); no new ADR or service was needed.
 - ✅ Assessment Analytics (`blueprintAnalytics` + `itemAnalysisService`)
   — **discovered already implemented** during the same investigation
   pass.
@@ -141,8 +142,8 @@ services.
 Verified existing functionality that no longer requires implementation:
 
 - Learner Analytics already implemented (`learnerDetailService.js` +
-  `LearnerDetail.jsx`) — investigated while scoping a planned ADR-015;
-  no new ADR or service was needed.
+  `LearnerDetail.jsx`) — investigated while scoping a planned analytics
+  ADR (no number was ever assigned); no new ADR or service was needed.
 - Assessment Analytics already implemented (`assessmentDetailService.js`
   + `blueprintAnalytics.js` + `itemAnalysisService.js` +
   `AssessmentDetail.jsx`).

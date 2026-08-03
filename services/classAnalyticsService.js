@@ -1,18 +1,18 @@
 'use strict';
 
 /**
- * Class Analytics Snapshot (ADR-013).
+ * Class Analytics Snapshot (ADR-015).
  *
  * Aggregates ProgressService/CoverageService/MasteryService once per
  * learner in a class roster into a single ClassAnalyticsSnapshot.
  * Sibling to classInterventionService.js (ADR-009) — neither calls the
  * other, and this service never reads InterventionPlan/priority.
  *
- * IMPORTANT — ASSUMPTIONS NOT FIXED BY ADR-013 (flag if wrong):
+ * IMPORTANT — ASSUMPTIONS NOT FIXED BY ADR-015 (flag if wrong):
  *
  *   1. averageMastery: MasteryReport.masteryLevel is categorical
  *      ("beginning"/"developing"/"secure"/"advanced"/"insufficient-data"),
- *      not a numeric score. ADR-013 needs a numeric classSummary.averageMastery,
+ *      not a numeric score. ADR-015 needs a numeric classSummary.averageMastery,
  *      so this module maps levels to MASTERY_LEVEL_SCORE below purely for
  *      averaging. This mapping is NOT specified anywhere in ADR-007/013 —
  *      confirm the scale (currently 25/50/75/100) matches product intent.
@@ -73,7 +73,7 @@ function coverageBucket(averagePercentage) {
 }
 
 /**
- * Builds a ClassAnalyticsSnapshot for a class roster (ADR-013).
+ * Builds a ClassAnalyticsSnapshot for a class roster (ADR-015).
  *
  * @param {string} phoneHash
  * @param {number} classId
@@ -119,7 +119,7 @@ function getClassAnalytics(phoneHash, classId, options = {}) {
 
     // --- Progress: average this learner's per-subject averagePercentage,
     // excluding subjects marked trend === "insufficient-data" (a single
-    // data point still carries a numeric averagePercentage, but ADR-013
+    // data point still carries a numeric averagePercentage, but ADR-015
     // §3.2 treats "insufficient-data" subjects as excluded from averages
     // and counted in distributions instead — same rule mastery/coverage
     // already apply on their own insufficient-data signal. A trend-based
@@ -159,7 +159,7 @@ function getClassAnalytics(phoneHash, classId, options = {}) {
     }
 
     // highlights.attentionRequired: ALL subjects in scope are
-    // insufficient-data for this learner (ADR-013 §3.2).
+    // insufficient-data for this learner (ADR-015 §3.2).
     if (masteryReports.length > 0 && evaluatedMastery.length === 0) {
       attentionRequiredIds.push(learner.id);
     }
@@ -211,7 +211,7 @@ function getClassAnalytics(phoneHash, classId, options = {}) {
   }));
 
   // highlights.strongestArea/weakestArea: compare subjects with >=1
-  // evaluated learner only (ADR-013 §3.2) — a subject with zero
+  // evaluated learner only (ADR-015 §3.2) — a subject with zero
   // evaluated learners is excluded, not treated as zero.
   const comparable = bySubject.filter((s) => s.averageMastery != null);
   let strongestArea = null;

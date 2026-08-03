@@ -54,7 +54,7 @@ not through a bug report.
 - `classInterventionService` — intervention signals that depend on coverage
   inherit the gap
 - `classAnalyticsService`
-- Dashboard Snapshot Analytics card (ADR-013/ADR-014) — renders coverage as
+- Dashboard Snapshot Analytics card (ADR-015/ADR-014) — renders coverage as
   unavailable (dash) rather than a number for affected classes
 
 ## User Impact

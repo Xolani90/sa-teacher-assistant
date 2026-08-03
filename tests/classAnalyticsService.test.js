@@ -1,6 +1,6 @@
 'use strict';
 /**
- * Class Analytics Snapshot tests (ADR-013).
+ * Class Analytics Snapshot tests (ADR-015).
  *
  * classAnalyticsService.js composes three seams: learnerRosterService,
  * progressService, coverageService, masteryService. This suite mocks all
@@ -257,7 +257,7 @@ function testInsufficientDataTrendExcludedFromAverage() {
 }
 
 // ── Run ──────────────────────────────────────────────────────────────────
-console.log('Class Analytics Snapshot tests (ADR-013)');
+console.log('Class Analytics Snapshot tests (ADR-015)');
 console.log('='.repeat(75));
 
 testAllFullData();

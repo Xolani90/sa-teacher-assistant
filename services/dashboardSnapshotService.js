@@ -3,7 +3,7 @@
 /**
  * dashboardSnapshotService (ADR-014).
  *
- * Pure orchestration layer. Composes classAnalyticsService (ADR-013),
+ * Pure orchestration layer. Composes classAnalyticsService (ADR-015),
  * classInterventionService (ADR-009), and tseGrowthInsightService (TSE
  * Phase 4) into a single ClassSnapshot. Performs no calculations of its
  * own — only invokes child services, isolates failures per section, and
