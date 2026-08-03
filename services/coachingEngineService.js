@@ -53,6 +53,12 @@ const MIN_REFLECTIONS_FOR_SUFFICIENT_DATA = 3;
 /** Insufficient-data guard threshold (§6.6): active growth plans < this → insufficient. */
 const MIN_ACTIVE_GROWTH_PLANS_FOR_SUFFICIENT_DATA = 1;
 
+/** PR36: low_confidence_recommendation rule fires when confidence is below this. */
+const LOW_CONFIDENCE_THRESHOLD = 0.45;
+
+/** PR36: stale_evidence rule fires when the newest evidence is older than this (days). */
+const STALE_EVIDENCE_THRESHOLD_DAYS = 60;
+
 /**
  * §6.1 resilience check: is this topicId usable as evidence right now?
  * A stale/invalid persisted topic_id is treated exactly like null — this
@@ -501,6 +507,14 @@ function buildTopicContexts(phoneHash) {
     recordsByTopic.get(p.topicId).push(p.createdAt);
   });
 
+  // PR36: derived from taggedGrowthPlans, already fetched above — no new
+  // query. Lets growth_plan_missing distinguish "no growth plan at all
+  // for this topic" from "has one, but it's completed/abandoned", which
+  // ctx.evidence (a bare {type,id} list) can't express on its own.
+  const hasActiveGrowthPlanByTopic = new Set(
+    taggedGrowthPlans.filter((p) => p.status === 'active').map((p) => p.topicId)
+  );
+
   const contexts = new Map();
 
   for (const [topicId, evidence] of evidenceByTopic.entries()) {
@@ -538,6 +552,7 @@ function buildTopicContexts(phoneHash) {
       consistencyScore,
       confidence,
       confidenceLabel: confidenceLabel(confidence),
+      hasActiveGrowthPlan: hasActiveGrowthPlanByTopic.has(topicId),
     });
   }
 
@@ -553,13 +568,81 @@ function buildTopicContexts(phoneHash) {
 // execution order — see runRules() below. Adding a new rule means adding
 // a new entry here; nothing else in this file changes.
 
+// PR36: three additional rules, all evaluated purely from the TopicContext
+// buildTopicContexts() already produces — no trend analysis, no new
+// database queries, no schema changes. Each `applies()` predicate below
+// is written to be mutually exclusive with the others for a given topic
+// (growth_plan_missing > stale_evidence > low_confidence_recommendation >
+// recurring_topic_pattern, most-specific first), so at most one rule ever
+// fires per topic. This is deliberate: dedupeRecommendationsByTopic()
+// only keeps the highest-confidence candidate per topic and breaks ties
+// by first-inserted, which would otherwise make the final output depend
+// on catalogue order whenever two rules tie on confidence for the same
+// topic — exactly what §6.4's order-independence guarantee rules out.
+// Mutual exclusivity via applies() (not via one rule reading another's
+// output) keeps every rule pure and order-independent by construction.
+
+/** PR36: reflections exist for the topic, but no *active* growth plan does. */
+function growthPlanMissingApplies(ctx) {
+  return ctx.evidence.some((e) => e.type === 'reflection') && !ctx.hasActiveGrowthPlan;
+}
+
+/** PR36: the newest supporting evidence for the topic has gone stale. */
+function staleEvidenceApplies(ctx) {
+  return Number.isFinite(ctx.ageDaysNewest) && ctx.ageDaysNewest > STALE_EVIDENCE_THRESHOLD_DAYS;
+}
+
+/** PR36: confidence is below the threshold for acting on the recommendation. */
+function lowConfidenceApplies(ctx) {
+  return ctx.confidence < LOW_CONFIDENCE_THRESHOLD;
+}
+
 const RECOMMENDATION_RULES = [
+  {
+    id: 'growth_plan_missing',
+    applies: (ctx) => growthPlanMissingApplies(ctx),
+    evaluate: (ctx) => ({
+      topicId: ctx.topicId,
+      recommendation: `You have identified a recurring pattern in ${ctx.topic.label} `
+        + `but don't yet have an active growth plan.`,
+      confidence: ctx.confidence,
+      evidence: ctx.evidence,
+    }),
+  },
+  {
+    id: 'stale_evidence',
+    applies: (ctx) => !growthPlanMissingApplies(ctx) && staleEvidenceApplies(ctx),
+    evaluate: (ctx) => ({
+      topicId: ctx.topicId,
+      recommendation: `You haven't recorded recent evidence for ${ctx.topic.label}. `
+        + `Add a recent reflection to keep recommendations current.`,
+      confidence: ctx.confidence,
+      evidence: ctx.evidence,
+    }),
+  },
+  {
+    id: 'low_confidence_recommendation',
+    applies: (ctx) => !growthPlanMissingApplies(ctx)
+      && !staleEvidenceApplies(ctx)
+      && lowConfidenceApplies(ctx),
+    evaluate: (ctx) => ({
+      topicId: ctx.topicId,
+      recommendation: 'Evidence is currently limited for this recommendation. '
+        + 'Continue recording reflections before making major changes.',
+      confidence: ctx.confidence,
+      evidence: ctx.evidence,
+    }),
+  },
   {
     id: 'recurring_topic_pattern',
     // Any topic with currently-usable evidence is an applicable pattern —
     // the insufficient-data guard (§6.6) already establishes there's
-    // enough data overall before rules ever run.
-    applies: (ctx) => ctx.evidenceCount > 0,
+    // enough data overall before rules ever run. Falls through only when
+    // none of the more specific PR36 rules above applied.
+    applies: (ctx) => ctx.evidenceCount > 0
+      && !growthPlanMissingApplies(ctx)
+      && !staleEvidenceApplies(ctx)
+      && !lowConfidenceApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
       recommendation: `Continue focused coaching support on ${ctx.topic.label}.`,
@@ -680,6 +763,8 @@ module.exports = {
   DEFAULT_MAX_INSIGHTS,
   MIN_REFLECTIONS_FOR_SUFFICIENT_DATA,
   MIN_ACTIVE_GROWTH_PLANS_FOR_SUFFICIENT_DATA,
+  LOW_CONFIDENCE_THRESHOLD,
+  STALE_EVIDENCE_THRESHOLD_DAYS,
   hasUsableTopic,
   checkInsufficientDataGuard,
   getTaggedReflections,

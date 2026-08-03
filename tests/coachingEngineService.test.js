@@ -90,6 +90,7 @@ async function run() {
   const {
     MIN_REFLECTIONS_FOR_SUFFICIENT_DATA,
     MIN_ACTIVE_GROWTH_PLANS_FOR_SUFFICIENT_DATA,
+    LOW_CONFIDENCE_THRESHOLD,
     DEFAULT_MAX_INSIGHTS,
     hasUsableTopic,
     checkInsufficientDataGuard,
@@ -635,6 +636,150 @@ async function run() {
     const topicIds = result.recommendations.map((r) => r.topicId);
     assert(!topicIds.includes('TOPIC_RETIRED_STALE'), 'stale/unknown topic_id never produces a recommendation');
     assertEq(result.status, 'ok', 'still resolves normally despite the stale row');
+  }
+
+  clearAll();
+
+  // ── Section 8: PR36 — additional rules (growth_plan_missing, ────────────
+  //    stale_evidence, low_confidence_recommendation)
+
+  console.log('\nSection 8: PR36 recommendation rules');
+
+  console.log('\nTest R-01: growth_plan_missing fires when reflections exist but no active growth plan does');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    // no growth plan at all for TOPIC_A
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_B, status: 'active' }); // satisfies the guard
+    for (let i = 0; i < 3; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_B });
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(!!recA, 'TOPIC_A recommendation is present');
+    assert(
+      recA.recommendation.includes("don't yet have an active growth plan"),
+      'growth_plan_missing message surfaces for a topic with reflections but no active plan'
+    );
+  }
+
+  console.log('\nTest R-02: growth_plan_missing does not fire once an active growth plan exists for that topic');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(
+      !recA.recommendation.includes('active growth plan'),
+      'a topic with an active growth plan falls through to a different rule'
+    );
+  }
+
+  console.log('\nTest R-03: growth_plan_missing does not fire for a completed (non-active) growth plan — still missing');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'completed' });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_B, status: 'active' }); // satisfies the guard
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(
+      recA.recommendation.includes("don't yet have an active growth plan"),
+      'a completed (non-active) growth plan still counts as "missing" for this rule'
+    );
+  }
+
+  console.log('\nTest R-04: stale_evidence fires when the newest evidence exceeds the staleness threshold');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+    // Backdate every row for TOPIC_A well past the staleness threshold.
+    _db.exec(
+      `UPDATE qms_reflections SET created_at = datetime('now', '-90 days') WHERE topic_id = '${TOPIC_A}'`
+    );
+    _db.exec(
+      `UPDATE qms_growth_plans SET created_at = datetime('now', '-90 days') WHERE topic_id = '${TOPIC_A}'`
+    );
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(!!recA, 'TOPIC_A recommendation is present');
+    assert(
+      recA.recommendation.includes("haven't recorded recent evidence"),
+      'stale_evidence message surfaces once the newest evidence is beyond the threshold'
+    );
+  }
+
+  console.log('\nTest R-05: stale_evidence does not fire for recently-recorded evidence');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(
+      !recA.recommendation.includes('recent evidence'),
+      'fresh evidence does not trigger the stale_evidence message'
+    );
+  }
+
+  console.log('\nTest R-06: low_confidence_recommendation fires when confidence is below threshold, no other rule applies');
+  clearAll();
+  {
+    // TOPIC_A: thin evidence (1 reflection + 1 active plan, so
+    // growth_plan_missing does NOT apply), moderately aged (40 days —
+    // recencyScore 0.75, under the 60-day stale_evidence threshold so
+    // that rule does NOT apply either), and diluted consistency (a lot
+    // of recent TOPIC_B reflections crowd TOPIC_A out of the 10-item
+    // consistency window). Low evidenceScore + low consistencyScore
+    // should push confidence under LOW_CONFIDENCE_THRESHOLD on their own.
+    insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+    _db.exec(
+      `UPDATE qms_reflections SET created_at = datetime('now', '-40 days') WHERE topic_id = '${TOPIC_A}'`
+    );
+    _db.exec(
+      `UPDATE qms_growth_plans SET created_at = datetime('now', '-40 days') WHERE topic_id = '${TOPIC_A}'`
+    );
+    for (let i = 0; i < 9; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_B });
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(!!recA, 'TOPIC_A recommendation is present');
+    assert(recA.confidence < LOW_CONFIDENCE_THRESHOLD, 'sanity: TOPIC_A confidence is genuinely below threshold');
+    assert(
+      recA.recommendation.includes('Evidence is currently limited'),
+      'low_confidence_recommendation message surfaces when confidence is below threshold'
+    );
+  }
+
+  console.log('\nTest R-07: rules are mutually exclusive per topic — exactly one recommendation, never a duplicate/contradictory pair');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+
+    const result = getCoachingInsights(PHONE);
+    const topicAEntries = result.recommendations.filter((r) => r.topicId === TOPIC_A);
+    assertEq(topicAEntries.length, 1, 'exactly one recommendation for TOPIC_A, not one per matching rule');
+  }
+
+  console.log('\nTest R-08: recurring_topic_pattern still fires for a well-supported, current, non-missing-plan topic (no regression)');
+  clearAll();
+  {
+    for (let i = 0; i < 6; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(
+      recA.recommendation.includes('Continue focused coaching support'),
+      'the baseline recurring_topic_pattern message still surfaces when no PR36 rule applies'
+    );
   }
 
   clearAll();
