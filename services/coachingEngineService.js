@@ -388,6 +388,16 @@ function sortRecommendations(candidates) {
   );
 
   return [...candidates].sort((a, b) => {
+    // ADR-017 §4: priority is now the primary sort key. A candidate
+    // without an explicit priority is treated as priority 0 rather than
+    // thrown on here — sortRecommendations() operates on already-built
+    // candidates, and rule-catalogue validation (validateRecommendationRules)
+    // is the single point responsible for rejecting a missing priority at
+    // startup, not this comparator on every call.
+    const priorityA = typeof a.priority === 'number' ? a.priority : 0;
+    const priorityB = typeof b.priority === 'number' ? b.priority : 0;
+    if (priorityB !== priorityA) return priorityB - priorityA;
+
     if (b.confidence !== a.confidence) return b.confidence - a.confidence;
 
     const orderA = orderByTopicId.get(a.topicId);
@@ -625,6 +635,11 @@ function lowConfidenceApplies(ctx) {
 const RECOMMENDATION_RULES = [
   {
     id: 'growth_plan_missing',
+    // ADR-017 §3: priority values spaced by 10s so later PR39 trend rules
+    // (evidence_removed=90, trend_falling=70, evidence_gained=60,
+    // trend_rising=40) can be inserted between the existing PR36 rules
+    // without renumbering any of them.
+    priority: 100,
     applies: (ctx) => growthPlanMissingApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
@@ -632,10 +647,12 @@ const RECOMMENDATION_RULES = [
         + `but don't yet have an active growth plan.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
+      priority: 100,
     }),
   },
   {
     id: 'stale_evidence',
+    priority: 80,
     applies: (ctx) => !growthPlanMissingApplies(ctx) && staleEvidenceApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
@@ -643,10 +660,12 @@ const RECOMMENDATION_RULES = [
         + `Add a recent reflection to keep recommendations current.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
+      priority: 80,
     }),
   },
   {
     id: 'low_confidence_recommendation',
+    priority: 50,
     applies: (ctx) => ctx.hasEvidence
       && !growthPlanMissingApplies(ctx)
       && !staleEvidenceApplies(ctx)
@@ -657,6 +676,7 @@ const RECOMMENDATION_RULES = [
         + 'Continue recording reflections before making major changes.',
       confidence: ctx.confidence,
       evidence: ctx.evidence,
+      priority: 50,
     }),
   },
   {
@@ -665,6 +685,7 @@ const RECOMMENDATION_RULES = [
     // the insufficient-data guard (§6.6) already establishes there's
     // enough data overall before rules ever run. Falls through only when
     // none of the more specific PR36 rules above applied.
+    priority: 10,
     applies: (ctx) => ctx.evidenceCount > 0
       && !growthPlanMissingApplies(ctx)
       && !staleEvidenceApplies(ctx)
@@ -674,9 +695,32 @@ const RECOMMENDATION_RULES = [
       recommendation: `Continue focused coaching support on ${ctx.topic.label}.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
+      priority: 10,
     }),
   },
 ];
+
+/**
+ * Validation (ADR-017 §7): every recommendation rule must declare a
+ * numeric `priority`. Called once at module load against the live
+ * catalogue so a misconfigured rule (missing/non-numeric priority) fails
+ * loudly at application startup, not silently the first time
+ * sortRecommendations() runs against it in production.
+ *
+ * @param {object[]} rules
+ * @throws {Error} if any rule lacks a finite numeric priority.
+ */
+function validateRecommendationRules(rules) {
+  for (const rule of rules) {
+    if (!Number.isFinite(rule.priority)) {
+      throw new Error(
+        `Recommendation rule '${rule.id}' is missing a numeric priority`
+      );
+    }
+  }
+}
+
+validateRecommendationRules(RECOMMENDATION_RULES);
 
 /**
  * Runs every rule in the catalogue against every topic context and
@@ -806,6 +850,8 @@ module.exports = {
   truncateRecommendations,
   processRecommendationCandidates,
   buildTopicContexts,
+  RECOMMENDATION_RULES,
+  validateRecommendationRules,
   runRules,
   generateExplanation,
   getCoachingInsights,

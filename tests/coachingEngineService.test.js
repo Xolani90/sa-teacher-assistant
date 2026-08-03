@@ -106,6 +106,8 @@ async function run() {
     sortRecommendations,
     truncateRecommendations,
     processRecommendationCandidates,
+    RECOMMENDATION_RULES,
+    validateRecommendationRules,
     getCoachingInsights,
   } = require('../services/coachingEngineService');
 
@@ -403,6 +405,12 @@ async function run() {
     recommendation: `rec for ${topicId} @ ${confidence}`,
     confidence,
     evidence: [{ type: 'reflection', id: 1 }],
+    // ADR-017 Phase 1: every candidate built by this helper shares the
+    // same default priority unless a test explicitly overrides it via
+    // `extra`. Since sortRecommendations() now sorts priority-first, this
+    // default keeps every pre-existing P-01..P-10 assertion exercising
+    // exactly the tier it always tested (confidence → order → topicId).
+    priority: 0,
     ...extra,
   });
 
@@ -521,6 +529,106 @@ async function run() {
       threw = true;
     }
     assert(threw, 'an invalid candidate topicId is treated as a rule bug and surfaces loudly, unlike stale-persisted-row handling in §6.1');
+  }
+
+  // ── Section 6b: ADR-017 Phase 1 — priority-first comparator ───────────
+  console.log('\nSection 6b: ADR-017 Phase 1 — priority-first comparator');
+
+  console.log('\nTest P-11: sortRecommendations() orders by priority descending, overriding confidence');
+  {
+    // Lower confidence but higher priority must still win — this is
+    // exactly the behavior change ADR-017 §4 calls out explicitly.
+    const candidates = [
+      candidate(TOPIC_A, 0.95, { priority: 10 }),
+      candidate(TOPIC_B, 0.10, { priority: 100 }),
+    ];
+    const result = sortRecommendations(candidates);
+    assertEq(
+      result.map((c) => c.topicId),
+      [TOPIC_B, TOPIC_A],
+      'the higher-priority, lower-confidence candidate (TOPIC_B) sorts first'
+    );
+  }
+
+  console.log('\nTest P-12: sortRecommendations() falls back to confidence, then order, when priority ties');
+  {
+    // Same shape as P-04, but now with an explicit (equal) priority on
+    // every candidate — proves the fallback tiers are unchanged, only
+    // reached one level later than before ADR-017.
+    const candidates = [
+      candidate(TOPIC_C, 0.70, { priority: 50 }),
+      candidate(TOPIC_B, 0.70, { priority: 50 }),
+    ];
+    const result = sortRecommendations(candidates);
+    assertEq(
+      result.map((c) => c.topicId),
+      [TOPIC_B, TOPIC_C],
+      'equal priority falls back to the pre-existing confidence/order tiebreak (TOPIC_B wins on lower topic.order)'
+    );
+  }
+
+  console.log('\nTest P-13: sortRecommendations() treats a missing priority as 0, not a throw');
+  {
+    let threw = false;
+    let result = [];
+    try {
+      result = sortRecommendations([
+        { topicId: TOPIC_A, recommendation: 'r', confidence: 0.5, evidence: [] },
+        candidate(TOPIC_B, 0.5, { priority: 20 }),
+      ]);
+    } catch (_) {
+      threw = true;
+    }
+    assert(threw === false, 'a candidate with no priority field does not throw at sort time');
+    assertEq(result.map((c) => c.topicId), [TOPIC_B, TOPIC_A], 'the explicitly-prioritized candidate still outranks the unprioritized one');
+  }
+
+  console.log('\nTest P-14: validateRecommendationRules() accepts the live RECOMMENDATION_RULES catalogue');
+  {
+    let threw = false;
+    try {
+      validateRecommendationRules(RECOMMENDATION_RULES);
+    } catch (_) {
+      threw = true;
+    }
+    assert(threw === false, 'the real PR36 rule catalogue passes validation as shipped');
+  }
+
+  console.log('\nTest P-15: validateRecommendationRules() throws on a rule with a missing priority');
+  {
+    let threw = false;
+    let message = '';
+    try {
+      validateRecommendationRules([{ id: 'no_priority_rule', applies: () => true, evaluate: () => ({}) }]);
+    } catch (err) {
+      threw = true;
+      message = err.message;
+    }
+    assert(threw, 'a rule with no priority field fails validation');
+    assert(message.includes('no_priority_rule'), 'the error names the offending rule id');
+  }
+
+  console.log('\nTest P-16: validateRecommendationRules() throws on a rule with a non-numeric priority');
+  {
+    let threw = false;
+    try {
+      validateRecommendationRules([{ id: 'bad_priority_rule', priority: 'high', applies: () => true, evaluate: () => ({}) }]);
+    } catch (_) {
+      threw = true;
+    }
+    assert(threw, 'a non-numeric priority value fails validation just like a missing one');
+  }
+
+  console.log('\nTest P-17: the live PR36 catalogue matches the ADR-017 §3 priority table (no silent renumbering)');
+  {
+    const expected = {
+      growth_plan_missing: 100,
+      stale_evidence: 80,
+      low_confidence_recommendation: 50,
+      recurring_topic_pattern: 10,
+    };
+    const actual = Object.fromEntries(RECOMMENDATION_RULES.map((r) => [r.id, r.priority]));
+    assertEq(actual, expected, 'each existing rule carries exactly the priority value ADR-017 §3 assigns it');
   }
 
   clearAll();
