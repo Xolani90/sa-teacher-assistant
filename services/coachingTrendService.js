@@ -146,13 +146,21 @@ function hadEvidenceAtCapture(snapshotRow) {
  *
  * @param {string} phoneHash
  * @param {string} topicId
+ * @param {Map<string, object>} [precomputedContexts] - if the caller
+ *   already has a topic-context map (e.g. coachingEngineService building
+ *   trend into its own contexts), pass it here instead of letting this
+ *   function call buildTopicContexts() itself. Required to avoid infinite
+ *   recursion, since buildTopicContexts() calls getLatestTrend() per
+ *   topic to attach ctx.trend (ADR-017 §2/PR39) — without this escape
+ *   hatch, getLatestTrend() -> buildTopicContexts() -> getLatestTrend()
+ *   would recurse forever.
  * @returns {BaselineTrendResult|ComputedTrendResult}
  */
-function getLatestTrend(phoneHash, topicId) {
+function getLatestTrend(phoneHash, topicId, precomputedContexts) {
   const latest = getLatestSnapshot(phoneHash, topicId);
+  const contexts = precomputedContexts || buildTopicContexts(phoneHash);
 
   if (!latest) {
-    const contexts = buildTopicContexts(phoneHash);
     const currentCtx = contexts.get(topicId);
     return {
       status: 'baseline',
@@ -161,7 +169,6 @@ function getLatestTrend(phoneHash, topicId) {
     };
   }
 
-  const contexts = buildTopicContexts(phoneHash);
   const currentCtx = contexts.get(topicId);
   const currentConfidence = currentCtx ? currentCtx.confidence : 0;
   const currentHasEvidence = currentCtx ? currentCtx.hasEvidence : false;

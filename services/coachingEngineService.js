@@ -34,6 +34,18 @@ const { isValidTopicId, getTopicById, listTopicsOrdered } = require('../utils/qm
 const reflectionService = require('./reflectionService');
 const growthPlanService = require('./growthPlanService');
 const { parseSqliteUtc } = require('../utils/dateUtils');
+// coachingTrendService requires this module (for buildTopicContexts) at its
+// own top level, so requiring it here at top level too would create a
+// require cycle where one side sees an incomplete module.exports. Required
+// lazily inside buildTopicContexts() instead — by the time it's actually
+// called, both modules have finished loading.
+let coachingTrendService = null;
+function getTrendService() {
+  if (!coachingTrendService) {
+    coachingTrendService = require('./coachingTrendService');
+  }
+  return coachingTrendService;
+}
 
 // ── Named configuration defaults (ADR-013 §6.3/§6.4/§6.6) ──────────────────
 // All provisional for initial release, not calibrated against usage data —
@@ -365,12 +377,20 @@ function deduplicateRecommendationsByTopic(candidates) {
 }
 
 /**
- * Sort (§6.4): confidence descending; ties broken by topic `order`
- * ascending; any remaining tie broken by `topicId` ascending
- * (lexicographic). The three-level tie-break guarantees stable ordering
- * even if two topics are ever accidentally assigned the same `order`
- * value — `order` is expected unique, but this sort does not depend on
- * that as a precondition.
+ * Sort (§6.4, revised by ADR-017 §3/§4): `priority` descending (the rule
+ * that produced the candidate), then `confidence` descending, then topic
+ * `order` ascending, then `topicId` ascending (lexicographic) as a final
+ * tiebreak. The priority tier lets a categorical rule (e.g.
+ * `growth_plan_missing`) always outrank a lower-priority rule (e.g.
+ * `trend_falling`) regardless of either one's confidence score — see
+ * ADR-017 §3 for the full priority ladder and rationale. Below a shared
+ * priority, ordering degrades to the original PR36 confidence-first
+ * contract unchanged.
+ *
+ * A candidate missing a numeric `priority` is treated as priority 0 —
+ * this only matters for candidates hand-built in tests that predate
+ * ADR-017; real rule output always carries a real priority because
+ * validateRecommendationRules() enforces it at load time.
  *
  * Does not mutate the input array.
  *
@@ -388,14 +408,8 @@ function sortRecommendations(candidates) {
   );
 
   return [...candidates].sort((a, b) => {
-    // ADR-017 §4: priority is now the primary sort key. A candidate
-    // without an explicit priority is treated as priority 0 rather than
-    // thrown on here — sortRecommendations() operates on already-built
-    // candidates, and rule-catalogue validation (validateRecommendationRules)
-    // is the single point responsible for rejecting a missing priority at
-    // startup, not this comparator on every call.
-    const priorityA = typeof a.priority === 'number' ? a.priority : 0;
-    const priorityB = typeof b.priority === 'number' ? b.priority : 0;
+    const priorityA = Number.isFinite(a.priority) ? a.priority : 0;
+    const priorityB = Number.isFinite(b.priority) ? b.priority : 0;
     if (priorityB !== priorityA) return priorityB - priorityA;
 
     if (b.confidence !== a.confidence) return b.confidence - a.confidence;
@@ -591,6 +605,20 @@ function buildTopicContexts(phoneHash) {
     });
   }
 
+  // PR39 (ADR-017 §2): trend is attached in a second pass, once every
+  // topic's base context (in particular its confidence) already exists.
+  // coachingTrendService.getLatestTrend() is given this same `contexts`
+  // map as its precomputedContexts argument so it never has to rebuild
+  // contexts itself — calling it without that argument here would recurse
+  // forever (getLatestTrend -> buildTopicContexts -> getLatestTrend ->
+  // ...). Every context always carries a ctx.trend object — either
+  // { status: 'baseline' } or a full trend result — so trend rules can
+  // gate on ctx.trend.status uniformly without a defensive null-check at
+  // every call site.
+  for (const [topicId, ctx] of contexts) {
+    ctx.trend = getTrendService().getLatestTrend(phoneHash, topicId, contexts);
+  }
+
   return contexts;
 }
 
@@ -632,35 +660,112 @@ function lowConfidenceApplies(ctx) {
   return ctx.confidence < LOW_CONFIDENCE_THRESHOLD;
 }
 
+// PR39 (ADR-017): trend-aware rules layered onto the same catalogue.
+// Each reads coachingTrendService.getLatestTrend(phoneHash, topicId)
+// itself rather than having trend data threaded through ctx, since
+// buildTopicContexts() is a pure, trend-unaware function per ADR-016 §9
+// (trend augments the engine, it isn't baked into the base context).
+// Every trend rule's applies() begins with the ctx.trend.status === 'trend'
+// baseline guard (ADR-017 §2) — a topic with no prior snapshot history
+// contributes no trend-based recommendation and falls through to the
+// PR36 rules unchanged.
+
+/** PR39: newest evidence appeared where none existed at the last snapshot. */
+function evidenceGainedApplies(ctx) {
+  return ctx.trend.status === 'trend' && ctx.trend.evidenceTransition === 'gained';
+}
+
+/** PR39: evidence that existed at the last snapshot is gone now. */
+function evidenceRemovedApplies(ctx) {
+  return ctx.trend.status === 'trend' && ctx.trend.evidenceTransition === 'lost';
+}
+
+/** PR39: confidence has fallen meaningfully since the last snapshot. */
+function trendFallingApplies(ctx) {
+  return ctx.trend.status === 'trend' && ctx.trend.trendDirection === 'falling';
+}
+
+/** PR39: confidence has risen meaningfully since the last snapshot. */
+function trendRisingApplies(ctx) {
+  return ctx.trend.status === 'trend' && ctx.trend.trendDirection === 'rising';
+}
+
 const RECOMMENDATION_RULES = [
   {
     id: 'growth_plan_missing',
-    // ADR-017 §3: priority values spaced by 10s so later PR39 trend rules
-    // (evidence_removed=90, trend_falling=70, evidence_gained=60,
-    // trend_rising=40) can be inserted between the existing PR36 rules
-    // without renumbering any of them.
     priority: 100,
     applies: (ctx) => growthPlanMissingApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
+      priority: 100,
       recommendation: `You have identified a recurring pattern in ${ctx.topic.label} `
         + `but don't yet have an active growth plan.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
-      priority: 100,
+    }),
+  },
+  {
+    id: 'evidence_removed',
+    priority: 90,
+    // Mutually exclusive with growth_plan_missing (higher priority, so it
+    // wins on priority alone even if both applied) — excluded here anyway
+    // to keep applies() self-documenting about which rule "owns" a topic.
+    applies: (ctx) => !growthPlanMissingApplies(ctx) && evidenceRemovedApplies(ctx),
+    evaluate: (ctx) => ({
+      topicId: ctx.topicId,
+      priority: 90,
+      recommendation: `Evidence you previously recorded for ${ctx.topic.label} is no `
+        + `longer present. Confirm whether this topic still needs attention.`,
+      confidence: ctx.confidence,
+      evidence: ctx.evidence,
     }),
   },
   {
     id: 'stale_evidence',
     priority: 80,
-    applies: (ctx) => !growthPlanMissingApplies(ctx) && staleEvidenceApplies(ctx),
+    applies: (ctx) => !growthPlanMissingApplies(ctx)
+      && !evidenceRemovedApplies(ctx)
+      && staleEvidenceApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
+      priority: 80,
       recommendation: `You haven't recorded recent evidence for ${ctx.topic.label}. `
         + `Add a recent reflection to keep recommendations current.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
-      priority: 80,
+    }),
+  },
+  {
+    id: 'trend_falling',
+    priority: 70,
+    applies: (ctx) => !growthPlanMissingApplies(ctx)
+      && !evidenceRemovedApplies(ctx)
+      && !staleEvidenceApplies(ctx)
+      && trendFallingApplies(ctx),
+    evaluate: (ctx) => ({
+      topicId: ctx.topicId,
+      priority: 70,
+      recommendation: `Your confidence in ${ctx.topic.label} has declined since your `
+        + `last check-in. Consider revisiting this area soon.`,
+      confidence: ctx.confidence,
+      evidence: ctx.evidence,
+    }),
+  },
+  {
+    id: 'evidence_gained',
+    priority: 60,
+    applies: (ctx) => !growthPlanMissingApplies(ctx)
+      && !evidenceRemovedApplies(ctx)
+      && !staleEvidenceApplies(ctx)
+      && !trendFallingApplies(ctx)
+      && evidenceGainedApplies(ctx),
+    evaluate: (ctx) => ({
+      topicId: ctx.topicId,
+      priority: 60,
+      recommendation: `New evidence has appeared for ${ctx.topic.label} since your last `
+        + `check-in. Keep building on this momentum.`,
+      confidence: ctx.confidence,
+      evidence: ctx.evidence,
     }),
   },
   {
@@ -668,54 +773,77 @@ const RECOMMENDATION_RULES = [
     priority: 50,
     applies: (ctx) => ctx.hasEvidence
       && !growthPlanMissingApplies(ctx)
+      && !evidenceRemovedApplies(ctx)
       && !staleEvidenceApplies(ctx)
+      && !trendFallingApplies(ctx)
+      && !evidenceGainedApplies(ctx)
       && lowConfidenceApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
+      priority: 50,
       recommendation: 'Evidence is currently limited for this recommendation. '
         + 'Continue recording reflections before making major changes.',
       confidence: ctx.confidence,
       evidence: ctx.evidence,
-      priority: 50,
+    }),
+  },
+  {
+    id: 'trend_rising',
+    priority: 40,
+    applies: (ctx) => !growthPlanMissingApplies(ctx)
+      && !evidenceRemovedApplies(ctx)
+      && !staleEvidenceApplies(ctx)
+      && !trendFallingApplies(ctx)
+      && !evidenceGainedApplies(ctx)
+      && !lowConfidenceApplies(ctx)
+      && trendRisingApplies(ctx),
+    evaluate: (ctx) => ({
+      topicId: ctx.topicId,
+      priority: 40,
+      recommendation: `Your confidence in ${ctx.topic.label} has improved since your `
+        + `last check-in. Keep up the current approach.`,
+      confidence: ctx.confidence,
+      evidence: ctx.evidence,
     }),
   },
   {
     id: 'recurring_topic_pattern',
+    priority: 10,
     // Any topic with currently-usable evidence is an applicable pattern —
     // the insufficient-data guard (§6.6) already establishes there's
     // enough data overall before rules ever run. Falls through only when
-    // none of the more specific PR36 rules above applied.
-    priority: 10,
+    // none of the more specific rules above applied.
     applies: (ctx) => ctx.evidenceCount > 0
       && !growthPlanMissingApplies(ctx)
+      && !evidenceRemovedApplies(ctx)
       && !staleEvidenceApplies(ctx)
-      && !lowConfidenceApplies(ctx),
+      && !trendFallingApplies(ctx)
+      && !evidenceGainedApplies(ctx)
+      && !lowConfidenceApplies(ctx)
+      && !trendRisingApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
+      priority: 10,
       recommendation: `Continue focused coaching support on ${ctx.topic.label}.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
-      priority: 10,
     }),
   },
 ];
 
 /**
- * Validation (ADR-017 §7): every recommendation rule must declare a
- * numeric `priority`. Called once at module load against the live
- * catalogue so a misconfigured rule (missing/non-numeric priority) fails
- * loudly at application startup, not silently the first time
- * sortRecommendations() runs against it in production.
+ * ADR-017 §7: every recommendation rule must declare a numeric priority.
+ * A missing or non-numeric priority is a configuration error and must
+ * fail loudly at load time, not silently at sort time (where it would
+ * otherwise be treated as priority 0 by sortRecommendations()'s fallback).
  *
- * @param {object[]} rules
+ * @param {object[]} [rules=RECOMMENDATION_RULES]
  * @throws {Error} if any rule lacks a finite numeric priority.
  */
-function validateRecommendationRules(rules) {
+function validateRecommendationRules(rules = RECOMMENDATION_RULES) {
   for (const rule of rules) {
     if (!Number.isFinite(rule.priority)) {
-      throw new Error(
-        `Recommendation rule '${rule.id}' is missing a numeric priority`
-      );
+      throw new Error(`Recommendation rule '${rule.id}' is missing a numeric priority`);
     }
   }
 }
@@ -850,9 +978,9 @@ module.exports = {
   truncateRecommendations,
   processRecommendationCandidates,
   buildTopicContexts,
-  RECOMMENDATION_RULES,
-  validateRecommendationRules,
   runRules,
   generateExplanation,
   getCoachingInsights,
+  RECOMMENDATION_RULES,
+  validateRecommendationRules,
 };
