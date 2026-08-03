@@ -100,38 +100,58 @@ async function run() {
   console.log('\n── Section 2: createReflection() ────────────────────────────────────');
 
   console.log('\nTest C-01: rejects missing phoneHash');
-  assertThrows(() => createReflection(null, { content: 'x' }), 'phoneHash is required', 'throws without phoneHash');
+  assertThrows(() => createReflection(null, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'x'}), 'phoneHash is required', 'throws without phoneHash');
 
   console.log('\nTest C-02: rejects missing content');
   assertThrows(() => createReflection(PHONE, {}), 'content is required', 'throws without content');
 
   console.log('\nTest C-03: rejects whitespace-only content');
-  assertThrows(() => createReflection(PHONE, { content: '   ' }), 'content is required', 'throws on whitespace-only content');
+  assertThrows(() => createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: '   '}), 'content is required', 'throws on whitespace-only content');
 
   console.log('\nTest C-04: rejects non-array evidenceLinkIds');
   assertThrows(
-    () => createReflection(PHONE, { content: 'x', evidenceLinkIds: 'not-an-array' }),
+    () => createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'x', evidenceLinkIds: 'not-an-array'}),
     'evidenceLinkIds must be an array',
     'throws on non-array evidenceLinkIds'
   );
 
+  console.log('\nTest C-08: rejects missing topicId (ADR-013 §3.3)');
+  assertThrows(
+    () => createReflection(PHONE, { content: 'x' }),
+    'topicId must be a valid QMS topic id',
+    'throws without topicId'
+  );
+
+  console.log('\nTest C-09: rejects an unknown topicId');
+  assertThrows(
+    () => createReflection(PHONE, { content: 'x', topicId: 'TOPIC_BANANAS' }),
+    'topicId must be a valid QMS topic id',
+    'throws on a topicId not in the active taxonomy'
+  );
+
+  console.log('\nTest C-10: rejects null topicId (must be a real value, not legacy-style null)');
+  assertThrows(
+    () => createReflection(PHONE, { content: 'x', topicId: null }),
+    'topicId must be a valid QMS topic id',
+    'throws on explicit null topicId'
+  );
+
   console.log('\nTest C-05: round-trip insert with all fields');
-  const created = createReflection(PHONE, {
-    content: 'Learners struggled with fractions. I switched to visual models.',
+  const created = createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'Learners struggled with fractions. I switched to visual models.',
     term: 2,
     aiAssisted: true,
-    evidenceLinkIds: [12, 15, 22],
-  });
+    evidenceLinkIds: [12, 15, 22],});
   assert(typeof created.id === 'number', 'created reflection has a numeric id');
   assertEq(created.phoneHash, PHONE, 'phoneHash round-trips');
   assertEq(created.term, 2, 'term round-trips');
   assertEq(created.content, 'Learners struggled with fractions. I switched to visual models.', 'content round-trips');
   assertEq(created.aiAssisted, true, 'aiAssisted round-trips as real boolean true');
+  assertEq(created.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'topicId round-trips');
   assertEq(created.evidenceLinkIds, [12, 15, 22], 'evidenceLinkIds round-trips as a real array');
   assertEq(created.deletedAt, null, 'new reflection is not soft-deleted');
 
   console.log('\nTest C-06: content is trimmed on insert');
-  const trimmed = createReflection(PHONE, { content: '  padded content  ' });
+  const trimmed = createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: '  padded content  '});
   assertEq(trimmed.content, 'padded content', 'leading/trailing whitespace stripped');
 
   _db.exec(`DELETE FROM qms_reflections`);
@@ -142,11 +162,11 @@ async function run() {
   console.log('\n── Section 3: reflection without evidence (ADR-011 §7) ──────────────');
 
   console.log('\nTest NE-01: reflection can be created with no evidenceLinkIds at all');
-  const noEvidence = createReflection(PHONE, { content: 'General reflection on a hard term.' });
+  const noEvidence = createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'General reflection on a hard term.'});
   assertEq(noEvidence.evidenceLinkIds, [], 'evidenceLinkIds defaults to an empty array, not an error');
 
   console.log('\nTest NE-02: reflection can be created with explicit empty evidenceLinkIds');
-  const explicitEmpty = createReflection(PHONE, { content: 'Another general reflection.', evidenceLinkIds: [] });
+  const explicitEmpty = createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'Another general reflection.', evidenceLinkIds: []});
   assertEq(explicitEmpty.evidenceLinkIds, [], 'explicit [] is preserved, not rejected');
 
   _db.exec(`DELETE FROM qms_reflections`);
@@ -156,7 +176,7 @@ async function run() {
   // ═══════════════════════════════════════════════════════════════════════
   console.log('\n── Section 4: getReflection() ───────────────────────────────────────');
 
-  const owned = createReflection(PHONE, { content: 'Owned by PHONE' });
+  const owned = createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'Owned by PHONE'});
 
   console.log('\nTest G-01: fetches an owned reflection');
   const fetched = getReflection(PHONE, owned.id);
@@ -181,10 +201,10 @@ async function run() {
   // ═══════════════════════════════════════════════════════════════════════
   console.log('\n── Section 5: listReflections() ─────────────────────────────────────');
 
-  const first = createReflection(PHONE, { content: 'First', term: 1 });
-  const second = createReflection(PHONE, { content: 'Second', term: 2 });
-  const third = createReflection(PHONE, { content: 'Third', term: 2 });
-  createReflection(OTHER_PHONE, { content: 'Someone else entirely', term: 2 });
+  const first = createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'First', term: 1});
+  const second = createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'Second', term: 2});
+  const third = createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'Third', term: 2});
+  createReflection(OTHER_PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'Someone else entirely', term: 2});
 
   console.log('\nTest L-01: lists only the requesting teacher\'s reflections');
   const all = listReflections(PHONE);
@@ -212,11 +232,9 @@ async function run() {
   // ═══════════════════════════════════════════════════════════════════════
   console.log('\n── Section 6: updateReflection() ────────────────────────────────────');
 
-  const toUpdate = createReflection(PHONE, {
-    content: 'Original content',
+  const toUpdate = createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'Original content',
     aiAssisted: false,
-    evidenceLinkIds: [1, 2],
-  });
+    evidenceLinkIds: [1, 2],});
 
   console.log('\nTest U-01: updates content');
   const updatedContent = updateReflection(PHONE, toUpdate.id, { content: 'Revised content' });
@@ -232,6 +250,21 @@ async function run() {
   console.log('\nTest U-03: updates evidenceLinkIds independently, including clearing to empty');
   const updatedEvidence = updateReflection(PHONE, toUpdate.id, { evidenceLinkIds: [] });
   assertEq(updatedEvidence.evidenceLinkIds, [], 'evidenceLinkIds can be cleared to empty array');
+
+  console.log('\nTest U-03b: topicId unchanged when not passed');
+  assertEq(updatedEvidence.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'topicId survives an unrelated update');
+
+  console.log('\nTest U-03c: updates topicId to a different valid topic');
+  const updatedTopic = updateReflection(PHONE, toUpdate.id, { topicId: 'TOPIC_ASSESSMENT' });
+  assertEq(updatedTopic.topicId, 'TOPIC_ASSESSMENT', 'topicId is updated');
+  assertEq(updatedTopic.content, 'Revised content', 'content unaffected by a topicId-only update');
+
+  console.log('\nTest U-03d: rejects an unknown topicId on update');
+  assertThrows(
+    () => updateReflection(PHONE, toUpdate.id, { topicId: 'TOPIC_BANANAS' }),
+    'topicId must be a valid QMS topic id',
+    'throws on updating to a topicId not in the active taxonomy'
+  );
 
   console.log('\nTest U-04: rejects clearing content to empty');
   assertThrows(
@@ -259,7 +292,7 @@ async function run() {
   // ═══════════════════════════════════════════════════════════════════════
   console.log('\n── Section 7: deleteReflection() ────────────────────────────────────');
 
-  const toDelete = createReflection(PHONE, { content: 'Will be soft-deleted' });
+  const toDelete = createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'Will be soft-deleted'});
 
   console.log('\nTest D-01: soft-deletes successfully');
   const deleteResult = deleteReflection(PHONE, toDelete.id);
@@ -275,7 +308,7 @@ async function run() {
   assertEq(doubleDelete, false, 'a second delete call returns false, not an error');
 
   console.log('\nTest D-04: returns false for another teacher\'s reflection (ownership scoping)');
-  const another = createReflection(PHONE, { content: 'Owned by PHONE, attacked by OTHER_PHONE' });
+  const another = createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'Owned by PHONE, attacked by OTHER_PHONE'});
   const wrongOwnerDelete = deleteReflection(OTHER_PHONE, another.id);
   assertEq(wrongOwnerDelete, false, 'cannot delete another teacher\'s reflection');
   assert(getReflection(PHONE, another.id) !== null, 'the reflection survives the failed cross-owner delete attempt');

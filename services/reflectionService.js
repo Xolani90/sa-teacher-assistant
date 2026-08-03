@@ -31,9 +31,15 @@
  * rows by default; there is no "restore" function in PR27 because
  * ADR-011 didn't decide restore semantics were needed yet. Add one
  * later if a real requirement shows up rather than guessing now.
+ *
+ * topicId (PR32, ADR-013 §4.3): every new reflection must be tagged with
+ * a validated topicId from utils/qmsTopics.js — the closed taxonomy that
+ * replaces free-text categorization. Pre-PR32 rows have topic_id IS NULL
+ * (Migration 039, ADR-013 §4.5) and are never backfilled.
  */
 
 const { getDb } = require('../utils/database');
+const { isValidTopicId } = require('../utils/qmsTopics');
 
 /**
  * Serializes a raw qms_reflections row into the shape callers expect —
@@ -62,6 +68,7 @@ function serializeReflection(row) {
     phoneHash: row.phone_hash,
     term: row.term,
     content: row.content,
+    topicId: row.topic_id,
     aiAssisted: !!row.ai_assisted,
     evidenceLinkIds,
     createdAt: row.created_at,
@@ -76,6 +83,10 @@ function serializeReflection(row) {
  * @param {string} phoneHash
  * @param {object} params
  * @param {string} params.content - required, non-empty.
+ * @param {string} params.topicId - required. Must be a valid taxonomy id
+ *   (utils/qmsTopics.js) — ADR-013 §3.3: new application writes must
+ *   always provide a valid topicId; null is reserved exclusively for
+ *   pre-PR32 legacy rows, never a valid value for a new write.
  * @param {number} [params.term] - defaults to null (unscoped) if omitted.
  * @param {boolean} [params.aiAssisted=false]
  * @param {number[]} [params.evidenceLinkIds=[]] - tse_evidence_links.id
@@ -83,7 +94,7 @@ function serializeReflection(row) {
  *   explicitly allows a reflection to exist without any linked evidence.
  * @returns {object} the created reflection, serialized.
  */
-function createReflection(phoneHash, { content, term = null, aiAssisted = false, evidenceLinkIds = [] } = {}) {
+function createReflection(phoneHash, { content, topicId, term = null, aiAssisted = false, evidenceLinkIds = [] } = {}) {
   if (!phoneHash || typeof phoneHash !== 'string') {
     throw new Error('createReflection: phoneHash is required');
   }
@@ -93,15 +104,18 @@ function createReflection(phoneHash, { content, term = null, aiAssisted = false,
   if (!Array.isArray(evidenceLinkIds)) {
     throw new Error('createReflection: evidenceLinkIds must be an array');
   }
+  if (!isValidTopicId(topicId)) {
+    throw new Error(`createReflection: topicId must be a valid QMS topic id, got "${topicId}"`);
+  }
 
   const db = getDb();
   const result = db
     .prepare(
       `INSERT INTO qms_reflections
-         (phone_hash, term, content, ai_assisted, evidence_link_ids)
-       VALUES (?, ?, ?, ?, ?)`
+         (phone_hash, term, content, topic_id, ai_assisted, evidence_link_ids)
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
-    .run(phoneHash, term, content.trim(), aiAssisted ? 1 : 0, JSON.stringify(evidenceLinkIds));
+    .run(phoneHash, term, content.trim(), topicId, aiAssisted ? 1 : 0, JSON.stringify(evidenceLinkIds));
 
   return getReflection(phoneHash, Number(result.lastInsertRowid));
 }
@@ -168,17 +182,28 @@ function listReflections(phoneHash, { term = null } = {}) {
  * @param {number} id
  * @param {object} params
  * @param {string} [params.content]
+ * @param {string} [params.topicId] - if provided, must be a valid
+ *   taxonomy id (ADR-013 §3.3). Omitting it leaves the existing value
+ *   (possibly a legacy null) untouched.
  * @param {boolean} [params.aiAssisted]
  * @param {number[]} [params.evidenceLinkIds]
  * @returns {object|null} the updated reflection, serialized, or null.
  */
-function updateReflection(phoneHash, id, { content, aiAssisted, evidenceLinkIds } = {}) {
+function updateReflection(phoneHash, id, { content, topicId, aiAssisted, evidenceLinkIds } = {}) {
   const existing = getReflection(phoneHash, id);
   if (!existing) return null;
 
   const nextContent = content !== undefined ? content : existing.content;
   if (!nextContent || typeof nextContent !== 'string' || !nextContent.trim()) {
     throw new Error('updateReflection: content cannot be empty');
+  }
+
+  let nextTopicId = existing.topicId;
+  if (topicId !== undefined) {
+    if (!isValidTopicId(topicId)) {
+      throw new Error(`updateReflection: topicId must be a valid QMS topic id, got "${topicId}"`);
+    }
+    nextTopicId = topicId;
   }
 
   const nextAiAssisted = aiAssisted !== undefined ? !!aiAssisted : existing.aiAssisted;
@@ -194,9 +219,9 @@ function updateReflection(phoneHash, id, { content, aiAssisted, evidenceLinkIds 
   const db = getDb();
   db.prepare(
     `UPDATE qms_reflections
-     SET content = ?, ai_assisted = ?, evidence_link_ids = ?, updated_at = datetime('now')
+     SET content = ?, topic_id = ?, ai_assisted = ?, evidence_link_ids = ?, updated_at = datetime('now')
      WHERE id = ? AND phone_hash = ? AND deleted_at IS NULL`
-  ).run(nextContent.trim(), nextAiAssisted ? 1 : 0, JSON.stringify(nextEvidenceLinkIds), id, phoneHash);
+  ).run(nextContent.trim(), nextTopicId, nextAiAssisted ? 1 : 0, JSON.stringify(nextEvidenceLinkIds), id, phoneHash);
 
   return getReflection(phoneHash, id);
 }

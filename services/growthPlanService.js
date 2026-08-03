@@ -1,13 +1,14 @@
 'use strict';
 
 /**
- * QMS Growth Plans service (PR29, ADR-011 §2/§7/§9).
+ * QMS Growth Plans service (PR29, ADR-011 §2/§7/§9; topicId per PR32,
+ * ADR-013 §4.3).
  *
- * Persistence layer over qms_growth_plans (Migration 038). Mirrors
- * reflectionService.js's shape: plain prepared statements, no
- * db.transaction() (compatibility with both better-sqlite3 in
- * production and the node:sqlite test shim used elsewhere in this
- * suite).
+ * Persistence layer over qms_growth_plans (Migration 038; topic_id added
+ * by Migration 039, ADR-013 §4.4). Mirrors reflectionService.js's shape:
+ * plain prepared statements, no db.transaction() (compatibility with both
+ * better-sqlite3 in production and the node:sqlite test shim used
+ * elsewhere in this suite).
  *
  * Scope note: schema and fields here are frozen exactly as ADR-011's
  * Data Model section specifies — phone_hash, term, goal_text,
@@ -15,6 +16,16 @@
  * linkage and no extra planning fields (planned_actions,
  * success_criteria, target_date) — those were explicitly deferred to a
  * future ADR (see PR29 discussion) rather than added silently here.
+ *
+ * topicId (ADR-013 §4.3): the public contract for this service now uses
+ * `topicId` — a validated, controlled taxonomy identifier from
+ * utils/qmsTopics.js — everywhere the old `targetArea` free-text field
+ * used to appear. `target_area` remains as a column on qms_growth_plans
+ * (Migration 039 intentionally does not drop it — see that migration's
+ * comment) but is no longer read or written by this service; it is
+ * deprecated, unused legacy data, not a second live source of truth.
+ * Every new row is persisted with topic_id only. Unknown/invalid topicId
+ * values are rejected here, never silently accepted (ADR-013 §3.3).
  *
  * Ownership: phone_hash, not teacher_id — same rationale as
  * reflectionService.js (ADR-011 §2).
@@ -31,12 +42,14 @@
  */
 
 const { getDb } = require('../utils/database');
+const { isValidTopicId } = require('../utils/qmsTopics');
 
 const VALID_STATUSES = ['active', 'in_progress', 'completed', 'abandoned'];
 
 /**
  * Serializes a raw qms_growth_plans row into the shape callers expect
- * — camelCase field names.
+ * — camelCase field names. Deliberately does not surface target_area
+ * (deprecated, ADR-013 §4.3) — only topicId.
  *
  * @param {object} row
  * @returns {object}
@@ -47,7 +60,7 @@ function serializeGrowthPlan(row) {
     phoneHash: row.phone_hash,
     term: row.term,
     goalText: row.goal_text,
-    targetArea: row.target_area,
+    topicId: row.topic_id,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -62,11 +75,14 @@ function serializeGrowthPlan(row) {
  * @param {object} params
  * @param {string} params.goalText - required, non-empty.
  * @param {number} [params.term] - defaults to null (unscoped) if omitted.
- * @param {string} [params.targetArea] - optional free-text focus area.
+ * @param {string} params.topicId - required. Must be a valid taxonomy id
+ *   (utils/qmsTopics.js) — ADR-013 §3.3: new application writes must
+ *   always provide a valid topicId; null is reserved exclusively for
+ *   pre-PR32 legacy rows, never a valid value for a new write.
  * @param {string} [params.status='active'] - must be one of VALID_STATUSES.
  * @returns {object} the created growth plan, serialized.
  */
-function createGrowthPlan(phoneHash, { goalText, term = null, targetArea = null, status = 'active' } = {}) {
+function createGrowthPlan(phoneHash, { goalText, term = null, topicId, status = 'active' } = {}) {
   if (!phoneHash || typeof phoneHash !== 'string') {
     throw new Error('createGrowthPlan: phoneHash is required');
   }
@@ -76,15 +92,18 @@ function createGrowthPlan(phoneHash, { goalText, term = null, targetArea = null,
   if (!VALID_STATUSES.includes(status)) {
     throw new Error(`createGrowthPlan: status must be one of ${VALID_STATUSES.join(', ')}`);
   }
+  if (!isValidTopicId(topicId)) {
+    throw new Error(`createGrowthPlan: topicId must be a valid QMS topic id, got "${topicId}"`);
+  }
 
   const db = getDb();
   const result = db
     .prepare(
       `INSERT INTO qms_growth_plans
-         (phone_hash, term, goal_text, target_area, status)
+         (phone_hash, term, goal_text, topic_id, status)
        VALUES (?, ?, ?, ?, ?)`
     )
-    .run(phoneHash, term, goalText.trim(), targetArea, status);
+    .run(phoneHash, term, goalText.trim(), topicId, status);
 
   return getGrowthPlan(phoneHash, Number(result.lastInsertRowid));
 }
@@ -148,11 +167,11 @@ function listGrowthPlans(phoneHash, { term = null, status = null } = {}) {
  * @param {number} id
  * @param {object} params
  * @param {string} [params.goalText]
- * @param {string} [params.targetArea]
+ * @param {string} [params.topicId]
  * @param {string} [params.status]
  * @returns {object|null} the updated growth plan, serialized, or null.
  */
-function updateGrowthPlan(phoneHash, id, { goalText, targetArea, status } = {}) {
+function updateGrowthPlan(phoneHash, id, { goalText, topicId, status } = {}) {
   const existing = getGrowthPlan(phoneHash, id);
   if (!existing) return null;
 
@@ -161,7 +180,17 @@ function updateGrowthPlan(phoneHash, id, { goalText, targetArea, status } = {}) 
     throw new Error('updateGrowthPlan: goalText cannot be empty');
   }
 
-  const nextTargetArea = targetArea !== undefined ? targetArea : existing.targetArea;
+  let nextTopicId = existing.topicId;
+  if (topicId !== undefined) {
+    // Omitting topicId leaves an existing (possibly legacy-null) value
+    // untouched — that's not a new write of null. Explicitly passing
+    // null/invalid here would be a new write of an invalid value, which
+    // ADR-013 §3.3 prohibits just as much as on create.
+    if (!isValidTopicId(topicId)) {
+      throw new Error(`updateGrowthPlan: topicId must be a valid QMS topic id, got "${topicId}"`);
+    }
+    nextTopicId = topicId;
+  }
 
   let nextStatus = existing.status;
   if (status !== undefined) {
@@ -174,9 +203,9 @@ function updateGrowthPlan(phoneHash, id, { goalText, targetArea, status } = {}) 
   const db = getDb();
   db.prepare(
     `UPDATE qms_growth_plans
-     SET goal_text = ?, target_area = ?, status = ?, updated_at = datetime('now')
+     SET goal_text = ?, topic_id = ?, status = ?, updated_at = datetime('now')
      WHERE id = ? AND phone_hash = ? AND deleted_at IS NULL`
-  ).run(nextGoalText.trim(), nextTargetArea, nextStatus, id, phoneHash);
+  ).run(nextGoalText.trim(), nextTopicId, nextStatus, id, phoneHash);
 
   return getGrowthPlan(phoneHash, id);
 }

@@ -92,7 +92,7 @@ async function run() {
   assertEq(rawRow.status, 'active', 'status defaults to active');
   assertEq(rawRow.deleted_at, null, 'deleted_at defaults to NULL');
   assertEq(rawRow.term, null, 'term defaults to NULL (unscoped) when omitted');
-  assertEq(rawRow.target_area, null, 'target_area defaults to NULL when omitted');
+  assertEq(rawRow.topic_id, null, 'topic_id defaults to NULL for a pre-PR32-style raw insert (ADR-013 §4.5)');
   _db.exec(`DELETE FROM qms_growth_plans`);
 
   // ═══════════════════════════════════════════════════════════════════════
@@ -101,42 +101,63 @@ async function run() {
   console.log('\n── Section 2: createGrowthPlan() ────────────────────────────────────');
 
   console.log('\nTest C-01: rejects missing phoneHash');
-  assertThrows(() => createGrowthPlan(null, { goalText: 'x' }), 'phoneHash is required', 'throws without phoneHash');
+  assertThrows(() => createGrowthPlan(null, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: 'x'}), 'phoneHash is required', 'throws without phoneHash');
 
   console.log('\nTest C-02: rejects missing goalText');
   assertThrows(() => createGrowthPlan(PHONE, {}), 'goalText is required', 'throws without goalText');
 
   console.log('\nTest C-03: rejects whitespace-only goalText');
-  assertThrows(() => createGrowthPlan(PHONE, { goalText: '   ' }), 'goalText is required', 'throws on whitespace-only goalText');
+  assertThrows(() => createGrowthPlan(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: '   '}), 'goalText is required', 'throws on whitespace-only goalText');
 
   console.log('\nTest C-04: rejects invalid status');
   assertThrows(
-    () => createGrowthPlan(PHONE, { goalText: 'x', status: 'bogus' }),
+    () => createGrowthPlan(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: 'x', status: 'bogus'}),
     'status must be one of',
     'throws on invalid status'
+  );
+
+  console.log('\nTest C-08: rejects missing topicId (ADR-013 §3.3)');
+  assertThrows(
+    () => createGrowthPlan(PHONE, { goalText: 'x' }),
+    'topicId must be a valid QMS topic id',
+    'throws without topicId'
+  );
+
+  console.log('\nTest C-09: rejects an unknown topicId');
+  assertThrows(
+    () => createGrowthPlan(PHONE, { goalText: 'x', topicId: 'TOPIC_BANANAS' }),
+    'topicId must be a valid QMS topic id',
+    'throws on a topicId not in the active taxonomy'
+  );
+
+  console.log('\nTest C-10: rejects null topicId (must be a real value, not legacy-style null)');
+  assertThrows(
+    () => createGrowthPlan(PHONE, { goalText: 'x', topicId: null }),
+    'topicId must be a valid QMS topic id',
+    'throws on explicit null topicId'
   );
 
   console.log('\nTest C-05: round-trip insert with all fields');
   const created = createGrowthPlan(PHONE, {
     goalText: 'Improve questioning technique to elicit deeper responses.',
     term: 2,
-    targetArea: 'Classroom practice',
+    topicId: 'TOPIC_CLASSROOM_MANAGEMENT',
     status: 'in_progress',
   });
   assert(typeof created.id === 'number', 'created growth plan has a numeric id');
   assertEq(created.phoneHash, PHONE, 'phoneHash round-trips');
   assertEq(created.term, 2, 'term round-trips');
   assertEq(created.goalText, 'Improve questioning technique to elicit deeper responses.', 'goalText round-trips');
-  assertEq(created.targetArea, 'Classroom practice', 'targetArea round-trips');
+  assertEq(created.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'topicId round-trips');
   assertEq(created.status, 'in_progress', 'status round-trips');
   assertEq(created.deletedAt, null, 'new growth plan is not soft-deleted');
 
   console.log('\nTest C-06: goalText is trimmed on insert');
-  const trimmed = createGrowthPlan(PHONE, { goalText: '  padded goal  ' });
+  const trimmed = createGrowthPlan(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: '  padded goal  '});
   assertEq(trimmed.goalText, 'padded goal', 'leading/trailing whitespace stripped');
 
   console.log('\nTest C-07: defaults to status=active when omitted');
-  const defaultStatus = createGrowthPlan(PHONE, { goalText: 'Default status check' });
+  const defaultStatus = createGrowthPlan(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: 'Default status check'});
   assertEq(defaultStatus.status, 'active', 'status defaults to active');
 
   _db.exec(`DELETE FROM qms_growth_plans`);
@@ -146,7 +167,7 @@ async function run() {
   // ═══════════════════════════════════════════════════════════════════════
   console.log('\n── Section 3: getGrowthPlan() ───────────────────────────────────────');
 
-  const owned = createGrowthPlan(PHONE, { goalText: 'Owned by PHONE' });
+  const owned = createGrowthPlan(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: 'Owned by PHONE'});
 
   console.log('\nTest G-01: fetches an owned growth plan');
   const fetched = getGrowthPlan(PHONE, owned.id);
@@ -171,10 +192,10 @@ async function run() {
   // ═══════════════════════════════════════════════════════════════════════
   console.log('\n── Section 4: listGrowthPlans() ─────────────────────────────────────');
 
-  const first = createGrowthPlan(PHONE, { goalText: 'First', term: 1, status: 'active' });
-  const second = createGrowthPlan(PHONE, { goalText: 'Second', term: 2, status: 'active' });
-  const third = createGrowthPlan(PHONE, { goalText: 'Third', term: 2, status: 'completed' });
-  createGrowthPlan(OTHER_PHONE, { goalText: 'Someone else entirely', term: 2 });
+  const first = createGrowthPlan(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: 'First', term: 1, status: 'active'});
+  const second = createGrowthPlan(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: 'Second', term: 2, status: 'active'});
+  const third = createGrowthPlan(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: 'Third', term: 2, status: 'completed'});
+  createGrowthPlan(OTHER_PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: 'Someone else entirely', term: 2});
 
   console.log('\nTest L-01: lists only the requesting teacher\'s growth plans');
   const all = listGrowthPlans(PHONE);
@@ -209,20 +230,32 @@ async function run() {
 
   const toUpdate = createGrowthPlan(PHONE, {
     goalText: 'Original goal',
-    targetArea: 'Original area',
+    topicId: 'TOPIC_CLASSROOM_MANAGEMENT',
     status: 'active',
   });
 
   console.log('\nTest U-01: updates goalText');
   const updatedGoal = updateGrowthPlan(PHONE, toUpdate.id, { goalText: 'Revised goal' });
   assertEq(updatedGoal.goalText, 'Revised goal', 'goalText is updated');
-  assertEq(updatedGoal.targetArea, 'Original area', 'targetArea unchanged when not passed');
+  assertEq(updatedGoal.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'topicId unchanged when not passed');
   assertEq(updatedGoal.status, 'active', 'status unchanged when not passed');
 
   console.log('\nTest U-02: updates status independently');
   const updatedStatus = updateGrowthPlan(PHONE, toUpdate.id, { status: 'in_progress' });
   assertEq(updatedStatus.status, 'in_progress', 'status transitions to in_progress');
   assertEq(updatedStatus.goalText, 'Revised goal', 'goalText unaffected by a status-only update');
+
+  console.log('\nTest U-02b: updates topicId to a different valid topic');
+  const updatedTopic = updateGrowthPlan(PHONE, toUpdate.id, { topicId: 'TOPIC_ASSESSMENT' });
+  assertEq(updatedTopic.topicId, 'TOPIC_ASSESSMENT', 'topicId is updated');
+  assertEq(updatedTopic.goalText, 'Revised goal', 'goalText unaffected by a topicId-only update');
+
+  console.log('\nTest U-02c: rejects an unknown topicId on update');
+  assertThrows(
+    () => updateGrowthPlan(PHONE, toUpdate.id, { topicId: 'TOPIC_BANANAS' }),
+    'topicId must be a valid QMS topic id',
+    'throws on updating to a topicId not in the active taxonomy'
+  );
 
   console.log('\nTest U-03: rejects invalid status on update');
   assertThrows(
@@ -257,7 +290,7 @@ async function run() {
   // ═══════════════════════════════════════════════════════════════════════
   console.log('\n── Section 6: completeGrowthPlan() ──────────────────────────────────');
 
-  const toComplete = createGrowthPlan(PHONE, { goalText: 'Will be completed', status: 'in_progress' });
+  const toComplete = createGrowthPlan(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: 'Will be completed', status: 'in_progress'});
 
   console.log('\nTest CP-01: transitions status to completed');
   const completed = completeGrowthPlan(PHONE, toComplete.id);
@@ -265,7 +298,7 @@ async function run() {
   assertEq(completed.goalText, 'Will be completed', 'goalText unaffected');
 
   console.log('\nTest CP-02: returns null for another teacher\'s growth plan');
-  const otherToComplete = createGrowthPlan(PHONE, { goalText: 'Owned by PHONE only' });
+  const otherToComplete = createGrowthPlan(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: 'Owned by PHONE only'});
   assertEq(completeGrowthPlan(OTHER_PHONE, otherToComplete.id), null, 'cannot complete another teacher\'s growth plan');
 
   _db.exec(`DELETE FROM qms_growth_plans`);
@@ -275,7 +308,7 @@ async function run() {
   // ═══════════════════════════════════════════════════════════════════════
   console.log('\n── Section 7: deleteGrowthPlan() ────────────────────────────────────');
 
-  const toDelete = createGrowthPlan(PHONE, { goalText: 'Will be soft-deleted' });
+  const toDelete = createGrowthPlan(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: 'Will be soft-deleted'});
 
   console.log('\nTest D-01: soft-deletes successfully');
   const deleteResult = deleteGrowthPlan(PHONE, toDelete.id);
@@ -291,7 +324,7 @@ async function run() {
   assertEq(doubleDelete, false, 'a second delete call returns false, not an error');
 
   console.log('\nTest D-04: returns false for another teacher\'s growth plan (ownership scoping)');
-  const another = createGrowthPlan(PHONE, { goalText: 'Owned by PHONE, attacked by OTHER_PHONE' });
+  const another = createGrowthPlan(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', goalText: 'Owned by PHONE, attacked by OTHER_PHONE'});
   const wrongOwnerDelete = deleteGrowthPlan(OTHER_PHONE, another.id);
   assertEq(wrongOwnerDelete, false, 'cannot delete another teacher\'s growth plan');
   assert(getGrowthPlan(PHONE, another.id) !== null, 'the growth plan survives the failed cross-owner delete attempt');

@@ -928,6 +928,39 @@ function runMigrations() {
       ON qms_growth_plans(phone_hash, term);
   `);
 
+  // Migration 039: qms topic_id columns (PR32, ADR-013 §4.4). Adds the
+  // controlled taxonomy identifier (utils/qmsTopics.js) to both QMS
+  // tables. Nullable at the schema level — per ADR-013 §3.3/§4.4/§4.5,
+  // nullability exists solely to permit pre-PR32 rows to remain
+  // unmigrated; every *new* write must supply a valid topicId, enforced
+  // at the service layer (reflectionService.js / growthPlanService.js),
+  // not by a DB-level CHECK/FK/ENUM constraint. ADR-013 §4.4 records this
+  // as a deliberate trade-off — a lookup-table migration would otherwise
+  // be required every time the taxonomy gains a topic (§3.4) — and is
+  // exactly why the coaching engine (PR33, ADR-013 §6.1) is required to
+  // treat any persisted topic_id absent from the active taxonomy the same
+  // way it treats a null one, rather than trusting the column blindly.
+  //
+  // qms_growth_plans.target_area is left in place rather than dropped —
+  // SQLite's ALTER TABLE DROP COLUMN support is version-dependent and
+  // dropping a column teachers' existing rows still populate is a higher-
+  // risk change than leaving it present-but-unused. The service layer
+  // (growthPlanService.js) exposes only topicId going forward (ADR-013
+  // §4.3); target_area becomes a deprecated, unread legacy column after
+  // this migration, not a second live source of truth.
+  try {
+    db.exec(`ALTER TABLE qms_reflections ADD COLUMN topic_id TEXT`);
+  } catch (_) { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE qms_growth_plans ADD COLUMN topic_id TEXT`);
+  } catch (_) { /* column already exists */ }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_qms_reflections_topic
+      ON qms_reflections(topic_id);
+    CREATE INDEX IF NOT EXISTS idx_qms_growth_plans_topic
+      ON qms_growth_plans(topic_id);
+  `);
+
   console.log('[DB] Migrations complete');
 }
 
