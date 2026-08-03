@@ -192,7 +192,7 @@ async function run() {
     insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
     const result = getCoachingInsights(PHONE);
     assertEq(result.status, 'ok', 'public API returns ok status once guard passes');
-    assertEq(result.recommendations, [], 'recommendations still empty — rules land in next PR33 increment, not this one');
+    assertEq(result.recommendations.length, 1, 'recommendations now populated once the guard passes (increment 4: rules wired in) — full behavior covered in Section 7');
   }
 
   // ── Section 2: Evidence retrieval (§6.2) ──────────────────────────────
@@ -520,6 +520,121 @@ async function run() {
       threw = true;
     }
     assert(threw, 'an invalid candidate topicId is treated as a rule bug and surfaces loudly, unlike stale-persisted-row handling in §6.1');
+  }
+
+  clearAll();
+
+  // ── Section 7: getCoachingInsights() end-to-end (§6.4/§6.5/§6.7) ──────
+  console.log('\nSection 7: getCoachingInsights() end-to-end pipeline');
+
+  console.log('\nTest E-01: insufficient data → status insufficient_data, empty recommendations');
+  clearAll();
+  {
+    insertReflectionRaw(PHONE, { topicId: TOPIC_A }); // only 1, below threshold
+    const result = getCoachingInsights(PHONE);
+    assertEq(result.status, 'insufficient_data', 'status reflects insufficient guard');
+    assertEq(result.recommendations, [], 'no recommendations when insufficient');
+    assert(typeof result.generatedAt === 'string', 'generatedAt is present');
+  }
+
+  console.log('\nTest E-02: sufficient data, single topic → one recommendation with explanation');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+
+    const result = getCoachingInsights(PHONE);
+    assertEq(result.status, 'ok', 'status ok once sufficient');
+    assertEq(result.recommendations.length, 1, 'exactly one topic has evidence');
+    const rec = result.recommendations[0];
+    assertEq(rec.topicId, TOPIC_A, 'recommendation is for the topic with evidence');
+    assert(rec.topicLabel === QMS_TOPICS[0].label, 'topicLabel resolved from taxonomy');
+    assert(typeof rec.confidence === 'number', 'confidence is numeric');
+    assert(['High', 'Medium', 'Low'].includes(rec.confidenceLabel), 'confidenceLabel is one of the three labels');
+    assertEq(rec.evidence.length, 6, 'evidence includes all 5 reflections + 1 growth plan');
+    assert(
+      rec.explanation.includes('Supported by 6 evidence item(s).')
+      && rec.explanation.includes('Confidence: ' + rec.confidenceLabel + '.'),
+      'explanation is template-generated from the same counts/label as the score'
+    );
+  }
+
+  console.log('\nTest E-03: multiple competing topics → ranked by confidence, capped at maxInsights');
+  clearAll();
+  {
+    // Give every topic the same 3-reflection/1-growth-plan floor so the
+    // guard passes and multiple topics have evidence to compete on.
+    for (let i = 0; i < 3; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_B });
+    for (let i = 0; i < 2; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_C });
+
+    const result = getCoachingInsights(PHONE, { maxInsights: 2 });
+    assertEq(result.status, 'ok', 'status ok');
+    assertEq(result.recommendations.length, 2, 'truncated to maxInsights=2 despite 3 topics having evidence');
+    const confidences = result.recommendations.map((r) => r.confidence);
+    assert(
+      confidences[0] >= confidences[1],
+      'recommendations are sorted by descending confidence'
+    );
+  }
+
+  console.log('\nTest E-04: duplicate-topic candidates never produce contradictory output (only one entry per topic)');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+    for (let i = 0; i < 3; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_B });
+
+    const result = getCoachingInsights(PHONE);
+    const topicIds = result.recommendations.map((r) => r.topicId);
+    assertEq(new Set(topicIds).size, topicIds.length, 'no topicId appears more than once in the output');
+  }
+
+  console.log('\nTest E-05: ownership isolation — OTHER_PHONE never sees PHONE\'s recommendations');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+
+    const otherResult = getCoachingInsights(OTHER_PHONE);
+    assertEq(otherResult.status, 'insufficient_data', 'a different phone_hash with no data of its own is unaffected by PHONE\'s data');
+  }
+
+  console.log('\nTest E-06: deterministic output regardless of rule catalogue execution order');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+    for (let i = 0; i < 4; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_B });
+
+    const { buildTopicContexts, runRules } = require('../services/coachingEngineService');
+    const contexts = buildTopicContexts(PHONE);
+
+    const ruleAlpha = { id: 'alpha', applies: (c) => c.evidenceCount > 0, evaluate: (c) => ({ topicId: c.topicId, recommendation: 'r', confidence: c.confidence, evidence: c.evidence }) };
+    const ruleBeta = { id: 'beta', applies: (c) => c.evidenceCount > 0, evaluate: (c) => ({ topicId: c.topicId, recommendation: 'r', confidence: c.confidence, evidence: c.evidence }) };
+
+    const order1 = runRules(contexts, [ruleAlpha, ruleBeta]);
+    const order2 = runRules(contexts, [ruleBeta, ruleAlpha]);
+
+    const normalize = (candidates) => processRecommendationCandidates(candidates, { maxInsights: 10 })
+      .map((c) => ({ topicId: c.topicId, confidence: c.confidence }));
+
+    assertEq(normalize(order1), normalize(order2), 'final pipeline output identical regardless of rule catalogue order');
+  }
+
+  console.log('\nTest E-07: unknown persisted topic_id (§6.1) never surfaces as a recommendation');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+    insertReflectionRaw(PHONE, { topicId: 'TOPIC_RETIRED_STALE' });
+
+    const result = getCoachingInsights(PHONE);
+    const topicIds = result.recommendations.map((r) => r.topicId);
+    assert(!topicIds.includes('TOPIC_RETIRED_STALE'), 'stale/unknown topic_id never produces a recommendation');
+    assertEq(result.status, 'ok', 'still resolves normally despite the stale row');
   }
 
   clearAll();

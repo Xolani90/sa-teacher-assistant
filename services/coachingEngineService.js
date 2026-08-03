@@ -33,6 +33,7 @@
 const { isValidTopicId, getTopicById } = require('../utils/qmsTopics');
 const reflectionService = require('./reflectionService');
 const growthPlanService = require('./growthPlanService');
+const { parseSqliteUtc } = require('../utils/dateUtils');
 
 // ── Named configuration defaults (ADR-013 §6.3/§6.4/§6.6) ──────────────────
 // All provisional for initial release, not calibrated against usage data —
@@ -430,24 +431,210 @@ function processRecommendationCandidates(candidates, { maxInsights = DEFAULT_MAX
   return truncateRecommendations(sorted, maxInsights);
 }
 
+// ── Rule context (feeds §6.4 rules + §6.5 explanations) ─────────────────
+//
+// Builds, per topic, everything a rule or the explanation template needs
+// to make a decision — evidence refs, the three §6.3 sub-scores, the
+// combined confidence, and the raw counts the explanation template quotes
+// verbatim. Built once per getCoachingInsights() call and handed to every
+// rule unchanged, which is what makes "rules execute independently of
+// registration/execution order" (§6.4) true in practice: no rule mutates
+// this, no rule reads another rule's output, every rule sees the same
+// snapshot regardless of catalogue order.
+
+/**
+ * Age in whole days between now and a SQLite UTC timestamp. Mirrors the
+ * clamping behavior calculateRecencyScore already expects (a clock-skewed
+ * or future-dated row still just falls in the "≤30 days" bucket there).
+ *
+ * @param {string} sqliteDatetime
+ * @returns {number}
+ */
+function ageInDays(sqliteDatetime) {
+  const then = parseSqliteUtc(sqliteDatetime);
+  const ms = Date.now() - then.getTime();
+  return ms / (1000 * 60 * 60 * 24);
+}
+
+/**
+ * The last 10 tagged reflections (§6.3 consistencyScore window), newest
+ * first. "Tagged" here means currently-usable per §6.1, matching the same
+ * treatment gatherEvidenceByTopic() already applies.
+ *
+ * @param {string} phoneHash
+ * @returns {object[]}
+ */
+function getRecentTaggedReflectionsWindow(phoneHash) {
+  return getTaggedReflections(phoneHash)
+    .slice()
+    .sort((a, b) => parseSqliteUtc(b.createdAt) - parseSqliteUtc(a.createdAt))
+    .slice(0, 10);
+}
+
+/**
+ * Builds the full per-topic rule context for every topic that has at
+ * least one piece of currently-usable evidence (§6.1/§6.2). Topics with
+ * no evidence are omitted entirely — there is nothing for a rule to
+ * evaluate and no evidence to cite in an explanation.
+ *
+ * @param {string} phoneHash
+ * @returns {Map<string, object>} topicId → {
+ *   topicId, topic, evidence, evidenceCount, ageDaysNewest,
+ *   matchingTaggedReflections, relevantTaggedReflections,
+ *   evidenceScore, recencyScore, consistencyScore, confidence, confidenceLabel
+ * }
+ */
+function buildTopicContexts(phoneHash) {
+  const evidenceByTopic = gatherEvidenceByTopic(phoneHash);
+  const taggedReflections = getTaggedReflections(phoneHash);
+  const taggedGrowthPlans = getTaggedGrowthPlans(phoneHash);
+  const recentWindow = getRecentTaggedReflectionsWindow(phoneHash);
+  const relevantTaggedReflections = recentWindow.length;
+
+  const recordsByTopic = new Map();
+  taggedReflections.forEach((r) => {
+    if (!recordsByTopic.has(r.topicId)) recordsByTopic.set(r.topicId, []);
+    recordsByTopic.get(r.topicId).push(r.createdAt);
+  });
+  taggedGrowthPlans.forEach((p) => {
+    if (!recordsByTopic.has(p.topicId)) recordsByTopic.set(p.topicId, []);
+    recordsByTopic.get(p.topicId).push(p.createdAt);
+  });
+
+  const contexts = new Map();
+
+  for (const [topicId, evidence] of evidenceByTopic.entries()) {
+    const topic = getTopicById(topicId);
+    if (!topic) continue; // §6.1: stale/invalid topicId, skip like it doesn't exist
+
+    const timestamps = recordsByTopic.get(topicId) || [];
+    const ageDaysNewest = timestamps.length
+      ? Math.min(...timestamps.map(ageInDays))
+      : Infinity;
+
+    const matchingTaggedReflections = recentWindow
+      .filter((r) => r.topicId === topicId).length;
+
+    const evidenceScore = calculateEvidenceScore(evidence.length);
+    const recencyScore = calculateRecencyScore(
+      Number.isFinite(ageDaysNewest) ? ageDaysNewest : Infinity
+    );
+    const consistencyScore = calculateConsistencyScore(
+      matchingTaggedReflections,
+      relevantTaggedReflections
+    );
+    const confidence = calculateConfidence({ evidenceScore, consistencyScore, recencyScore });
+
+    contexts.set(topicId, {
+      topicId,
+      topic,
+      evidence,
+      evidenceCount: evidence.length,
+      ageDaysNewest,
+      matchingTaggedReflections,
+      relevantTaggedReflections,
+      evidenceScore,
+      recencyScore,
+      consistencyScore,
+      confidence,
+      confidenceLabel: confidenceLabel(confidence),
+    });
+  }
+
+  return contexts;
+}
+
+// ── Recommendation rule catalogue (ADR-013 §6.4) ────────────────────────
+//
+// Each rule is `{ id, applies(ctx), evaluate(ctx) }`:
+//   - applies(ctx)  → boolean, pure, reads only the topic context passed in
+//   - evaluate(ctx) → { topicId, recommendation, confidence, evidence }
+// Rules never read another rule's output and never read or affect
+// execution order — see runRules() below. Adding a new rule means adding
+// a new entry here; nothing else in this file changes.
+
+const RECOMMENDATION_RULES = [
+  {
+    id: 'recurring_topic_pattern',
+    // Any topic with currently-usable evidence is an applicable pattern —
+    // the insufficient-data guard (§6.6) already establishes there's
+    // enough data overall before rules ever run.
+    applies: (ctx) => ctx.evidenceCount > 0,
+    evaluate: (ctx) => ({
+      topicId: ctx.topicId,
+      recommendation: `Continue focused coaching support on ${ctx.topic.label}.`,
+      confidence: ctx.confidence,
+      evidence: ctx.evidence,
+    }),
+  },
+];
+
+/**
+ * Runs every rule in the catalogue against every topic context and
+ * collects the resulting candidates into a single flat list. Iteration
+ * order (rules-outer/topics-inner here) is not meaningful — §6.4
+ * guarantees the same final output regardless of it, since deduplication
+ * and sorting happen entirely afterward in processRecommendationCandidates().
+ *
+ * @param {Map<string, object>} topicContexts
+ * @param {object[]} [rules=RECOMMENDATION_RULES]
+ * @returns {object[]} candidates: `{topicId, recommendation, confidence, evidence}[]`
+ */
+function runRules(topicContexts, rules = RECOMMENDATION_RULES) {
+  const candidates = [];
+  for (const rule of rules) {
+    for (const ctx of topicContexts.values()) {
+      if (rule.applies(ctx)) {
+        candidates.push(rule.evaluate(ctx));
+      }
+    }
+  }
+  return candidates;
+}
+
+// ── Explanation generation (ADR-013 §6.5) ───────────────────────────────
+
+/**
+ * Template-generates the `explanation` field from the same inputs as the
+ * confidence score — never free text, never LLM-authored at this layer,
+ * per §6.5's explicit rationale (this field must stay reproducible, not
+ * reintroduce non-determinism).
+ *
+ * Fixed template:
+ *   "Supported by {evidenceCount} evidence item(s). Observed in {matching}
+ *   of the last {relevant} tagged reflections. Latest supporting
+ *   evidence: {ageDays} days ago. Confidence: {confidenceLabel}."
+ *
+ * @param {object} ctx - a topic context from buildTopicContexts().
+ * @returns {string}
+ */
+function generateExplanation(ctx) {
+  const ageDays = Number.isFinite(ctx.ageDaysNewest)
+    ? Math.round(ctx.ageDaysNewest)
+    : 'unknown';
+
+  return `Supported by ${ctx.evidenceCount} evidence item(s). `
+    + `Observed in ${ctx.matchingTaggedReflections} of the last `
+    + `${ctx.relevantTaggedReflections} tagged reflections. `
+    + `Latest supporting evidence: ${ageDays} days ago. `
+    + `Confidence: ${ctx.confidenceLabel}.`;
+}
+
 /**
  * Public API (§6.7). Returns structured data only — no formatting, no
  * WhatsApp markup, no markdown — so this can be called identically from
  * a future `MY INSIGHTS` WhatsApp command and a dashboard route.
  *
- * Increment-1 scope: the insufficient-data guard is fully wired. Once
- * data is sufficient, confidence scoring (§6.3) and recommendation rules
- * (§6.4) are what would normally populate `recommendations` — those land
- * in the next PR33 increment, so for now a sufficient-data teacher
- * correctly gets `status: "ok"` with an empty recommendation list rather
- * than this function fabricating output ahead of the rules that are
- * supposed to produce it.
+ * Full pipeline (increment 4):
+ *   guard → buildTopicContexts() → runRules() →
+ *   processRecommendationCandidates() → attach topicLabel + explanation
  *
  * @param {string} phoneHash
  * @param {object} [options]
+ * @param {number} [options.maxInsights=DEFAULT_MAX_INSIGHTS]
  * @returns {{status: string, summary: (string|null), recommendations: object[], generatedAt: string}}
  */
-function getCoachingInsights(phoneHash, options = {}) { // eslint-disable-line no-unused-vars
+function getCoachingInsights(phoneHash, options = {}) {
   if (!phoneHash || typeof phoneHash !== 'string') {
     throw new Error('getCoachingInsights: phoneHash is required');
   }
@@ -462,10 +649,28 @@ function getCoachingInsights(phoneHash, options = {}) { // eslint-disable-line n
     };
   }
 
+  const topicContexts = buildTopicContexts(phoneHash);
+  const candidates = runRules(topicContexts);
+  const { maxInsights = DEFAULT_MAX_INSIGHTS } = options;
+  const finalCandidates = processRecommendationCandidates(candidates, { maxInsights });
+
+  const recommendations = finalCandidates.map((candidate) => {
+    const ctx = topicContexts.get(candidate.topicId);
+    return {
+      topicId: candidate.topicId,
+      topicLabel: ctx.topic.label,
+      recommendation: candidate.recommendation,
+      confidence: candidate.confidence,
+      confidenceLabel: confidenceLabel(candidate.confidence),
+      evidence: candidate.evidence,
+      explanation: generateExplanation(ctx),
+    };
+  });
+
   return {
     status: 'ok',
     summary: null,
-    recommendations: [],
+    recommendations,
     generatedAt: new Date().toISOString(),
   };
 }
@@ -489,5 +694,8 @@ module.exports = {
   sortRecommendations,
   truncateRecommendations,
   processRecommendationCandidates,
+  buildTopicContexts,
+  runRules,
+  generateExplanation,
   getCoachingInsights,
 };
