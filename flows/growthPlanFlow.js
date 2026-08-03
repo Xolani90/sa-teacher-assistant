@@ -1,7 +1,8 @@
 'use strict';
 
 /**
- * Growth plan flow handler (PR29, ADR-011 §2/§7/§9).
+ * Growth plan flow handler (PR29, ADR-011 §2/§7/§9; topic selection
+ * added PR32, ADR-013 §5.2).
  * Dependencies are injected via the `deps` object rather than required
  * directly, so this module has no reverse dependency on webhook.js —
  * same convention as reflectionFlow.js/observationFlow.js.
@@ -12,14 +13,15 @@
  *   safeSendMessage,    // async (from, text) => void
  *   parseIntent,        // (text) => intent
  *   hashPhone,          // (from) => phoneHash
- *   createGrowthPlan,   // (phoneHash, { goalText, term, targetArea, status }) => growthPlan
+ *   createGrowthPlan,   // (phoneHash, { goalText, term, topicId, status }) => growthPlan
  *   getCurrentTerm,     // schoolCalendarRepository: () => number|null
  * }
  *
  * Scope note (PR29): create-only, matching ADR-011's frozen Migration
- * 038 schema exactly — goalText and targetArea are the only two
- * teacher-authored free-text fields collected here. No reflection_id
- * linkage step (deferred to a future ADR — see PR29 discussion), no
+ * 038 schema. goalText is free text; topic (PR32, ADR-013) replaces
+ * the original free-text targetArea field with a controlled taxonomy
+ * selection via utils/qmsTopicSelection.js. No reflection_id linkage
+ * step (deferred to a future ADR — see PR29 discussion), no
  * planned_actions/success_criteria/target_date fields (not in the
  * frozen schema), no history/edit/delete sub-flow (PR30/PR31
  * territory). New plans are always created with status 'active' —
@@ -31,7 +33,14 @@
  * one-shot choice of which single field to redo (awaitingCorrectionChoice),
  * then returns straight back to reviewSummary with that field replaced.
  * Nothing is persisted until YES.
+ *
+ * State preservation (ADR-013 §5.2/§7.1): every *State.set(...) call
+ * site in this file uses immutable spread updates ({ ...state, ... })
+ * rather than explicit field lists, so the topicId field added in PR32
+ * cannot be silently dropped by a transition that forgot to list it.
  */
+
+const { renderTopicListMessage, resolveTopicSelection, labelForTopicId } = require('../utils/qmsTopicSelection');
 
 const YES_RE = /^y(es)?$/i;
 const NO_RE = /^n(o)?$/i;
@@ -39,22 +48,23 @@ const NO_RE = /^n(o)?$/i;
 /**
  * Builds the review summary message for the current collected fields.
  *
- * @param {{goalText: string, targetArea: string}} fields
+ * @param {{goalText: string, topicId: string}} fields
  * @returns {string}
  */
-function buildReviewSummaryMessage({ goalText, targetArea }) {
+function buildReviewSummaryMessage({ goalText, topicId }) {
+  const topicLabel = labelForTopicId(topicId) || topicId;
   return (
     `Here's your growth plan:\n\n` +
     `*Goal:*\n${goalText}\n\n` +
-    `*Focus area:*\n${targetArea}\n\n` +
+    `*Topic:*\n${topicLabel}\n\n` +
     `Save this growth plan? Reply *YES* or *NO*, or *CANCEL* to discard.`
   );
 }
 
 // ── Growth plan flow handler ────────────────────────────────────────────
 /**
- * Handles the "create growth plan" conversation. Collects two fixed
- * free-text fields across two separate messages (goal, focus area),
+ * Handles the "create growth plan" conversation. Collects a free-text
+ * goal and a taxonomy topic selection across two separate messages,
  * shows the teacher a summary of exactly what will be saved, and
  * persists only after they reply YES. Replying NO at the review step
  * offers a lightweight single-field correction before returning to
@@ -118,10 +128,12 @@ async function handleGrowthPlanFlow(from, text, preClassifiedIntent, deps) {
     // Correction path: replace just this field, then go straight back
     // to reviewSummary instead of continuing the forward chain.
     if (state.correcting) {
-      const fields = { goalText: trimmed, targetArea: state.targetArea };
+      const fields = { goalText: trimmed, topicId: state.topicId };
       growthPlanState.set(phoneHash, {
+        ...state,
         step: 'reviewSummary',
         ...fields,
+        correcting: false,
         lastActivity: Date.now(),
       });
       await safeSendMessage(from, `Updated summary:\n\n` + buildReviewSummaryMessage(fields));
@@ -129,27 +141,31 @@ async function handleGrowthPlanFlow(from, text, preClassifiedIntent, deps) {
     }
 
     growthPlanState.set(phoneHash, {
-      step: 'awaitingTargetArea',
+      ...state,
+      step: 'awaitingTopic',
       goalText: trimmed,
       lastActivity: Date.now(),
     });
-    await safeSendMessage(from, `What area of your practice does this focus on?`);
+    await safeSendMessage(from, renderTopicListMessage());
     return true;
   }
 
-  if (state.step === 'awaitingTargetArea') {
-    if (!trimmed) {
+  if (state.step === 'awaitingTopic') {
+    const selection = resolveTopicSelection(trimmed);
+    if (!selection.ok) {
       growthPlanState.set(phoneHash, { ...state, lastActivity: Date.now() });
       await safeSendMessage(from,
-        `Please share the focus area, or *CANCEL* to stop.`
+        `Please reply with the number of a topic, or *CANCEL* to stop.\n\n` + renderTopicListMessage()
       );
       return true;
     }
 
-    const fields = { goalText: state.goalText, targetArea: trimmed };
+    const fields = { goalText: state.goalText, topicId: selection.topicId };
     growthPlanState.set(phoneHash, {
+      ...state,
       step: 'reviewSummary',
       ...fields,
+      correcting: false,
       lastActivity: Date.now(),
     });
     await safeSendMessage(from, buildReviewSummaryMessage(fields));
@@ -180,7 +196,7 @@ async function handleGrowthPlanFlow(from, text, preClassifiedIntent, deps) {
         createGrowthPlan(phoneHash, {
           goalText: state.goalText,
           term,
-          targetArea: state.targetArea,
+          topicId: state.topicId,
           status: 'active',
         });
       } catch (err) {
@@ -203,15 +219,14 @@ async function handleGrowthPlanFlow(from, text, preClassifiedIntent, deps) {
 
     if (NO_RE.test(trimmed)) {
       growthPlanState.set(phoneHash, {
+        ...state,
         step: 'awaitingCorrectionChoice',
-        goalText: state.goalText,
-        targetArea: state.targetArea,
         lastActivity: Date.now(),
       });
       await safeSendMessage(from,
         `Which part would you like to change?\n\n` +
         `1. Goal\n` +
-        `2. Focus area\n` +
+        `2. Topic\n` +
         `3. Cancel`
       );
       return true;
@@ -233,9 +248,8 @@ async function handleGrowthPlanFlow(from, text, preClassifiedIntent, deps) {
 
     if (trimmed === '1') {
       growthPlanState.set(phoneHash, {
+        ...state,
         step: 'awaitingGoal',
-        goalText: state.goalText,
-        targetArea: state.targetArea,
         correcting: true,
         lastActivity: Date.now(),
       });
@@ -245,13 +259,12 @@ async function handleGrowthPlanFlow(from, text, preClassifiedIntent, deps) {
 
     if (trimmed === '2') {
       growthPlanState.set(phoneHash, {
-        step: 'awaitingTargetArea',
-        goalText: state.goalText,
-        targetArea: state.targetArea,
+        ...state,
+        step: 'awaitingTopic',
         correcting: true,
         lastActivity: Date.now(),
       });
-      await safeSendMessage(from, `What area of your practice does this focus on?`);
+      await safeSendMessage(from, renderTopicListMessage());
       return true;
     }
 
@@ -259,7 +272,7 @@ async function handleGrowthPlanFlow(from, text, preClassifiedIntent, deps) {
     await safeSendMessage(from,
       `Please reply with a number:\n\n` +
       `1. Goal\n` +
-      `2. Focus area\n` +
+      `2. Topic\n` +
       `3. Cancel`
     );
     return true;

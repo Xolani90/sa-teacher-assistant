@@ -288,18 +288,18 @@ function createGetReflectionsHandler({ listReflections }) {
 function createPostReflectionHandler({ createReflection }) {
   /**
    * POST /api/reflections
-   * Body: { content, term?, aiAssisted?, evidenceLinkIds? }
+   * Body: { content, term?, aiAssisted?, evidenceLinkIds?, topicId? }
    *
    * @returns 201 { reflection } on success
    * @returns 400 if content is missing/blank or evidenceLinkIds isn't an array
    * @returns 500 if the underlying service throws for any other reason
    */
   return function handlePostReflection(req, res) {
-    const { content, term, aiAssisted, evidenceLinkIds } = req.body || {};
+    const { content, term, aiAssisted, evidenceLinkIds, topicId } = req.body || {};
 
     let reflection;
     try {
-      reflection = createReflection(req.teacher.phoneHash, { content, term, aiAssisted, evidenceLinkIds });
+      reflection = createReflection(req.teacher.phoneHash, { content, term, aiAssisted, evidenceLinkIds, topicId });
     } catch (err) {
       // createReflection's own guard clauses (missing content, bad
       // evidenceLinkIds shape) are caller-input errors, not server

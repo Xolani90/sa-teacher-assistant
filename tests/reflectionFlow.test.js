@@ -36,10 +36,6 @@ function assertMatch(str, regex, message) {
   assert(typeof str === 'string' && regex.test(str), message);
 }
 
-/**
- * Minimal mock function tracker — replaces jest.fn() for plain-node execution.
- * Records calls and supports a fixed return value or a custom implementation.
- */
 function createMockFn(implementation) {
   const calls = [];
   const fn = (...args) => {
@@ -51,10 +47,6 @@ function createMockFn(implementation) {
   return fn;
 }
 
-/**
- * Minimal in-memory SessionStore stand-in — mirrors the get/set/delete
- * shape reflectionFlow.js expects, with per-phoneHash isolation.
- */
 function createSessionStore() {
   const store = new Map();
   return {
@@ -85,7 +77,6 @@ function createDeps(overrides = {}) {
 }
 
 async function runHappyPathUpTo(deps, from, step) {
-  // 'REFLECT' triggers entry (parseIntent mocked to return reflection)
   await handleReflectionFlow(from, 'REFLECT', null, deps);
   if (step === 'entry') return;
 
@@ -95,14 +86,34 @@ async function runHappyPathUpTo(deps, from, step) {
   await handleReflectionFlow(from, 'Learners understood equivalent fractions.', null, deps); // went well
   if (step === 'awaitingImprovement') return;
 
-  await handleReflectionFlow(from, 'More practical examples.', null, deps); // improvement -> reviewSummary
+  await handleReflectionFlow(from, 'More practical examples.', null, deps); // improvement -> awaitingTopic
+  if (step === 'awaitingTopic') return;
+
+  await handleReflectionFlow(from, '1', null, deps); // topic -> reviewSummary
 }
 
 async function run() {
   console.log('reflectionFlow tests');
   console.log('='.repeat(60));
 
-  // ── happy path ─────────────────────────────────────────────
+  console.log('\n── PR31a regression: first-prompt equivalence ──');
+  {
+    const depsA = createDeps();
+    const depsB = createDeps();
+
+    await handleReflectionFlow('+27000000101', 'REFLECT', null, depsA);
+    await handleReflectionFlow('+27000000102', 'reflect on my lesson', null, depsB);
+
+    const messageA = depsA.safeSendMessage.calls[0][1];
+    const messageB = depsB.safeSendMessage.calls[0][1];
+
+    assertEqual(messageA, messageB, 'REFLECT and "reflect on my lesson" produce identical first prompts');
+    assertMatch(messageA, /what lesson is this reflection about/i, 'first prompt is the lesson prompt, unaffected by topic insertion');
+
+    const stateA = depsA.reflectionState.get('hash:+27000000101');
+    assertEqual(stateA.step, 'awaitingLesson', 'reflection still begins at awaitingLesson, no topic prompt beforehand');
+  }
+
   console.log('\n── happy path ──');
   {
     const deps = createDeps();
@@ -111,13 +122,14 @@ async function run() {
     await runHappyPathUpTo(deps, from, 'reviewSummary');
     await handleReflectionFlow(from, 'YES', null, deps);
 
-    assert(deps.createReflection.callCount() === 1, 'collects all three fields and calls createReflection exactly once on YES');
+    assert(deps.createReflection.callCount() === 1, 'collects all fields and calls createReflection exactly once on YES');
     const [phoneHash, payload] = deps.createReflection.calls[0];
 
     assertEqual(phoneHash, 'hash:+27000000001', 'phoneHash passed to createReflection is correct');
     assertEqual(payload.term, 2, 'term is carried through from getCurrentTerm');
     assertEqual(payload.aiAssisted, false, 'aiAssisted defaults to false');
     assertEqual(payload.evidenceLinkIds, [], 'evidenceLinkIds defaults to empty array');
+    assertEqual(payload.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'topicId is the resolved topic selection');
     assertContains(payload.content, 'Lesson:\nFractions Grade 6', 'content includes the lesson field');
     assertContains(payload.content, 'What went well:\nLearners understood equivalent fractions.', 'content includes the went-well field');
     assertContains(payload.content, 'What I would improve:\nMore practical examples.', 'content includes the improvement field');
@@ -125,8 +137,49 @@ async function run() {
     assert(deps.reflectionState.get('hash:+27000000001') === null, 'state is cleared after save');
   }
 
-  // ── correction path ────────────────────────────────────────
-  console.log('\n── correction path ──');
+  console.log('\n── awaitingTopic follows awaitingImprovement ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000013';
+
+    await runHappyPathUpTo(deps, from, 'awaitingTopic');
+    const state = deps.reflectionState.get('hash:+27000000013');
+    assertEqual(state.step, 'awaitingTopic', 'flow reaches awaitingTopic immediately after improvement is collected');
+
+    const lastMessage = deps.safeSendMessage.calls[deps.safeSendMessage.calls.length - 1][1];
+    assertMatch(lastMessage, /which coaching area/i, 'awaitingTopic prompt asks for a coaching area');
+  }
+
+  console.log('\n── review summary displays selected topic ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000014';
+
+    await runHappyPathUpTo(deps, from, 'reviewSummary');
+    const lastMessage = deps.safeSendMessage.calls[deps.safeSendMessage.calls.length - 1][1];
+    assertContains(lastMessage, 'Classroom Management', 'review summary displays the selected topic label');
+  }
+
+  console.log('\n── invalid topic selection reply ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000015';
+    const phoneHash = 'hash:+27000000015';
+
+    await runHappyPathUpTo(deps, from, 'awaitingTopic');
+    await handleReflectionFlow(from, '99', null, deps); // out-of-range
+
+    let state = deps.reflectionState.get(phoneHash);
+    assertEqual(state.step, 'awaitingTopic', 'stays on awaitingTopic after an out-of-range reply');
+    assert(deps.createReflection.callCount() === 0, 'does not save on an invalid topic reply');
+
+    await handleReflectionFlow(from, '1', null, deps); // now valid
+    state = deps.reflectionState.get(phoneHash);
+    assertEqual(state.step, 'reviewSummary', 'advances to reviewSummary once a valid topic reply is sent');
+    assertEqual(state.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'valid reply resolves to the correct topicId');
+  }
+
+  console.log('\n── correction path (content field) ──');
   {
     const deps = createDeps();
     const from = '+27000000002';
@@ -144,45 +197,75 @@ async function run() {
     assertContains(payload.content, 'What went well:\nLearners understood equivalent fractions.', 'went-well field untouched by the correction');
     assertContains(payload.content, 'What I would improve:\nMore practical examples.', 'improvement field untouched by the correction');
     assertNotContains(payload.content, 'Fractions Grade 6\n', 'original (pre-correction) lesson text is gone');
+    assertEqual(payload.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'topic survives a correction cycle on a different field');
   }
 
-  // ── cancel ─────────────────────────────────────────────────
+  console.log('\n── correction path (topic field) ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000016';
+    const phoneHash = 'hash:+27000000016';
+
+    await runHappyPathUpTo(deps, from, 'reviewSummary');
+    await handleReflectionFlow(from, 'NO', null, deps); // -> awaitingCorrectionChoice
+
+    const menuMessage = deps.safeSendMessage.calls[deps.safeSendMessage.calls.length - 1][1];
+    assertContains(menuMessage, '4. Topic', 'correction menu shows Topic as option 4');
+    assertContains(menuMessage, '5. Cancel', 'correction menu shows Cancel as option 5');
+
+    await handleReflectionFlow(from, '4', null, deps); // choose Topic -> awaitingTopic (correcting)
+    let state = deps.reflectionState.get(phoneHash);
+    assertEqual(state.step, 'awaitingTopic', 'selecting Topic returns to awaitingTopic');
+
+    await handleReflectionFlow(from, '2', null, deps); // pick a different topic
+    state = deps.reflectionState.get(phoneHash);
+    assertEqual(state.step, 'reviewSummary', 'returns to reviewSummary after correcting the topic');
+    assertEqual(state.topicId, 'TOPIC_ASSESSMENT', 'topicId reflects the corrected selection');
+    assertEqual(state.lesson, 'Fractions Grade 6', 'other fields untouched by a topic-only correction');
+
+    await handleReflectionFlow(from, 'YES', null, deps);
+    const [, payload] = deps.createReflection.calls[0];
+    assertEqual(payload.topicId, 'TOPIC_ASSESSMENT', 'corrected topicId is what gets persisted');
+  }
+
+  console.log('\n── correction menu: Cancel now option 5 ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000017';
+    const phoneHash = 'hash:+27000000017';
+
+    await runHappyPathUpTo(deps, from, 'reviewSummary');
+    await handleReflectionFlow(from, 'NO', null, deps);
+
+    await handleReflectionFlow(from, '4', null, deps);
+    assert(deps.reflectionState.get(phoneHash) !== null, 'replying "4" no longer cancels — session is still active');
+    assertEqual(deps.reflectionState.get(phoneHash).step, 'awaitingTopic', 'replying "4" now routes to Topic correction');
+
+    await handleReflectionFlow(from, '1', null, deps);
+    await handleReflectionFlow(from, 'NO', null, deps);
+    await handleReflectionFlow(from, '5', null, deps);
+    assert(deps.reflectionState.get(phoneHash) === null, 'replying "5" cancels the reflection');
+    assert(deps.createReflection.callCount() === 0, 'cancelling never saves');
+  }
+
   console.log('\n── cancel ──');
   const cancelSteps = [
-    {
-      name: 'awaitingLesson',
-      drive: async (deps, from) => {
-        await handleReflectionFlow(from, 'REFLECT', null, deps);
-      },
-    },
-    {
-      name: 'awaitingWentWell',
-      drive: async (deps, from) => {
-        await handleReflectionFlow(from, 'REFLECT', null, deps);
-        await handleReflectionFlow(from, 'Lesson text', null, deps);
-      },
-    },
-    {
-      name: 'awaitingImprovement',
-      drive: async (deps, from) => {
-        await handleReflectionFlow(from, 'REFLECT', null, deps);
-        await handleReflectionFlow(from, 'Lesson text', null, deps);
-        await handleReflectionFlow(from, 'Went well text', null, deps);
-      },
-    },
-    {
-      name: 'reviewSummary',
-      drive: async (deps, from) => {
-        await runHappyPathUpTo(deps, from, 'reviewSummary');
-      },
-    },
-    {
-      name: 'awaitingCorrectionChoice',
-      drive: async (deps, from) => {
-        await runHappyPathUpTo(deps, from, 'reviewSummary');
-        await handleReflectionFlow(from, 'NO', null, deps);
-      },
-    },
+    { name: 'awaitingLesson', drive: async (deps, from) => { await handleReflectionFlow(from, 'REFLECT', null, deps); } },
+    { name: 'awaitingWentWell', drive: async (deps, from) => {
+      await handleReflectionFlow(from, 'REFLECT', null, deps);
+      await handleReflectionFlow(from, 'Lesson text', null, deps);
+    } },
+    { name: 'awaitingImprovement', drive: async (deps, from) => {
+      await handleReflectionFlow(from, 'REFLECT', null, deps);
+      await handleReflectionFlow(from, 'Lesson text', null, deps);
+      await handleReflectionFlow(from, 'Went well text', null, deps);
+    } },
+    { name: 'awaitingTopic', drive: async (deps, from) => { await runHappyPathUpTo(deps, from, 'awaitingTopic'); } },
+    { name: 'reviewSummary', drive: async (deps, from) => { await runHappyPathUpTo(deps, from, 'reviewSummary'); } },
+    { name: 'awaitingCorrectionChoice', drive: async (deps, from) => {
+      await runHappyPathUpTo(deps, from, 'reviewSummary');
+      await handleReflectionFlow(from, 'NO', null, deps);
+    } },
   ];
 
   for (const { name, drive } of cancelSteps) {
@@ -196,7 +279,6 @@ async function run() {
     assert(deps.reflectionState.get('hash:+27000000003') === null, `state is cleared after CANCEL from ${name}`);
   }
 
-  // ── timeout ────────────────────────────────────────────────
   console.log('\n── timeout ──');
   {
     const deps = createDeps();
@@ -205,7 +287,7 @@ async function run() {
 
     deps.reflectionState.set(phoneHash, {
       step: 'awaitingLesson',
-      lesson: 'Fractions Grade 6', // proves the discarded state, not just its shell, is stale
+      lesson: 'Fractions Grade 6',
       lastActivity: Date.now() - 31 * 60 * 1000,
     });
 
@@ -219,8 +301,6 @@ async function run() {
 
   console.log('\n── timeout boundary ──');
   {
-    // Exactly at the threshold should NOT be treated as stale — the
-    // check is strictly greater-than, so equal elapsed time must pass through.
     const deps = createDeps();
     const from = '+27000000009';
     const phoneHash = 'hash:+27000000009';
@@ -240,9 +320,6 @@ async function run() {
 
   console.log('\n── fresh session after timeout ──');
   {
-    // After a stale session is dropped (handled === false), the caller's
-    // normal routing re-invokes with the same message so intent parsing
-    // runs again and a brand-new session starts cleanly.
     const deps = createDeps();
     const from = '+27000000010';
     const phoneHash = 'hash:+27000000010';
@@ -265,7 +342,6 @@ async function run() {
     assert(!('lesson' in (state || {})), 'no leftover fields survive from the stale session');
   }
 
-  // ── session isolation ──────────────────────────────────────
   console.log('\n── session isolation ──');
   {
     const deps = createDeps();
@@ -286,7 +362,6 @@ async function run() {
     assert(stateA.lesson !== stateB.lesson, "keeps two teachers' in-progress reflections independent");
   }
 
-  // ── term unavailable ───────────────────────────────────────
   console.log('\n── term unavailable ──');
   {
     const deps = createDeps({ getCurrentTerm: createMockFn(() => null) });
@@ -303,7 +378,6 @@ async function run() {
     assertMatch(lastMessage, /couldn't determine the current school term/i, 'tells the teacher the term could not be determined');
   }
 
-  // ── invalid confirmation reply ─────────────────────────────
   console.log('\n── invalid confirmation reply ──');
   {
     const deps = createDeps();
@@ -319,6 +393,26 @@ async function run() {
     assertEqual(state.lesson, 'Fractions Grade 6', 'lesson field is preserved');
     assertEqual(state.wentWell, 'Learners understood equivalent fractions.', 'wentWell field is preserved');
     assertEqual(state.improvement, 'More practical examples.', 'improvement field is preserved');
+    assertEqual(state.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'topicId field is preserved');
+  }
+
+  console.log('\n── save failure ──');
+  {
+    const deps = createDeps({
+      createReflection: createMockFn(() => {
+        throw new Error('db unavailable');
+      }),
+    });
+    const from = '+27000000011';
+
+    await runHappyPathUpTo(deps, from, 'reviewSummary');
+    await handleReflectionFlow(from, 'YES', null, deps);
+
+    assert(deps.reflectionState.get('hash:+27000000011') === null, 'state is cleared even though the save failed');
+
+    const lastCall = deps.safeSendMessage.calls[deps.safeSendMessage.calls.length - 1];
+    const lastMessage = lastCall[1];
+    assertMatch(lastMessage, /couldn't save that reflection/i, 'tells the teacher the save failed');
   }
 
   console.log('\n' + '─'.repeat(55));

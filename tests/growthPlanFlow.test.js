@@ -82,9 +82,9 @@ async function runHappyPathUpTo(deps, from, step) {
   if (step === 'entry') return;
 
   await handleGrowthPlanFlow(from, 'Improve questioning technique', null, deps); // goal
-  if (step === 'awaitingTargetArea') return;
+  if (step === 'awaitingTopic') return;
 
-  await handleGrowthPlanFlow(from, 'Classroom practice', null, deps); // targetArea -> reviewSummary
+  await handleGrowthPlanFlow(from, '1', null, deps); // topicId -> reviewSummary
 }
 
 async function run() {
@@ -107,7 +107,7 @@ async function run() {
     assertEqual(payload.term, 2, 'term is carried through from getCurrentTerm');
     assertEqual(payload.status, 'active', 'status defaults to active on creation');
     assertEqual(payload.goalText, 'Improve questioning technique', 'goalText is the collected goal field');
-    assertEqual(payload.targetArea, 'Classroom practice', 'targetArea is the collected focus-area field');
+    assertEqual(payload.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'topicId is the resolved topic selection');
 
     assert(deps.growthPlanState.get('hash:+27000000001') === null, 'state is cleared after save');
   }
@@ -128,7 +128,7 @@ async function run() {
     const [, payload] = deps.createGrowthPlan.calls[0];
 
     assertEqual(payload.goalText, 'Improve questioning technique (corrected)', 'goalText reflects the corrected value');
-    assertEqual(payload.targetArea, 'Classroom practice', 'targetArea field untouched by the correction');
+    assertEqual(payload.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'topicId field untouched by the correction');
   }
 
   // ── cancel ─────────────────────────────────────────────────
@@ -141,7 +141,7 @@ async function run() {
       },
     },
     {
-      name: 'awaitingTargetArea',
+      name: 'awaitingTopic',
       drive: async (deps, from) => {
         await handleGrowthPlanFlow(from, 'GROWTH PLAN', null, deps);
         await handleGrowthPlanFlow(from, 'Goal text', null, deps);
@@ -212,7 +212,7 @@ async function run() {
     assert(handled === true, 'treats a session exactly at the 30-minute boundary as still active');
     const state = deps.growthPlanState.get(phoneHash);
     assert(state !== null, 'state at the exact boundary is not dropped');
-    assertEqual(state && state.step, 'awaitingTargetArea', 'session at the boundary continues to advance normally');
+    assertEqual(state && state.step, 'awaitingTopic', 'session at the boundary continues to advance normally');
   }
 
   console.log('\n── fresh session after timeout ──');
@@ -227,7 +227,7 @@ async function run() {
     deps.growthPlanState.set(phoneHash, {
       step: 'reviewSummary',
       goalText: 'Old stale goal',
-      targetArea: 'Old stale area',
+      topicId: 'TOPIC_OLD_STALE',
       lastActivity: Date.now() - 45 * 60 * 1000,
     });
 
@@ -294,7 +294,28 @@ async function run() {
     const state = deps.growthPlanState.get('hash:+27000000008');
     assertEqual(state.step, 'reviewSummary', 'stays on reviewSummary after an invalid reply');
     assertEqual(state.goalText, 'Improve questioning technique', 'goalText field is preserved');
-    assertEqual(state.targetArea, 'Classroom practice', 'targetArea field is preserved');
+    assertEqual(state.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'topicId field is preserved');
+  }
+
+  // ── invalid topic selection reply ──────────────────────────
+  console.log('\n── invalid topic selection reply ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000012';
+    const phoneHash = 'hash:+27000000012';
+
+    await handleGrowthPlanFlow(from, 'GROWTH PLAN', null, deps);
+    await handleGrowthPlanFlow(from, 'Improve questioning technique', null, deps); // -> awaitingTopic
+    await handleGrowthPlanFlow(from, '99', null, deps); // out-of-range reply
+
+    const state = deps.growthPlanState.get(phoneHash);
+    assertEqual(state.step, 'awaitingTopic', 'stays on awaitingTopic after an out-of-range reply');
+    assert(deps.createGrowthPlan.callCount() === 0, 'does not save on an invalid topic reply');
+
+    await handleGrowthPlanFlow(from, '1', null, deps); // now valid
+    const advanced = deps.growthPlanState.get(phoneHash);
+    assertEqual(advanced.step, 'reviewSummary', 'advances to reviewSummary once a valid topic reply is sent');
+    assertEqual(advanced.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'valid reply resolves to the correct topicId');
   }
 
   // ── save failure ───────────────────────────────────────────
