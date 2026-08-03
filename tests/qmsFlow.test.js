@@ -55,6 +55,12 @@ function buildDeps(overrides = {}) {
     getCommonFocusAreas: () => [],
     listReflections: () => [],
     getCurrentTerm: () => 2,
+    getCoachingInsights: () => ({
+      status: 'insufficient_data',
+      summary: null,
+      recommendations: [],
+      generatedAt: '2026-08-03T00:00:00.000Z',
+    }),
     ...overrides,
   };
 
@@ -76,7 +82,7 @@ async function run() {
 
   {
     const { deps } = buildDeps();
-    for (const cmd of ['MY STATS', 'my stats', ' My Stats ', 'MY STATS ALL', 'MY GOALS', 'MY REFLECTIONS']) {
+    for (const cmd of ['MY STATS', 'my stats', ' My Stats ', 'MY STATS ALL', 'MY GOALS', 'MY REFLECTIONS', 'MY COACHING']) {
       const handled = await handleQmsFlow('27821110000', cmd, deps);
       assert(handled === true, `"${cmd}" is handled (case/whitespace insensitive)`);
     }
@@ -306,9 +312,123 @@ async function run() {
   }
 
   // ═══════════════════════════════════════════════════════════════════
-  // SECTION 5: isolation between commands (no cross-talk)
+  // SECTION 5: MY COACHING
   // ═══════════════════════════════════════════════════════════════════
-  console.log('\n── Section 5: no cross-command leakage ──────────────────');
+  console.log('\n── Section 5: MY COACHING ───────────────────────────────');
+
+  {
+    const { deps, sentMessages } = buildDeps({
+      getCoachingInsights: () => ({
+        status: 'insufficient_data',
+        summary: null,
+        recommendations: [],
+        generatedAt: '2026-08-03T00:00:00.000Z',
+      }),
+    });
+    const handled = await handleQmsFlow('27821110000', 'MY COACHING', deps);
+    assert(handled === true, 'MY COACHING is handled');
+    assertIncludes(sentMessages[0].text, 'Not enough tagged reflections', 'insufficient-data guidance shown');
+    assertIncludes(sentMessages[0].text, 'NEW GOAL', 'insufficient-data message points to NEW GOAL');
+  }
+
+  {
+    const { deps, sentMessages } = buildDeps({
+      getCoachingInsights: () => ({
+        status: 'ok',
+        summary: null,
+        recommendations: [],
+        generatedAt: '2026-08-03T00:00:00.000Z',
+      }),
+    });
+    const handled = await handleQmsFlow('27821110000', 'MY COACHING', deps);
+    assert(handled === true, 'MY COACHING with ok status + zero recommendations is handled');
+    assertIncludes(sentMessages[0].text, 'No specific recommendations', 'no-recommendations message shown');
+  }
+
+  {
+    const { deps, sentMessages } = buildDeps({
+      getCoachingInsights: () => ({
+        status: 'ok',
+        summary: null,
+        recommendations: [
+          {
+            topicId: 'assessment_design',
+            topicLabel: 'Assessment Design',
+            recommendation: 'Continue focused coaching support on Assessment Design.',
+            confidence: 0.91,
+            confidenceLabel: 'High',
+            evidence: { evidenceCount: 6 },
+            explanation: 'Supported by 6 evidence item(s). Observed in 4 of the last 5 tagged reflections. Latest supporting evidence: 3 days ago. Confidence: High.',
+          },
+          {
+            topicId: 'classroom_management',
+            topicLabel: 'Classroom Management',
+            recommendation: 'Continue focused coaching support on Classroom Management.',
+            confidence: 0.62,
+            confidenceLabel: 'Medium',
+            evidence: { evidenceCount: 3 },
+            explanation: 'Supported by 3 evidence item(s). Observed in 2 of the last 5 tagged reflections. Latest supporting evidence: 10 days ago. Confidence: Medium.',
+          },
+        ],
+        generatedAt: '2026-08-03T00:00:00.000Z',
+      }),
+    });
+    const handled = await handleQmsFlow('27821110000', 'MY COACHING', deps);
+    assert(handled === true, 'MY COACHING with recommendations is handled');
+    const msg = sentMessages[0].text;
+    assertIncludes(msg, '1. Assessment Design', 'first recommendation numbered and labelled');
+    assertIncludes(msg, '2. Classroom Management', 'second recommendation numbered and labelled');
+    assertIncludes(msg, 'High', 'confidence label shown for first recommendation');
+    assertIncludes(msg, 'Medium', 'confidence label shown for second recommendation');
+    assertIncludes(msg, 'Continue focused coaching support on Assessment Design.', 'recommendation text shown verbatim from the service');
+    assertIncludes(msg, 'Supported by 6 evidence item(s)', 'explanation text shown verbatim from the service');
+    assertIncludes(msg, 'NEW GOAL', 'closing hint points to NEW GOAL');
+  }
+
+  {
+    const { deps, sentMessages } = buildDeps({
+      getCoachingInsights: () => { throw new Error('boom'); },
+    });
+    const handled = await handleQmsFlow('27821110000', 'MY COACHING', deps);
+    assert(handled === true, 'a thrown error from getCoachingInsights is still handled');
+    assertIncludes(sentMessages[0].text, "Couldn't load your coaching recommendations", 'friendly error message shown on failure');
+  }
+
+  {
+    // MY STATS should nudge toward MY COACHING; MY COACHING itself must
+    // not call any of the MY STATS/MY GOALS/MY REFLECTIONS dependencies.
+    const { deps, sentMessages } = buildDeps({
+      getSummary: () => ({
+        reflectionCount: 3,
+        growthPlanCountsByStatus: { active: 1 },
+        latestActivity: '2026-08-01 10:00:00',
+      }),
+    });
+    const handled = await handleQmsFlow('27821110000', 'MY STATS', deps);
+    assert(handled === true, 'MY STATS still handled');
+    assertIncludes(sentMessages[0].text, 'MY COACHING', 'MY STATS output nudges toward MY COACHING');
+  }
+
+  {
+    let getSummaryCalled = false;
+    let getGrowthPlanSummaryCalled = false;
+    let listReflectionsCalled = false;
+    const { deps } = buildDeps({
+      getSummary: () => { getSummaryCalled = true; return { reflectionCount: 0, growthPlanCountsByStatus: {}, latestActivity: null }; },
+      getGrowthPlanSummary: () => { getGrowthPlanSummaryCalled = true; return { countsByStatus: {}, recentPlans: [] }; },
+      listReflections: () => { listReflectionsCalled = true; return []; },
+      getCoachingInsights: () => ({ status: 'insufficient_data', summary: null, recommendations: [], generatedAt: '2026-08-03T00:00:00.000Z' }),
+    });
+    await handleQmsFlow('27821110000', 'MY COACHING', deps);
+    assert(!getSummaryCalled, 'MY COACHING does not call getSummary');
+    assert(!getGrowthPlanSummaryCalled, 'MY COACHING does not call getGrowthPlanSummary');
+    assert(!listReflectionsCalled, 'MY COACHING does not call listReflections');
+  }
+
+  // ═══════════════════════════════════════════════════════════════════
+  // SECTION 6: isolation between commands (no cross-talk)
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 6: no cross-command leakage ──────────────────');
 
   {
     let getSummaryCalled = false;

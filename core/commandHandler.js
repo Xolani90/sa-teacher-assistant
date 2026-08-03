@@ -269,13 +269,14 @@ async function handleCommand(from, text, deps) {
 
   if (await handleWorkspaceFlow(from, text, buildWorkspaceDeps())) return true;
 
-  // ── QMS commands (MY STATS, MY STATS ALL, MY GOALS, MY REFLECTIONS) ──
+  // ── QMS commands (MY STATS, MY STATS ALL, MY GOALS, MY REFLECTIONS, MY COACHING) ──
   const { handleQmsFlow } = require('../flows/qmsFlow');
 
   function buildQmsDeps() {
     const { getSummary, getGrowthPlanSummary, getCommonFocusAreas } = require('../services/qmsAnalyticsService');
     const { listReflections } = require('../services/reflectionService');
     const { getCurrentTerm } = require('../services/schoolCalendarRepository');
+    const { getCoachingInsights } = require('../services/coachingEngineService');
 
     return Object.freeze({
       hashPhone: deps.hashPhone,
@@ -286,6 +287,7 @@ async function handleCommand(from, text, deps) {
       getCommonFocusAreas,
       listReflections,
       getCurrentTerm,
+      getCoachingInsights,
     });
   }
 

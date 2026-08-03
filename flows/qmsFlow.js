@@ -11,12 +11,21 @@
  *   MY STATS ALL   — summary + common focus areas across growth plans
  *   MY GOALS       — growth plan status counts + recent plans
  *   MY REFLECTIONS — recent reflection entries
+ *   MY COACHING    — prescriptive recommendations (ADR-013 §6, PR33's
+ *                    coachingEngineService.getCoachingInsights()).
+ *                    Deliberately a standalone command, not folded into
+ *                    MY STATS ALL — MY STATS/MY GOALS answer "what
+ *                    happened / what am I committed to", MY COACHING
+ *                    answers "what should I do next", which is a
+ *                    distinct job (prescriptive vs descriptive) and
+ *                    reads better as its own short WhatsApp message
+ *                    than as a paragraph buried in a longer report.
  *
  * This flow does no aggregation of its own — every number shown here
- * comes straight from qmsAnalyticsService.js or reflectionService.js.
- * Per ADR-007 §3.3's convention (already followed by workspaceFlow.js's
- * formatSubjectMastery/formatIntervention), formatting helpers below
- * read their inputs as-is and compute nothing.
+ * comes straight from qmsAnalyticsService.js, reflectionService.js, or
+ * coachingEngineService.js. Per ADR-007 §3.3's convention (already
+ * followed by workspaceFlow.js's formatSubjectMastery/formatIntervention),
+ * formatting helpers below read their inputs as-is and compute nothing.
  *
  * Expected deps shape:
  * {
@@ -28,6 +37,7 @@
  *   getCommonFocusAreas,    // services/qmsAnalyticsService.js
  *   listReflections,        // services/reflectionService.js
  *   getCurrentTerm,         // services/schoolCalendarRepository.js
+ *   getCoachingInsights,    // services/coachingEngineService.js
  * }
  */
 
@@ -50,6 +60,7 @@ async function handleQmsFlow(from, text, deps) {
     getCommonFocusAreas,
     listReflections,
     getCurrentTerm,
+    getCoachingInsights,
   } = deps;
 
   const upper = text.trim().toUpperCase();
@@ -57,7 +68,8 @@ async function handleQmsFlow(from, text, deps) {
   const isQmsCmd =
     upper === 'MY STATS' || upper === 'MY STATS ALL' ||
     upper === 'MY GOALS' ||
-    upper === 'MY REFLECTIONS';
+    upper === 'MY REFLECTIONS' ||
+    upper === 'MY COACHING';
 
   if (!isQmsCmd) return false;
 
@@ -109,6 +121,8 @@ async function handleQmsFlow(from, text, deps) {
       } else {
         msg += `\n\n_Reply *MY STATS ALL* for common focus areas too._`;
       }
+
+      msg += `\n💡 _Reply *MY COACHING* for recommended next steps._`;
 
       await safeSendMessage(from, msg);
     } catch (err) {
@@ -176,6 +190,42 @@ async function handleQmsFlow(from, text, deps) {
     } catch (err) {
       console.error('[QMS] MY REFLECTIONS error:', err.message);
       await safeSendMessage(from, `⚠️ Couldn't load your reflections. Please try again.`);
+    }
+    return true;
+  }
+
+  // ── MY COACHING ──
+  if (upper === 'MY COACHING') {
+    try {
+      const insights = getCoachingInsights(hash);
+
+      if (insights.status === 'insufficient_data') {
+        await safeSendMessage(from,
+          `📘 *My Coaching*\n\nNot enough tagged reflections or growth plans yet to generate recommendations.\n\nReply *REFLECT* to log a reflection, or *NEW GOAL* to start a growth plan — recommendations appear once there's enough evidence.`
+        );
+        return true;
+      }
+
+      if (insights.recommendations.length === 0) {
+        await safeSendMessage(from,
+          `📘 *My Coaching*\n\n✅ No specific recommendations right now — nothing stands out as a recurring focus area.\n\nReply *MY STATS* to see your current numbers.`
+        );
+        return true;
+      }
+
+      let msg = `📘 *My Coaching*\n\n`;
+      insights.recommendations.forEach((rec, i) => {
+        msg += `*${i + 1}. ${rec.topicLabel}*\n`;
+        msg += `Confidence: ${rec.confidenceLabel}\n`;
+        msg += `${rec.recommendation}\n`;
+        msg += `_${rec.explanation}_\n\n`;
+      });
+      msg += `_Reply *NEW GOAL* to turn a recommendation into a growth plan._`;
+
+      await safeSendMessage(from, msg);
+    } catch (err) {
+      console.error('[QMS] MY COACHING error:', err.message);
+      await safeSendMessage(from, `⚠️ Couldn't load your coaching recommendations. Please try again.`);
     }
     return true;
   }
