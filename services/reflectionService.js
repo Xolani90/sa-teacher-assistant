@@ -231,12 +231,30 @@ function updateReflection(phoneHash, id, { content, topicId, aiAssisted, evidenc
     nextEvidenceLinkIds = evidenceLinkIds;
   }
 
+  const topicChanged = topicId !== undefined && nextTopicId !== existing.topicId;
+
   const db = getDb();
   db.prepare(
     `UPDATE qms_reflections
      SET content = ?, topic_id = ?, ai_assisted = ?, evidence_link_ids = ?, updated_at = datetime('now')
      WHERE id = ? AND phone_hash = ? AND deleted_at IS NULL`
   ).run(nextContent.trim(), nextTopicId, nextAiAssisted ? 1 : 0, JSON.stringify(nextEvidenceLinkIds), id, phoneHash);
+
+  // PR37, ADR-016 §2 (revised, evidence-event philosophy): content/
+  // aiAssisted/evidenceLinkIds don't feed buildTopicContexts() (evidence
+  // is grouped and scored by topicId + createdAt only — see
+  // coachingEngineService.gatherEvidenceByTopic), so editing those alone
+  // is not a trigger. A topicId reassignment moves this reflection's
+  // evidence from one topic's evidenceScore/recencyScore/consistencyScore
+  // to another's, so it is. Required lazily to avoid a load-order cycle
+  // (coachingSnapshotService -> coachingEngineService -> this module).
+  if (topicChanged) {
+    try {
+      require('./coachingSnapshotService').recordSnapshotsForTeacher(phoneHash);
+    } catch (err) {
+      console.error('[coachingSnapshotService] snapshot write failed after updateReflection:', err);
+    }
+  }
 
   return getReflection(phoneHash, id);
 }
@@ -259,6 +277,21 @@ function deleteReflection(phoneHash, id) {
        WHERE id = ? AND phone_hash = ? AND deleted_at IS NULL`
     )
     .run(id, phoneHash);
+
+  // PR37, ADR-016 §2 (revised, evidence-event philosophy): a soft-deleted
+  // reflection drops out of getTaggedReflections() and therefore out of
+  // evidenceScore/recencyScore/consistencyScore for its topic — a genuine
+  // evidence change, so it triggers a snapshot the same as a create.
+  // Only fires if this call actually deleted something. Required lazily
+  // to avoid a load-order cycle (coachingSnapshotService ->
+  // coachingEngineService -> this module).
+  if (result.changes > 0) {
+    try {
+      require('./coachingSnapshotService').recordSnapshotsForTeacher(phoneHash);
+    } catch (err) {
+      console.error('[coachingSnapshotService] snapshot write failed after deleteReflection:', err);
+    }
+  }
 
   return result.changes > 0;
 }

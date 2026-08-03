@@ -105,6 +105,18 @@ function createGrowthPlan(phoneHash, { goalText, term = null, topicId, status = 
     )
     .run(phoneHash, term, goalText.trim(), topicId, status);
 
+  // PR37, ADR-016 §2 (revised): a new growth plan is new coaching evidence
+  // (getTaggedGrowthPlans() is not status-filtered, so it enters
+  // evidenceScore/recencyScore for its topic immediately) — the
+  // evidence-event philosophy triggers on every evidence-changing write,
+  // not just status transitions. Required lazily to avoid a load-order
+  // cycle (coachingSnapshotService -> coachingEngineService -> this module).
+  try {
+    require('./coachingSnapshotService').recordSnapshotsForTeacher(phoneHash);
+  } catch (err) {
+    console.error('[coachingSnapshotService] snapshot write failed after createGrowthPlan:', err);
+  }
+
   return getGrowthPlan(phoneHash, Number(result.lastInsertRowid));
 }
 
@@ -201,6 +213,7 @@ function updateGrowthPlan(phoneHash, id, { goalText, topicId, status } = {}) {
   }
 
   const statusChanged = status !== undefined && nextStatus !== existing.status;
+  const topicChanged = topicId !== undefined && nextTopicId !== existing.topicId;
 
   const db = getDb();
   db.prepare(
@@ -209,16 +222,20 @@ function updateGrowthPlan(phoneHash, id, { goalText, topicId, status } = {}) {
      WHERE id = ? AND phone_hash = ? AND deleted_at IS NULL`
   ).run(nextGoalText.trim(), nextTopicId, nextStatus, id, phoneHash);
 
-  // PR37, ADR-016 §2/§9 invariant 1: a growth plan *status change* is an
-  // evidence change and triggers a coaching snapshot — editing goalText
-  // or topicId alone (statusChanged === false) does not, per ADR-016 §2's
-  // explicit trigger list. Required lazily to avoid a load-order cycle
+  // PR37, ADR-016 §2 (revised, evidence-event philosophy): any write that
+  // changes the evidence buildTopicContexts() sees triggers a snapshot.
+  // A status change is coaching-relevant on its own (feeds
+  // hasActiveGrowthPlanByTopic / growth_plan_missing rule). A topicId
+  // change moves this plan's evidence from one topic's evidenceScore/
+  // recencyScore to another's. A plain goalText edit (both false)
+  // changes nothing buildTopicContexts() reads, so it stays a non-trigger.
+  // Required lazily to avoid a load-order cycle
   // (coachingSnapshotService -> coachingEngineService -> this module).
-  if (statusChanged) {
+  if (statusChanged || topicChanged) {
     try {
       require('./coachingSnapshotService').recordSnapshotsForTeacher(phoneHash);
     } catch (err) {
-      console.error('[coachingSnapshotService] snapshot write failed after updateGrowthPlan status change:', err);
+      console.error('[coachingSnapshotService] snapshot write failed after updateGrowthPlan:', err);
     }
   }
 

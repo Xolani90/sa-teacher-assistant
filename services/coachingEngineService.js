@@ -30,7 +30,7 @@
  * referencing it exist, per §3.4).
  */
 
-const { isValidTopicId, getTopicById } = require('../utils/qmsTopics');
+const { isValidTopicId, getTopicById, listTopicsOrdered } = require('../utils/qmsTopics');
 const reflectionService = require('./reflectionService');
 const growthPlanService = require('./growthPlanService');
 const { parseSqliteUtc } = require('../utils/dateUtils');
@@ -478,14 +478,33 @@ function getRecentTaggedReflectionsWindow(phoneHash) {
 }
 
 /**
- * Builds the full per-topic rule context for every topic that has at
- * least one piece of currently-usable evidence (§6.1/§6.2). Topics with
- * no evidence are omitted entirely — there is nothing for a rule to
- * evaluate and no evidence to cite in an explanation.
+ * Builds the full per-topic rule context for every topic in the active
+ * taxonomy (§4.1) — including topics with no currently-usable evidence
+ * at all.
+ *
+ * Revised by ADR-016 (coaching trend architecture): the original PR33
+ * contract omitted zero-evidence topics entirely, on the reasoning that
+ * there was nothing for a rule to evaluate. That was fine for a
+ * single-snapshot engine, but once history is persisted (PR37) it breaks
+ * silently: a topic whose only evidence is later deleted (or reassigned
+ * away) simply vanishes from this map, so nothing downstream ever
+ * records that its confidence dropped — trend history freezes at the
+ * old value with no signal that evidence disappeared. Returning a
+ * `hasEvidence: false, confidence: 0` context for every untouched/
+ * emptied topic instead means the snapshot writer, trend engine, and
+ * rules all see one consistent, complete state per topic — no component
+ * has to separately track "did this topic just disappear".
+ *
+ * Rules must not blindly evaluate zero-evidence contexts: only
+ * `recurring_topic_pattern` and `low_confidence_recommendation` need an
+ * explicit `ctx.hasEvidence`/`ctx.evidenceCount > 0` guard (see
+ * RECOMMENDATION_RULES below) — `growth_plan_missing` and
+ * `stale_evidence` already gate on evidence being present as a side
+ * effect of their own `applies()` checks.
  *
  * @param {string} phoneHash
  * @returns {Map<string, object>} topicId → {
- *   topicId, topic, evidence, evidenceCount, ageDaysNewest,
+ *   topicId, topic, evidence, evidenceCount, hasEvidence, ageDaysNewest,
  *   matchingTaggedReflections, relevantTaggedReflections,
  *   evidenceScore, recencyScore, consistencyScore, confidence, confidenceLabel
  * }
@@ -517,9 +536,10 @@ function buildTopicContexts(phoneHash) {
 
   const contexts = new Map();
 
-  for (const [topicId, evidence] of evidenceByTopic.entries()) {
-    const topic = getTopicById(topicId);
-    if (!topic) continue; // §6.1: stale/invalid topicId, skip like it doesn't exist
+  for (const topic of listTopicsOrdered()) {
+    const topicId = topic.id;
+    const evidence = evidenceByTopic.get(topicId) || [];
+    const hasEvidence = evidence.length > 0;
 
     const timestamps = recordsByTopic.get(topicId) || [];
     const ageDaysNewest = timestamps.length
@@ -530,9 +550,13 @@ function buildTopicContexts(phoneHash) {
       .filter((r) => r.topicId === topicId).length;
 
     const evidenceScore = calculateEvidenceScore(evidence.length);
-    const recencyScore = calculateRecencyScore(
-      Number.isFinite(ageDaysNewest) ? ageDaysNewest : Infinity
-    );
+    // A topic with no evidence has no "newest evidence" to be fresh or
+    // stale — recencyScore is 0, not calculateRecencyScore(Infinity)
+    // (which would land in the ">180 days" bucket at 0.25, wrongly
+    // implying stale-but-present evidence for a topic that has none).
+    const recencyScore = hasEvidence
+      ? calculateRecencyScore(ageDaysNewest)
+      : 0;
     const consistencyScore = calculateConsistencyScore(
       matchingTaggedReflections,
       relevantTaggedReflections
@@ -544,6 +568,7 @@ function buildTopicContexts(phoneHash) {
       topic,
       evidence,
       evidenceCount: evidence.length,
+      hasEvidence,
       ageDaysNewest,
       matchingTaggedReflections,
       relevantTaggedReflections,
@@ -622,7 +647,8 @@ const RECOMMENDATION_RULES = [
   },
   {
     id: 'low_confidence_recommendation',
-    applies: (ctx) => !growthPlanMissingApplies(ctx)
+    applies: (ctx) => ctx.hasEvidence
+      && !growthPlanMissingApplies(ctx)
       && !staleEvidenceApplies(ctx)
       && lowConfidenceApplies(ctx),
     evaluate: (ctx) => ({

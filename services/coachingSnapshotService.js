@@ -42,6 +42,16 @@ const { buildTopicContexts } = require('./coachingEngineService');
 const DEFAULT_TREND_NOISE_THRESHOLD = 0.05;
 
 /**
+ * Float-imprecision tolerance for comparisons against
+ * DEFAULT_TREND_NOISE_THRESHOLD. Confidence is a sum of weighted floats
+ * (§6.3), so a delta that is conceptually exactly the threshold can land
+ * a few ULPs on either side of it (e.g. 0.50 + 0.05 - 0.50 ===
+ * 0.050000000000000044 in JS) — without this, "exactly at the threshold"
+ * is not reliably classified as "not past it" (this ADR's own §4 wording).
+ */
+const THRESHOLD_EPSILON = 1e-9;
+
+/**
  * Returns the most recently stored snapshot for a (phoneHash, topicId)
  * pair, or null if none exists yet.
  *
@@ -105,9 +115,21 @@ function getTodaysSnapshot(phoneHash, topicId) {
  */
 function writeSnapshotForTopic(phoneHash, ctx, { ruleId = null } = {}) {
   const db = getDb();
-  const { topicId, confidence, confidenceLabel, evidenceScore, consistencyScore, recencyScore } = ctx;
+  const { topicId, confidence, confidenceLabel, evidenceScore, consistencyScore, recencyScore, hasEvidence } = ctx;
 
   const latest = getLatestSnapshot(phoneHash, topicId);
+
+  // buildTopicContexts() (ADR-016-revised) now returns a context for
+  // every taxonomy topic, including ones the teacher has never touched.
+  // Recording confidence=0 for a topic with no evidence and no prior
+  // snapshot would be noise, not history — so skip entirely. Once a
+  // topic HAS a stored snapshot (it had evidence at some point), its
+  // later drop to zero evidence is genuine history and must still be
+  // recorded, which is why this only skips when both conditions hold.
+  if (!hasEvidence && !latest) {
+    return 'skipped';
+  }
+
   const delta = latest ? Math.abs(confidence - latest.confidence) : Infinity;
 
   // No prior snapshot at all is always worth recording (first data point).
@@ -115,7 +137,7 @@ function writeSnapshotForTopic(phoneHash, ctx, { ruleId = null } = {}) {
   // threshold since the last stored value (§2/§4) — this applies
   // regardless of whether today's row already exists, since the check is
   // "has anything changed enough to matter", not "has today changed".
-  if (latest && delta <= DEFAULT_TREND_NOISE_THRESHOLD) {
+  if (latest && delta <= DEFAULT_TREND_NOISE_THRESHOLD + THRESHOLD_EPSILON) {
     return 'skipped';
   }
 
@@ -174,6 +196,7 @@ function recordSnapshotsForTeacher(phoneHash, { ruleId = null } = {}) {
 
 module.exports = {
   DEFAULT_TREND_NOISE_THRESHOLD,
+  THRESHOLD_EPSILON,
   getLatestSnapshot,
   getTodaysSnapshot,
   writeSnapshotForTopic,

@@ -3,6 +3,14 @@
 ## Status
 Accepted
 
+**Amended by ADR-016** (coaching trend architecture, post-PR37): §6.1/§6.2's
+`buildTopicContexts()` originally omitted any topic with zero
+currently-usable evidence entirely. ADR-016 §6 revises this — every
+taxonomy topic now gets a context (`hasEvidence: false, confidence: 0`
+for ones with none) so persisted snapshot history can represent evidence
+disappearing (deletion/reassignment), not just accumulating. See ADR-016
+§6 for the full rationale and the corresponding rule guards.
+
 **Depends on:** ADR-010 (TSE evidence infrastructure), ADR-011 (QMS domain
 model), ADR-012 (QMS action centre).
 

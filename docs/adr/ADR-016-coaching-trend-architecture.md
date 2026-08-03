@@ -72,12 +72,38 @@ perspective, even though their evidence changed continuously. That
 inverts the feature's purpose — trend should measure how the evidence
 changed, not how often the teacher looked.
 
-**Snapshot triggers (evidence-driven):**
+**Trigger philosophy (revised after PR37 shipped): evidence-event, not
+milestone.** A coaching snapshot represents the coaching state immediately
+following *any* operation that changes the evidence
+`coachingEngineService.buildTopicContexts()` reads — not a curated subset
+of "significant" lifecycle events. The alternative (snapshotting only
+selected milestones, e.g. status transitions but not creation/deletion/
+reassignment) was considered and rejected: it makes the historical record
+reflect which operations happened to be wired as triggers rather than how
+the teacher's evidence actually evolved, which is precisely the failure
+mode §2 already rejected command-triggered snapshots for for the same
+underlying reason. The dedup/threshold mechanics below exist so that this
+philosophy doesn't get expensive: most evidence-changing events result in
+no additional stored row unless the coaching state changed meaningfully.
 
-- a reflection is saved (`reflectionService.createReflection`)
-- a growth plan's `status` changes (`growthPlanService`)
+**Snapshot triggers — every write path that changes what
+`buildTopicContexts()` sees:**
 
-`MY COACHING` (and any future dashboard equivalent) becomes purely a
+- `reflectionService.createReflection` — new evidence.
+- `reflectionService.updateReflection`, **only when `topicId` changes** —
+  content/aiAssisted/evidenceLinkIds are not read by `buildTopicContexts()`
+  (evidence is grouped and scored by `topicId` + `createdAt` only), so
+  editing those alone is not a trigger; reassigning `topicId` moves this
+  reflection's evidence from one topic to another and is.
+- `reflectionService.deleteReflection` — evidence removed entirely.
+- `growthPlanService.createGrowthPlan` — new evidence (growth plans are
+  evidence regardless of status — `getTaggedGrowthPlans()` is not
+  status-filtered).
+- `growthPlanService.updateGrowthPlan`, when `status` changes **or**
+  `topicId` changes — a plain `goalText` edit (both false) changes nothing
+  `buildTopicContexts()` reads, so it stays a non-trigger.
+
+`MY COACHING` (and any future dashboard equivalent) remains purely a
 **consumer** of snapshot history, never a trigger for creating it.
 
 **Deduplication (to keep storage small despite event-driven writes):**
@@ -168,6 +194,25 @@ survives deduplication or where it sorts — trend is purely informational
 context attached after ranking is already final.
 
 ## 6. Schema (PR37)
+
+**Amendment (post-PR37 hardening):** `coachingEngineService.buildTopicContexts()`
+(ADR-013 §6.1/§6.2) originally omitted any topic with zero currently-usable
+evidence. Under a persisted-history model that silently breaks: a topic
+whose only evidence is later deleted, or reassigned to another topic,
+simply disappears from the context map, so nothing ever records that its
+confidence dropped — trend history for that topic freezes at its last
+value with no signal that the evidence is gone. `buildTopicContexts()` now
+returns a context for **every** taxonomy topic, with `hasEvidence: false`
+and `confidence: 0` for topics with none. The snapshot writer
+(`coachingSnapshotService.writeSnapshotForTopic`) still only persists a
+row for a zero-evidence topic if that topic already has a prior stored
+snapshot (i.e. it had evidence at some point) — a topic the teacher has
+never touched at all produces no row, so this does not spam a fresh
+zero-confidence snapshot for every topic in the taxonomy on a teacher's
+very first reflection. Rules that would otherwise misfire against a
+zero-evidence context (`low_confidence_recommendation`, whose 0 <
+`LOW_CONFIDENCE_THRESHOLD` would otherwise be true for every untouched
+topic) are gated on `ctx.hasEvidence`/`ctx.evidenceCount > 0`.
 
 New table, e.g. `coaching_snapshots`:
 
