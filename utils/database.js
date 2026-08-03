@@ -961,6 +961,49 @@ function runMigrations() {
       ON qms_growth_plans(topic_id);
   `);
 
+  // Migration 040: coaching_snapshots (PR37, ADR-016 §6). Persisted
+  // historical trend data sitting on top of the PR33 coaching engine.
+  // Written exclusively by services/coachingSnapshotService.js as a side
+  // effect of evidence changes (reflection saved, growth plan status
+  // change) — never as a side effect of a read (MY COACHING, a future
+  // dashboard route, or any other consumer). See ADR-016 §9 invariant 5:
+  // history is append-only; a same-day write updates that day's row
+  // in place (§2 dedup) but never deletes or rewrites a prior day's row.
+  //
+  // Stores the individual component scores (evidence_score,
+  // consistency_score, recency_score) alongside the aggregate confidence
+  // — not just the aggregate — per ADR-016 §6, so historical graphs and
+  // debugging can explain *why* confidence moved rather than only *that*
+  // it moved. rule_id is nullable: PR37 does not yet attribute a
+  // snapshot to a specific triggering rule (no rules consume this table
+  // until PR39); the column is added now so PR39 doesn't require its own
+  // migration.
+  //
+  // topic_id is a plain TEXT column, not a taxonomy FK — same accepted
+  // trade-off as qms_reflections.topic_id / qms_growth_plans.topic_id
+  // (ADR-013 §4.4) — validity against the active taxonomy is enforced
+  // by the writer service, not the database.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS coaching_snapshots (
+      id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash         TEXT    NOT NULL,
+      topic_id           TEXT    NOT NULL,
+      confidence         REAL    NOT NULL,
+      confidence_label   TEXT    NOT NULL,
+      evidence_score     REAL    NOT NULL,
+      consistency_score  REAL    NOT NULL,
+      recency_score      REAL    NOT NULL,
+      rule_id            TEXT,
+      captured_at        TEXT    NOT NULL,
+      created_at         TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_coaching_snapshots_phone_topic
+      ON coaching_snapshots(phone_hash, topic_id);
+    CREATE INDEX IF NOT EXISTS idx_coaching_snapshots_captured_at
+      ON coaching_snapshots(phone_hash, topic_id, captured_at);
+  `);
+
   console.log('[DB] Migrations complete');
 }
 

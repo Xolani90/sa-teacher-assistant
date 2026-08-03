@@ -200,12 +200,27 @@ function updateGrowthPlan(phoneHash, id, { goalText, topicId, status } = {}) {
     nextStatus = status;
   }
 
+  const statusChanged = status !== undefined && nextStatus !== existing.status;
+
   const db = getDb();
   db.prepare(
     `UPDATE qms_growth_plans
      SET goal_text = ?, topic_id = ?, status = ?, updated_at = datetime('now')
      WHERE id = ? AND phone_hash = ? AND deleted_at IS NULL`
   ).run(nextGoalText.trim(), nextTopicId, nextStatus, id, phoneHash);
+
+  // PR37, ADR-016 §2/§9 invariant 1: a growth plan *status change* is an
+  // evidence change and triggers a coaching snapshot — editing goalText
+  // or topicId alone (statusChanged === false) does not, per ADR-016 §2's
+  // explicit trigger list. Required lazily to avoid a load-order cycle
+  // (coachingSnapshotService -> coachingEngineService -> this module).
+  if (statusChanged) {
+    try {
+      require('./coachingSnapshotService').recordSnapshotsForTeacher(phoneHash);
+    } catch (err) {
+      console.error('[coachingSnapshotService] snapshot write failed after updateGrowthPlan status change:', err);
+    }
+  }
 
   return getGrowthPlan(phoneHash, id);
 }

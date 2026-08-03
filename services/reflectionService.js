@@ -117,7 +117,22 @@ function createReflection(phoneHash, { content, topicId, term = null, aiAssisted
     )
     .run(phoneHash, term, content.trim(), topicId, aiAssisted ? 1 : 0, JSON.stringify(evidenceLinkIds));
 
-  return getReflection(phoneHash, Number(result.lastInsertRowid));
+  const created = getReflection(phoneHash, Number(result.lastInsertRowid));
+
+  // PR37, ADR-016 §2/§9 invariant 1: a reflection save is an evidence
+  // change, so it triggers a coaching snapshot. Required lazily (not at
+  // module top) to avoid a load-order cycle — coachingSnapshotService
+  // requires coachingEngineService, which itself requires this module.
+  // This call must never throw the write itself off course: a snapshot
+  // failure is logged, not propagated, since the reflection is already
+  // durably committed by this point.
+  try {
+    require('./coachingSnapshotService').recordSnapshotsForTeacher(phoneHash);
+  } catch (err) {
+    console.error('[coachingSnapshotService] snapshot write failed after createReflection:', err);
+  }
+
+  return created;
 }
 
 /**
