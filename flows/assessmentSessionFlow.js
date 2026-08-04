@@ -174,7 +174,7 @@ async function generateAndSendPrintablePaper(from, blueprintId, deps) {
       return;
     }
     const pdfUrl = buildPdfUrl(fileId);
-    await sendDocument(from, pdfUrl, filename, `🖨️ *Printable question paper ready!*\\n\\nHand this to learners, then capture their marks with *NEW TEST*.`);
+    await sendDocument(from, pdfUrl, filename, `🖨️ *Printable question paper ready!*\n\nHand this to learners, then capture their marks with *NEW TEST*.`);
   } catch (pdfErr) {
     console.error('[ASSESSMENT_SESSION_FLOW] Blueprint paper PDF generation failed:', pdfErr.message);
     await safeSendMessage(from, `⚠️ Couldn't generate the printable paper right now. Please try again.`);

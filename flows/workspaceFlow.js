@@ -430,7 +430,7 @@ async function handleWorkspaceFlow(from, text, deps) {
 
     if (classes.length === 0) {
       await safeSendMessage(from,
-        `📚 *No classes yet*\\n\\nCreate one first:\\n*NEW CLASS [name] | [learner count]*\\n\\nExample:\\n_NEW CLASS Grade 8B Mathematics | 28_`
+        `📚 *No classes yet*\n\nCreate one first:\n*NEW CLASS [name] | [learner count]*\n\nExample:\n_NEW CLASS Grade 8B Mathematics | 28_`
       );
       return true;
     }
@@ -446,7 +446,7 @@ async function handleWorkspaceFlow(from, text, deps) {
       chosenClass = resolveClassSelector(rawSelector, classes);
       if (!chosenClass) {
         await safeSendMessage(from,
-          `⚠️ I couldn't match "${rawSelector}" to one of your classes.\\n\\n` +
+          `⚠️ I couldn't match "${rawSelector}" to one of your classes.\n\n` +
           formatClassSelectionForIntervention(classes, wantsPdf)
         );
         return true;
@@ -597,11 +597,11 @@ function formatIntervention(plan) {
  */
 function formatClassSelectionForIntervention(classes, wantsPdf = false) {
   const cmd = wantsPdf ? 'CLASS INTERVENTION PDF' : 'CLASS INTERVENTION';
-  let msg = `📚 *Which class?*\\n\\n`;
+  let msg = `📚 *Which class?*\n\n`;
   classes.forEach((c, i) => {
-    msg += `${i + 1}. ${c.name}\\n`;
+    msg += `${i + 1}. ${c.name}\n`;
   });
-  msg += `\\n_Reply *${cmd} [number]* or *${cmd} [class name]*._`;
+  msg += `\n_Reply *${cmd} [number]* or *${cmd} [class name]*._`;
   return msg;
 }
 
@@ -628,7 +628,7 @@ async function generateAndSendClassInterventionPdf(from, hash, chosenClass, deps
     }
     const pdfUrl = buildPdfUrl(fileId);
     await sendDocument(from, pdfUrl, filename,
-      `📎 *Class Intervention Report ready!*\\n\\nPriority breakdown, per-learner detail, and common focus topics for *${chosenClass.name}* are in the PDF above.`);
+      `📎 *Class Intervention Report ready!*\n\nPriority breakdown, per-learner detail, and common focus topics for *${chosenClass.name}* are in the PDF above.`);
   } catch (pdfErr) {
     console.error('[Workspace] Class intervention PDF generation failed:', pdfErr.message);
     await safeSendMessage(from, `⚠️ Couldn't generate the class intervention report right now. Please try again.`);
@@ -658,7 +658,7 @@ async function generateAndSendLearnerInterventionPdf(from, learner, deps) {
     }
     const pdfUrl = buildPdfUrl(fileId);
     await sendDocument(from, pdfUrl, filename,
-      `📎 *Learner Progress Report ready!*\\n\\nMastery levels and intervention notes for *${learner.canonicalName}* are in the PDF above.`);
+      `📎 *Learner Progress Report ready!*\n\nMastery levels and intervention notes for *${learner.canonicalName}* are in the PDF above.`);
   } catch (pdfErr) {
     console.error('[Workspace] Learner progress PDF generation failed:', pdfErr.message);
     await safeSendMessage(from, `⚠️ Couldn't generate ${learner.canonicalName}'s progress report right now. Please try again.`);
@@ -701,45 +701,45 @@ function formatClassInterventionPlan(cls, plan) {
   const { summary, priorityCounts, commonFocusTopics, priorityLearners } = plan;
 
   if (summary.totalLearners === 0) {
-    return `🏫 *Class Intervention — ${cls.name}*\\n\\nThis class has no learners recorded yet.\\n\\n_Add learners before running a class intervention report._`;
+    return `🏫 *Class Intervention — ${cls.name}*\n\nThis class has no learners recorded yet.\n\n_Add learners before running a class intervention report._`;
   }
 
-  let msg = `🏫 *Class Intervention — ${cls.name}*\\n\\n`;
-  msg += `👥 ${summary.totalLearners} learner(s) | ${summary.evaluatedLearners} evaluated | ${summary.insufficientData} awaiting data\\n`;
+  let msg = `🏫 *Class Intervention — ${cls.name}*\n\n`;
+  msg += `👥 ${summary.totalLearners} learner(s) | ${summary.evaluatedLearners} evaluated | ${summary.insufficientData} awaiting data\n`;
   if (summary.erroredLearners > 0) {
-    msg += `⚠️ ${summary.erroredLearners} learner(s) couldn't be evaluated\\n`;
+    msg += `⚠️ ${summary.erroredLearners} learner(s) couldn't be evaluated\n`;
   }
-  msg += `\\n`;
+  msg += `\n`;
 
-  msg += `*Priority breakdown*\\n`;
-  msg += `${PRIORITY_EMOJI.high} High: ${priorityCounts.high}\\n`;
-  msg += `${PRIORITY_EMOJI.medium} Medium: ${priorityCounts.medium}\\n`;
-  msg += `${PRIORITY_EMOJI.low} Low: ${priorityCounts.low}\\n`;
+  msg += `*Priority breakdown*\n`;
+  msg += `${PRIORITY_EMOJI.high} High: ${priorityCounts.high}\n`;
+  msg += `${PRIORITY_EMOJI.medium} Medium: ${priorityCounts.medium}\n`;
+  msg += `${PRIORITY_EMOJI.low} Low: ${priorityCounts.low}\n`;
 
   const BUCKET_DISPLAY_CAP = 8;
   for (const level of ['high', 'medium', 'low']) {
     const learners = priorityLearners[level];
     if (!learners || learners.length === 0) continue;
-    msg += `\\n${PRIORITY_EMOJI[level]} *${PRIORITY_LABELS[level]} priority*\\n`;
+    msg += `\n${PRIORITY_EMOJI[level]} *${PRIORITY_LABELS[level]} priority*\n`;
     const shown = learners.slice(0, BUCKET_DISPLAY_CAP);
     for (const l of shown) {
-      msg += `• ${l.learnerName}\\n`;
+      msg += `• ${l.learnerName}\n`;
     }
     if (learners.length > shown.length) {
-      msg += `_...and ${learners.length - shown.length} more_\\n`;
+      msg += `_...and ${learners.length - shown.length} more_\n`;
     }
   }
 
   if (commonFocusTopics.length > 0) {
     const TOPIC_DISPLAY_CAP = 5;
     const sorted = [...commonFocusTopics].sort((a, b) => b.percentage - a.percentage);
-    msg += `\\n*Common focus topics*\\n`;
+    msg += `\n*Common focus topics*\n`;
     for (const t of sorted.slice(0, TOPIC_DISPLAY_CAP)) {
-      msg += `• ${t.subject} — ${t.topic} (${Math.round(t.percentage * 100)}% of evaluated learners)\\n`;
+      msg += `• ${t.subject} — ${t.topic} (${Math.round(t.percentage * 100)}% of evaluated learners)\n`;
     }
   }
 
-  msg += `\\n_Reply *LEARNER PROGRESS [name]* for a specific learner's full breakdown._`;
+  msg += `\n_Reply *LEARNER PROGRESS [name]* for a specific learner's full breakdown._`;
   return msg;
 }
 

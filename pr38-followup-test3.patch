@@ -1,0 +1,68 @@
+--- /tmp/orig_test.js	2026-08-03 13:33:51.696628347 +0000
++++ tests/coachingTrendService.test.js	2026-08-03 13:33:40.455524412 +0000
+@@ -155,28 +155,46 @@
+   console.log('\nTest 3: flat trend — confidence moved, but not past TREND_FLAT_THRESHOLD');
+   clearAll();
+   {
++    // Regression test:
++    //
++    // Snapshot persistence (PR37) only writes a new coaching_snapshots
++    // row once a delta exceeds SNAPSHOT_WRITE_THRESHOLD. Trend
++    // classification (PR38) intentionally uses the separate
++    // TREND_FLAT_THRESHOLD constant — today they happen to share the
++    // same value (0.05), but coachingTrendService never assumes that.
++    // If a future tuning pass collapses the two constants into one
++    // shared threshold, this test would stop exercising a real flat
++    // zone at all, so it pins an exact in-band delta rather than just
++    // checking "flat" is one of the allowed strings.
++    //
++    // currentConfidence comes from buildTopicContexts(), which derives
++    // confidence from real evidence/consistency/recency scoring —
++    // there's no reliable way to make live reflections land on an
++    // exact 0.52 without coupling this test to that formula. So
++    // buildTopicContexts is stubbed for this one case only, then
++    // restored immediately after.
+     insertSnapshotRow(PHONE, TOPIC_A, {
+       confidence: 0.50, evidenceScore: 0.5, capturedAt: '2026-01-01T00:00:00.000Z',
+     });
+-    const result = getLatestTrend(PHONE, TOPIC_A);
+-    // No new evidence since the stored snapshot in this sub-case would
+-    // actually swing to "falling" (as in Test 2), so instead assert the
+-    // pure classification boundary directly against the exported
+-    // threshold rather than relying on a specific evidence fixture.
+-    assertEq(
+-      require('../services/coachingTrendService').TREND_FLAT_THRESHOLD >= 0,
+-      true,
+-      'TREND_FLAT_THRESHOLD is defined and non-negative (flat-zone sanity check)'
+-    );
+-    // Direct flat-zone check: construct a scenario where current
+-    // confidence is derived from a fresh reflection whose resulting
+-    // confidence lands within the noise band of the stored snapshot is
+-    // fragile against coachingEngineService internals, so instead this
+-    // test validates the classification function's boundary via the
+-    // public contract: a delta of exactly the threshold is NOT "rising"
+-    // or "falling" — verified structurally in Test 7's ordering check
+-    // and directly here by confirming "flat" is a reachable status.
+-    assert(['rising', 'falling', 'flat'].includes(result.trendDirection), 'trendDirection is one of the three valid values');
++
++    const coachingEngineService = require('../services/coachingEngineService');
++    const originalBuildTopicContexts = coachingEngineService.buildTopicContexts;
++    let result;
++    try {
++      coachingEngineService.buildTopicContexts = () =>
++        new Map([[TOPIC_A, { confidence: 0.52, hasEvidence: true }]]);
++      delete require.cache[require.resolve('../services/coachingTrendService')];
++      const stubbed = require('../services/coachingTrendService');
++      result = stubbed.getLatestTrend(PHONE, TOPIC_A);
++    } finally {
++      coachingEngineService.buildTopicContexts = originalBuildTopicContexts;
++      delete require.cache[require.resolve('../services/coachingTrendService')];
++    }
++
++    assertEq(result.status, 'trend', 'status is "trend" in the flat-zone case');
++    assert(result.delta > 0, 'delta is positive (0.52 - 0.50)');
++    assert(result.delta < TREND_FLAT_THRESHOLD, 'delta is inside the flat zone (< TREND_FLAT_THRESHOLD)');
++    assertEq(result.trendDirection, 'flat', 'trendDirection is "flat" for a delta inside the threshold band');
+   }
+ 
+   console.log('\nTest 4: evidence added — evidenceTransition is "gained"');

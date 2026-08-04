@@ -1,0 +1,24 @@
+[1mdiff --git a/docs/releases/RC1-MILESTONE.md b/docs/releases/RC1-MILESTONE.md[m
+[1mindex 077bf11..c7ead4c 100644[m
+[1m--- a/docs/releases/RC1-MILESTONE.md[m
+[1m+++ b/docs/releases/RC1-MILESTONE.md[m
+[36m@@ -102,10 +102,17 @@[m [msubstitute for the manual pass, since WhatsApp formatting and real API[m
+ round-trips aren't covered by unit tests.[m
+ [m
+ ### Core onboarding & auth[m
+[32m+[m
+[32m+[m[32m**Note:** The first two authentication checks are API-level verification,[m
+[32m+[m[32mnot WhatsApp manual tests. Validate via HTTP client (curl/Postman). The[m
+[32m+[m[32mdashboard is the intended consumer and is deferred to RC2, but the backend[m
+[32m+[m[32mauthentication endpoints remain part of the RC1 release surface and should[m
+[32m+[m[32mbe verified independently.[m
+[32m+[m
+ | Item | Automated ref | Pass | Fail | Notes |[m
+ |---|---|---|---|---|[m
+[31m-| WhatsApp OTP login (request-code → verify-code) | `pr22-whatsapp-otp.test.js` | ☐ | ☐ | |[m
+[31m-| Dev OTP bypass correctly disabled in production | `pr25-dev-otp-bypass.test.js` | ☐ | ☐ | |[m
+[32m+[m[32m| WhatsApp OTP login (request-code → verify-code) | `pr22-whatsapp-otp.test.js` | ☐ | ☐ | Verify via API (curl/Postman); no WhatsApp trigger exists |[m
+[32m+[m[32m| Dev OTP bypass correctly disabled in production | `pr25-dev-otp-bypass.test.js` | ☐ | ☐ | Verify via API against production |[m
+ | Profile update | `update-teacher-profile.test.js` | ☐ | ☐ | |[m
+ | MENU / HELP / HI (session reset) | `menu-help-session-reset.test.js` | ☐ | ☐ | |[m
+ | STOP (opt-out) | `menu-help-session-reset.test.js` | ☐ | ☐ | |[m

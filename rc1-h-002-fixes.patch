@@ -1,0 +1,145 @@
+--- a/flows/workspaceFlow.js	2026-08-04 08:22:34.000000000 +0000
++++ b/flows/workspaceFlow.js	2026-08-04 09:04:32.108468843 +0000
+@@ -430,7 +430,7 @@
+ 
+     if (classes.length === 0) {
+       await safeSendMessage(from,
+-        `📚 *No classes yet*\\n\\nCreate one first:\\n*NEW CLASS [name] | [learner count]*\\n\\nExample:\\n_NEW CLASS Grade 8B Mathematics | 28_`
++        `📚 *No classes yet*\n\nCreate one first:\n*NEW CLASS [name] | [learner count]*\n\nExample:\n_NEW CLASS Grade 8B Mathematics | 28_`
+       );
+       return true;
+     }
+@@ -446,7 +446,7 @@
+       chosenClass = resolveClassSelector(rawSelector, classes);
+       if (!chosenClass) {
+         await safeSendMessage(from,
+-          `⚠️ I couldn't match "${rawSelector}" to one of your classes.\\n\\n` +
++          `⚠️ I couldn't match "${rawSelector}" to one of your classes.\n\n` +
+           formatClassSelectionForIntervention(classes, wantsPdf)
+         );
+         return true;
+@@ -597,11 +597,11 @@
+  */
+ function formatClassSelectionForIntervention(classes, wantsPdf = false) {
+   const cmd = wantsPdf ? 'CLASS INTERVENTION PDF' : 'CLASS INTERVENTION';
+-  let msg = `📚 *Which class?*\\n\\n`;
++  let msg = `📚 *Which class?*\n\n`;
+   classes.forEach((c, i) => {
+-    msg += `${i + 1}. ${c.name}\\n`;
++    msg += `${i + 1}. ${c.name}\n`;
+   });
+-  msg += `\\n_Reply *${cmd} [number]* or *${cmd} [class name]*._`;
++  msg += `\n_Reply *${cmd} [number]* or *${cmd} [class name]*._`;
+   return msg;
+ }
+ 
+@@ -628,7 +628,7 @@
+     }
+     const pdfUrl = buildPdfUrl(fileId);
+     await sendDocument(from, pdfUrl, filename,
+-      `📎 *Class Intervention Report ready!*\\n\\nPriority breakdown, per-learner detail, and common focus topics for *${chosenClass.name}* are in the PDF above.`);
++      `📎 *Class Intervention Report ready!*\n\nPriority breakdown, per-learner detail, and common focus topics for *${chosenClass.name}* are in the PDF above.`);
+   } catch (pdfErr) {
+     console.error('[Workspace] Class intervention PDF generation failed:', pdfErr.message);
+     await safeSendMessage(from, `⚠️ Couldn't generate the class intervention report right now. Please try again.`);
+@@ -658,7 +658,7 @@
+     }
+     const pdfUrl = buildPdfUrl(fileId);
+     await sendDocument(from, pdfUrl, filename,
+-      `📎 *Learner Progress Report ready!*\\n\\nMastery levels and intervention notes for *${learner.canonicalName}* are in the PDF above.`);
++      `📎 *Learner Progress Report ready!*\n\nMastery levels and intervention notes for *${learner.canonicalName}* are in the PDF above.`);
+   } catch (pdfErr) {
+     console.error('[Workspace] Learner progress PDF generation failed:', pdfErr.message);
+     await safeSendMessage(from, `⚠️ Couldn't generate ${learner.canonicalName}'s progress report right now. Please try again.`);
+@@ -701,45 +701,45 @@
+   const { summary, priorityCounts, commonFocusTopics, priorityLearners } = plan;
+ 
+   if (summary.totalLearners === 0) {
+-    return `🏫 *Class Intervention — ${cls.name}*\\n\\nThis class has no learners recorded yet.\\n\\n_Add learners before running a class intervention report._`;
++    return `🏫 *Class Intervention — ${cls.name}*\n\nThis class has no learners recorded yet.\n\n_Add learners before running a class intervention report._`;
+   }
+ 
+-  let msg = `🏫 *Class Intervention — ${cls.name}*\\n\\n`;
+-  msg += `👥 ${summary.totalLearners} learner(s) | ${summary.evaluatedLearners} evaluated | ${summary.insufficientData} awaiting data\\n`;
++  let msg = `🏫 *Class Intervention — ${cls.name}*\n\n`;
++  msg += `👥 ${summary.totalLearners} learner(s) | ${summary.evaluatedLearners} evaluated | ${summary.insufficientData} awaiting data\n`;
+   if (summary.erroredLearners > 0) {
+-    msg += `⚠️ ${summary.erroredLearners} learner(s) couldn't be evaluated\\n`;
++    msg += `⚠️ ${summary.erroredLearners} learner(s) couldn't be evaluated\n`;
+   }
+-  msg += `\\n`;
++  msg += `\n`;
+ 
+-  msg += `*Priority breakdown*\\n`;
+-  msg += `${PRIORITY_EMOJI.high} High: ${priorityCounts.high}\\n`;
+-  msg += `${PRIORITY_EMOJI.medium} Medium: ${priorityCounts.medium}\\n`;
+-  msg += `${PRIORITY_EMOJI.low} Low: ${priorityCounts.low}\\n`;
++  msg += `*Priority breakdown*\n`;
++  msg += `${PRIORITY_EMOJI.high} High: ${priorityCounts.high}\n`;
++  msg += `${PRIORITY_EMOJI.medium} Medium: ${priorityCounts.medium}\n`;
++  msg += `${PRIORITY_EMOJI.low} Low: ${priorityCounts.low}\n`;
+ 
+   const BUCKET_DISPLAY_CAP = 8;
+   for (const level of ['high', 'medium', 'low']) {
+     const learners = priorityLearners[level];
+     if (!learners || learners.length === 0) continue;
+-    msg += `\\n${PRIORITY_EMOJI[level]} *${PRIORITY_LABELS[level]} priority*\\n`;
++    msg += `\n${PRIORITY_EMOJI[level]} *${PRIORITY_LABELS[level]} priority*\n`;
+     const shown = learners.slice(0, BUCKET_DISPLAY_CAP);
+     for (const l of shown) {
+-      msg += `• ${l.learnerName}\\n`;
++      msg += `• ${l.learnerName}\n`;
+     }
+     if (learners.length > shown.length) {
+-      msg += `_...and ${learners.length - shown.length} more_\\n`;
++      msg += `_...and ${learners.length - shown.length} more_\n`;
+     }
+   }
+ 
+   if (commonFocusTopics.length > 0) {
+     const TOPIC_DISPLAY_CAP = 5;
+     const sorted = [...commonFocusTopics].sort((a, b) => b.percentage - a.percentage);
+-    msg += `\\n*Common focus topics*\\n`;
++    msg += `\n*Common focus topics*\n`;
+     for (const t of sorted.slice(0, TOPIC_DISPLAY_CAP)) {
+-      msg += `• ${t.subject} — ${t.topic} (${Math.round(t.percentage * 100)}% of evaluated learners)\\n`;
++      msg += `• ${t.subject} — ${t.topic} (${Math.round(t.percentage * 100)}% of evaluated learners)\n`;
+     }
+   }
+ 
+-  msg += `\\n_Reply *LEARNER PROGRESS [name]* for a specific learner's full breakdown._`;
++  msg += `\n_Reply *LEARNER PROGRESS [name]* for a specific learner's full breakdown._`;
+   return msg;
+ }
+ 
+--- a/flows/assessmentSessionFlow.js	2026-08-04 08:22:34.000000000 +0000
++++ b/flows/assessmentSessionFlow.js	2026-08-04 09:04:57.697400670 +0000
+@@ -174,7 +174,7 @@
+       return;
+     }
+     const pdfUrl = buildPdfUrl(fileId);
+-    await sendDocument(from, pdfUrl, filename, `🖨️ *Printable question paper ready!*\\n\\nHand this to learners, then capture their marks with *NEW TEST*.`);
++    await sendDocument(from, pdfUrl, filename, `🖨️ *Printable question paper ready!*\n\nHand this to learners, then capture their marks with *NEW TEST*.`);
+   } catch (pdfErr) {
+     console.error('[ASSESSMENT_SESSION_FLOW] Blueprint paper PDF generation failed:', pdfErr.message);
+     await safeSendMessage(from, `⚠️ Couldn't generate the printable paper right now. Please try again.`);
+--- a/docs/releases/RC1-MILESTONE.md	2026-08-04 08:22:34.000000000 +0000
++++ b/docs/releases/RC1-MILESTONE.md	2026-08-04 09:01:51.593220858 +0000
+@@ -138,7 +138,7 @@
+ | Bulk paste mark capture | `assessment-bulk-capture.test.js` | ☐ | ☐ | |
+ | UNDO / EDIT mid-capture | `assessment-capture-undo.test.js`, `assessmentCaptureService.edit.test.js` | ☐ | ☐ | |
+ | Upload marks (CSV/text) | `test-marks-parser.js`, `parsed-marks-adapter.test.js` | ☐ | ☐ | |
+-| Item analysis / blueprint analytics | `blueprint-analytics.test.js` | ☐ | ☑ | FAIL — RC1-H-002 (fix implemented, not yet re-verified against `npm test` or a fresh WhatsApp run — see Defect Log for details). Original observation: intervention report showed "Common Fractions"/"Whole Numbers" at 140% of learners affected (impossible with 5 learners) and "Target group size: 0 learners" despite the PDF correctly listing 2 learners below the 40% threshold. |
++| Item analysis / blueprint analytics | `blueprint-analytics.test.js` | ☑ | ☑ | PASS — RC1-H-002 Resolved (2026-08-04). Fix verified via automated tests (`intervention-reports.test.js` 11/11, `blueprint-analytics.test.js` 21/21) and a fresh live WhatsApp run (new seed, 5 learners): Intervention Report now shows "Common Fractions — 60% of learners affected" (3 of 5 learners, ≤100%) and "Target group size: 3 learners" (Group C + Group D), replacing the original 140%/0-learners bug. See Defect Log for full root cause and verification history. |
+ | CLASS INTERVENTION | `workspaceFlow-classIntervention.test.js` | ☐ | ☐ | |
+ | CLASS INTERVENTION PDF | `workspaceFlow-classInterventionPdf.test.js` | ☐ | ☐ | |
+ | LEARNER PROGRESS | `masteryService.test.js`, `routing-order-workspace-flow.test.js` | ☐ | ☐ | |
+@@ -315,7 +315,7 @@
+ | Severity | Owner | Date discovered | Date resolved | RC version containing fix | Description |
+ |---|---|---|---|---|---|
+ | High | X.O | 2026-08-04 | | | **RC1-H-001** — No teacher-accessible production path exists to create and publish Assessment Blueprints. `createBlueprint()`/`publishBlueprint()` (`services/blueprintRepository.js`) have no caller outside `scripts/seedTestBlueprint.js` (a dev seeding script) and the test suite. Verified no path via: AI intent classifier (no blueprint-creation intent type), fixed WhatsApp commands (`NEW TEST`, `PRINT` both require an existing published blueprint), `routes/api.js` (zero blueprint references; its only POST/PATCH/DELETE routes are `/reflections`, unrelated), `routes/webhook.js` (only imports read-only `listBlueprints`/`getBlueprintById`), `flows/assessmentSessionFlow.js` (only reads via `listBlueprints`), `core/` (no blueprint references), and no cron/scheduler exists. Impact: `NEW TEST` and everything downstream (PRINT, interactive/bulk mark capture, UNDO/EDIT, item analysis, CLASS INTERVENTION, LEARNER PROGRESS) is unreachable for a pilot teacher on RC1 as shipped. The blueprint subsystem itself (validation, versioning, marks import, analytics, PDF export) is fully implemented and tested — only the production entry point to create/publish is missing. |
+-| High | X.O | 2026-08-04 | | | **RC1-H-002** — Assessment intervention analytics produce incorrect results. Tested under the RC1-H-001 workaround (manually seeded blueprint "Fractions Test (Seed)", Grade 6 Mathematics, 5 learners, marks captured via `NEW TEST` in WhatsApp): the generated Intervention Report shows "Common Fractions" and "Whole Numbers" both at 140% of learners affected — impossible with 5 learners (max is 100%) — and separately states "Target group size: 0 learners," while the accompanying Blueprint Assessment Report PDF correctly identifies 2 learners below the 40% support threshold (Samuel Tshabalala 20%, Motlatsi Moloi 0%). Impact: a teacher could be shown a report that simultaneously flags a topic-wide problem and recommends acting on zero learners, producing incorrect instructional guidance.<br><br>**Root cause analysis (2026-08-04):**<br>1. `services/errorAnalysisService.js` (line 155) counts question failures rather than unique affected learners when aggregating by topic: `topicErrors[topic].frequency` accumulates a per-question failure tally and sums across every question sharing a topic, so a learner failing multiple questions under one topic is counted more than once. With 2 questions per topic in the seeded blueprint, this allows "learners affected" percentages to exceed 100%.<br>2. `services/interventionReportsService.js` (lines 158, 229) reads `report.interventionPlan.targetGroups` (plural, expecting an array), but `services/interventionPlanService.js` (line 76) returns the field as `targetGroup` (singular, a pre-formatted string). The property name mismatch means `targetGroups` is always `undefined`, silently falling back to an empty array via `|| []`, producing a target group size of 0 even though correct group/count data (Group C: 2, Group D: 2) exists under the correctly-named field.<br><br>**Fix implemented (2026-08-04):**<br>1. `errorAnalysisService.js`'s `performErrorAnalysis()` now tracks a `Set` of unique affected learner names per topic (parsing each learner's `question_data` the same way `itemAnalysisService.js` does, using the same half-marks-per-question threshold), rather than summing per-question failure counts. `frequency` is now that Set's size, so it can never exceed the class size.<br>2. `interventionPlanService.js`'s `generateInterventionPlan()` now returns `targetGroups` (the array) alongside the existing `targetGroup` (the display string), so `interventionReportsService.js`'s existing read of `targetGroups` resolves correctly instead of silently defaulting to an empty array.<br><br>**Verification performed:** standalone reproduction of the exact seeded scenario (5 learners, 2 questions per topic, matching the captured marks and Group A–D distribution from the WhatsApp session) confirmed the old formula reproduces 140%/0-learners exactly as observed in production, and the fixed formula produces 80% (≤100%, unique-learner-based) and 4 learners (Group C + Group D, correctly read). **Not yet verified:** the project's own automated test suite (`npm test`, including `intervention-reports.test.js`) could not be run in this environment — `npm install` failed on a blocked CDN dependency (sheetjs) unrelated to this fix. Recommend running `npm test` on your machine/Render and re-running `NEW TEST` → capture → intervention report against the existing seeded assessment (blueprint ID 1) before marking this Resolved. |
++| High | X.O | 2026-08-04 | 2026-08-04 | Resolved | **RC1-H-002** — Assessment intervention analytics produce incorrect results. Tested under the RC1-H-001 workaround (manually seeded blueprint "Fractions Test (Seed)", Grade 6 Mathematics, 5 learners, marks captured via `NEW TEST` in WhatsApp): the generated Intervention Report shows "Common Fractions" and "Whole Numbers" both at 140% of learners affected — impossible with 5 learners (max is 100%) — and separately states "Target group size: 0 learners," while the accompanying Blueprint Assessment Report PDF correctly identifies 2 learners below the 40% support threshold (Samuel Tshabalala 20%, Motlatsi Moloi 0%). Impact: a teacher could be shown a report that simultaneously flags a topic-wide problem and recommends acting on zero learners, producing incorrect instructional guidance.<br><br>**Root cause analysis (2026-08-04):**<br>1. `services/errorAnalysisService.js` (line 155) counts question failures rather than unique affected learners when aggregating by topic: `topicErrors[topic].frequency` accumulates a per-question failure tally and sums across every question sharing a topic, so a learner failing multiple questions under one topic is counted more than once. With 2 questions per topic in the seeded blueprint, this allows "learners affected" percentages to exceed 100%.<br>2. `services/interventionReportsService.js` (lines 158, 229) reads `report.interventionPlan.targetGroups` (plural, expecting an array), but `services/interventionPlanService.js` (line 76) returns the field as `targetGroup` (singular, a pre-formatted string). The property name mismatch means `targetGroups` is always `undefined`, silently falling back to an empty array via `|| []`, producing a target group size of 0 even though correct group/count data (Group C: 2, Group D: 2) exists under the correctly-named field.<br><br>**Fix implemented (2026-08-04):**<br>1. `errorAnalysisService.js`'s `performErrorAnalysis()` now tracks a `Set` of unique affected learner names per topic (parsing each learner's `question_data` the same way `itemAnalysisService.js` does, using the same half-marks-per-question threshold), rather than summing per-question failure counts. `frequency` is now that Set's size, so it can never exceed the class size.<br>2. `interventionPlanService.js`'s `generateInterventionPlan()` now returns `targetGroups` (the array) alongside the existing `targetGroup` (the display string), so `interventionReportsService.js`'s existing read of `targetGroups` resolves correctly instead of silently defaulting to an empty array.<br><br>**Verification performed:** standalone reproduction of the exact seeded scenario (5 learners, 2 questions per topic, matching the captured marks and Group A–D distribution from the WhatsApp session) confirmed the old formula reproduces 140%/0-learners exactly as observed in production, and the fixed formula produces 80% (≤100%, unique-learner-based) and 4 learners (Group C + Group D, correctly read). **Final verification (2026-08-04):** (1) Automated tests run directly via `node` (working around a sandboxed `npm install` block on an unrelated `xlsx`/`better-sqlite3` dependency): `tests/intervention-reports.test.js` 11/11 passed, `tests/blueprint-analytics.test.js` 21/21 passed, no regressions in any other suite that could execute without the missing native module. (2) Fresh live WhatsApp run against a newly seeded "Fractions Test (Seed)" assessment (5 learners, marks captured via `NEW TEST`, different data from the original bug report): the generated Intervention Report shows "Common Fractions — 60% of learners affected" (3 of 5 learners — correctly ≤100%, no repeat of the 140% bug) and "Target group size: 3 learners" (Group C: 2 + Group D: 1, correctly read — no repeat of the 0-learners bug). Status: **Resolved.** |
+ 
+ ---
+ 
