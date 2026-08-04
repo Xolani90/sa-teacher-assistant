@@ -102,10 +102,17 @@ substitute for the manual pass, since WhatsApp formatting and real API
 round-trips aren't covered by unit tests.
 
 ### Core onboarding & auth
+
+**Note:** The first two authentication checks are API-level verification,
+not WhatsApp manual tests. Validate via HTTP client (curl/Postman). The
+dashboard is the intended consumer and is deferred to RC2, but the backend
+authentication endpoints remain part of the RC1 release surface and should
+be verified independently.
+
 | Item | Automated ref | Pass | Fail | Notes |
 |---|---|---|---|---|
-| WhatsApp OTP login (request-code → verify-code) | `pr22-whatsapp-otp.test.js` | ☐ | ☐ | |
-| Dev OTP bypass correctly disabled in production | `pr25-dev-otp-bypass.test.js` | ☐ | ☐ | |
+| WhatsApp OTP login (request-code → verify-code) | `pr22-whatsapp-otp.test.js` | ☐ | ☐ | Verify via API (curl/Postman); no WhatsApp trigger exists |
+| Dev OTP bypass correctly disabled in production | `pr25-dev-otp-bypass.test.js` | ☐ | ☐ | Verify via API against production |
 | Profile update | `update-teacher-profile.test.js` | ☐ | ☐ | |
 | MENU / HELP / HI (session reset) | `menu-help-session-reset.test.js` | ☐ | ☐ | |
 | STOP (opt-out) | `menu-help-session-reset.test.js` | ☐ | ☐ | |
