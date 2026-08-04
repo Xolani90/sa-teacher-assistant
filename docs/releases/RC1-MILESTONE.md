@@ -1,6 +1,6 @@
 # RC1 Milestone — Release Candidate 1
 
-**Document Version:** 1.0
+**Document Version:** 1.4
 **Last Updated:** 2026-08-04
 **Approved By:** _pending_
 
@@ -56,6 +56,17 @@ not-yet-built dashboard/mobile work that will eventually consume this API.
 (deployment notes, runbooks, this document) may be made during RC1. New
 architecture documents belong to RC2 — don't let "improving the docs"
 become a side door back into design work.
+
+**Dependency freeze:** no routine package upgrades during RC1. Exceptions:
+security fixes and fixes for a production blocker. Routine updates
+(Express, the AI SDK, the WhatsApp SDK, etc.) move to RC2 — an upgrade is
+exactly the kind of change that can introduce a regression nobody was
+looking for.
+
+**Code freeze:** once `v1.0.0-rc1` is tagged, only commits that reference
+a documented Defect Log entry are permitted. No unrelated cleanup,
+refactors, or "while I'm in here" commits — if it isn't fixing a logged
+RC1 defect, it waits for RC2.
 
 ---
 
@@ -252,6 +263,12 @@ Notes:
 **Pilot size:** 5–10 teachers
 **Duration:** 14 days
 
+**Early termination:** if a Rollback Condition (above) occurs at any
+point during the 14 days, the pilot ends immediately — day 1 or day 13,
+no difference. After the fix, the replacement RC starts a fresh 14-day
+pilot from day 1. Partial pilot time is never carried over, since the
+fix itself is what's unverified.
+
 ### Success metrics
 - [ ] ≥95% successful command completion rate
 - [ ] No data corruption
@@ -282,6 +299,18 @@ meet both conditions, it goes in the RC2 Backlog below, not into the code.
 
 ---
 
+## Defect Log
+
+Every defect discovered during RC1 (Phase A, B, or C) must record all five
+fields below when opened, and stay in this table until resolved. This is
+what answers "who was fixing this again?" six days into the pilot.
+
+| Severity | Owner | Date discovered | Date resolved | RC version containing fix | Description |
+|---|---|---|---|---|---|
+| | | | | | |
+
+---
+
 ## RC2 Backlog
 
 Anything raised during RC1 that isn't a blocking defect goes here instead of
@@ -300,6 +329,20 @@ Known candidates already deferred out of RC1 scope:
 
 ---
 
+## Known Open Issues
+
+Different from the RC2 Backlog above. The backlog is deferred *ideas* and
+enhancements. This is defects you are knowingly shipping RC1 with — Low
+severity, workaround exists, decision to ship anyway made deliberately
+rather than by omission. Starts empty; a Critical or High defect must
+never appear here (see Defect Classification).
+
+| ID | Severity | Workaround | Planned Version |
+|---|---|---|---|
+| | | | |
+
+---
+
 ## Defect Classification
 
 | Severity | Definition | RC1 Rule |
@@ -312,11 +355,11 @@ Known candidates already deferred out of RC1 scope:
 
 ---
 
-## Known Risks
+## Accepted Limitations
 
-Accepted limitations going into RC1 — not defects, just things the pilot
-is not attempting to solve. Listed here so nobody discovers them mid-pilot
-and mistakes them for bugs.
+Product scope decisions going into RC1 — not defects, and not things that
+could fail. Listed here so nobody discovers them mid-pilot and mistakes a
+deliberate scope choice for a bug.
 
 - English-only coaching messages (localisation deferred to RC2, per ADR-018's message-renderer seam)
 - No dashboard yet (PR29–32 analytics/QMS workspace/reporting/home analytics — RC2)
@@ -336,6 +379,21 @@ RC1 is considered successful when:
 - No High defects remain open
 - Pilot teachers indicate they would continue using the system
 - v1.0.0 is approved at the RC1 Approval Meeting
+
+---
+
+## Release Artifacts
+
+Complete before the Approval Meeting — a precise record of exactly what
+was deployed, so it can be reconstructed months later without guessing.
+
+- [ ] Git tag created (`v1.0.0-rc1`)
+- [ ] Release notes written
+- [ ] Commit hash recorded: ___________________
+- [ ] Production configuration archived (env vars list, not secrets themselves)
+- [ ] Deployment timestamp: ___________________
+- [ ] Pilot start date: ___________________
+- [ ] Pilot end date: ___________________
 
 ---
 
@@ -364,18 +422,55 @@ only one person in the room.)*
 - [ ] Approved
 - [ ] Delayed — reason: ___________________
 
+### Go / No-Go Rules
+
+If every Release Criterion below is satisfied:
+→ Approve RC1 → Deploy → Begin Pilot (Phase C)
+
+If any Critical or High defect remains open:
+→ RC1 is rejected → fixes are implemented → a new candidate is cut as
+`v1.0.0-rc2` → Phase A is repeated in full, and any Phase B item touched
+by the fix is repeated → a fresh Approval Meeting is held before the
+pilot begins.
+
+There is no partial approval. A "Delayed" decision above always resolves
+to one of these two paths, never to proceeding with an open Critical/High
+defect on the strength of a judgment call.
+
+### After a No-Go: does Phase C restart?
+
+Yes, always, for an RC2 cut. RC2 is a new candidate, so it gets a full
+Pilot run — pilot feedback on RC1 doesn't carry over to validate RC2's
+fix, since the fix itself is what's unverified.
+
+```
+RC1
+ ↓
+Go/No-Go
+ ├─ Go  → Deploy → Pilot (Phase C) → RC1.1 → v1.0.0
+ └─ No-Go → fix → v1.0.0-rc2
+              ↓
+         Phase A (repeat, full)
+              ↓
+         Phase B (repeat affected items)
+              ↓
+         Approval Meeting (fresh)
+              ↓
+         Pilot (Phase C, full 14 days)
+```
+
 ---
 
 ## Release Criteria
 
 RC1 may be released only when:
 
-- [ ] All Phase A items pass
-- [ ] All critical bugs resolved
-- [ ] No open data-loss bugs
-- [ ] No security blockers
-- [ ] Pilot completed successfully (14 days, success metrics met)
-- [ ] Documentation complete
+- [ ] Phase A passed
+- [ ] Phase B passed
+- [ ] Deployment Verification passed
+- [ ] Phase C completed successfully
+- [ ] No Critical or High defects remain open
+- [ ] Required release documentation complete
 - [ ] Deployment reproducible
 - [ ] Feature freeze maintained throughout
 
