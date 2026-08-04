@@ -114,6 +114,21 @@ function formatBulkResultNotice(result) {
   return `✅ Applied marks for ${result.appliedCount} learner${result.appliedCount === 1 ? '' : 's'}.\n\n${parts.join('\n\n')}`;
 }
 
+// RC1: a bulk paste where every line was rejected (submitBulkReply's
+// accepted.length === 0 branch) previously showed only the generic
+// "No learners could be captured..." message and silently dropped the
+// specific per-learner reasons that adaptParsedMarks() already computed —
+// leaving the teacher with no way to tell what was actually wrong with
+// their paste. This surfaces those reasons alongside the generic error.
+function formatBulkFailureDetail(genericError, result) {
+  if (!result || !result.skipped || result.skipped.length === 0) {
+    return genericError;
+  }
+
+  const lines = result.skipped.map((s) => `• ${s.learnerName} — ${s.reason}`);
+  return `${genericError}\n\n${lines.join('\n')}`;
+}
+
 /**
  * Generates and sends the blueprint assessment analytics PDF once marks
  * capture completes and processAssessmentData() has stored the assessment.
@@ -426,7 +441,10 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
       : submitReply(state, trimmed);
 
     if (!result.ok) {
-      await safeSendMessage(from, result.error);
+      const detail = isBulk
+        ? formatBulkFailureDetail(result.error, result.result)
+        : result.error;
+      await safeSendMessage(from, detail);
       return true;
     }
 
