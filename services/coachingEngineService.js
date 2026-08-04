@@ -46,6 +46,17 @@ function getTrendService() {
   }
   return coachingTrendService;
 }
+// coachingMessageRenderer requires this module (to validate its template
+// catalogue against RECOMMENDATION_RULES) at its own top level, so this
+// mirrors the same lazy-require pattern used for coachingTrendService
+// above rather than creating a second require cycle.
+let coachingMessageRenderer = null;
+function getMessageRenderer() {
+  if (!coachingMessageRenderer) {
+    coachingMessageRenderer = require('./coachingMessageRenderer');
+  }
+  return coachingMessageRenderer;
+}
 
 // ── Named configuration defaults (ADR-013 §6.3/§6.4/§6.6) ──────────────────
 // All provisional for initial release, not calibrated against usage data —
@@ -698,16 +709,14 @@ const RECOMMENDATION_RULES = [
     applies: (ctx) => growthPlanMissingApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
+      ruleId: 'growth_plan_missing',
       priority: 100,
       messageId: 'growth_plan_missing',
-      recommendation: `You have identified a recurring pattern in ${ctx.topic.label} `
-        + `but don't yet have an active growth plan.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
-      // ADR-018 Phase 1: populated alongside `recommendation` but not yet
-      // consumed anywhere — coachingMessageRenderer can already render
-      // from this today; `recommendation` itself only stops being
-      // hand-composed here in Phase 2.
+      // ADR-018 Phase 2: rules emit templateData only. Teacher-facing
+      // wording is produced exclusively by coachingMessageRenderer,
+      // keyed off `messageId` — see getCoachingInsights() below.
       templateData: { topicLabel: ctx.topic.label },
     }),
   },
@@ -721,10 +730,9 @@ const RECOMMENDATION_RULES = [
     applies: (ctx) => !growthPlanMissingApplies(ctx) && evidenceRemovedApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
+      ruleId: 'evidence_removed',
       priority: 90,
       messageId: 'evidence_removed',
-      recommendation: `Evidence you previously recorded for ${ctx.topic.label} is no `
-        + `longer present. Confirm whether this topic still needs attention.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
       templateData: { topicLabel: ctx.topic.label },
@@ -739,10 +747,9 @@ const RECOMMENDATION_RULES = [
       && staleEvidenceApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
+      ruleId: 'stale_evidence',
       priority: 80,
       messageId: 'stale_evidence',
-      recommendation: `You haven't recorded recent evidence for ${ctx.topic.label}. `
-        + `Add a recent reflection to keep recommendations current.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
       templateData: { topicLabel: ctx.topic.label },
@@ -758,10 +765,9 @@ const RECOMMENDATION_RULES = [
       && trendFallingApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
+      ruleId: 'trend_falling',
       priority: 70,
       messageId: 'trend_falling',
-      recommendation: `Your confidence in ${ctx.topic.label} has declined since your `
-        + `last check-in. Consider revisiting this area soon.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
       templateData: {
@@ -782,10 +788,9 @@ const RECOMMENDATION_RULES = [
       && evidenceGainedApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
+      ruleId: 'evidence_gained',
       priority: 60,
       messageId: 'evidence_gained',
-      recommendation: `New evidence has appeared for ${ctx.topic.label} since your last `
-        + `check-in. Keep building on this momentum.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
       templateData: { topicLabel: ctx.topic.label },
@@ -804,10 +809,9 @@ const RECOMMENDATION_RULES = [
       && lowConfidenceApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
+      ruleId: 'low_confidence_recommendation',
       priority: 50,
       messageId: 'low_confidence_recommendation',
-      recommendation: 'Evidence is currently limited for this recommendation. '
-        + 'Continue recording reflections before making major changes.',
       confidence: ctx.confidence,
       evidence: ctx.evidence,
       templateData: {},
@@ -826,10 +830,9 @@ const RECOMMENDATION_RULES = [
       && trendRisingApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
+      ruleId: 'trend_rising',
       priority: 40,
       messageId: 'trend_rising',
-      recommendation: `Your confidence in ${ctx.topic.label} has improved since your `
-        + `last check-in. Keep up the current approach.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
       templateData: {
@@ -857,9 +860,9 @@ const RECOMMENDATION_RULES = [
       && !trendRisingApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
+      ruleId: 'recurring_topic_pattern',
       priority: 10,
       messageId: 'recurring_topic_pattern',
-      recommendation: `Continue focused coaching support on ${ctx.topic.label}.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
       templateData: { topicLabel: ctx.topic.label },
@@ -971,12 +974,17 @@ function getCoachingInsights(phoneHash, options = {}) {
   const { maxInsights = DEFAULT_MAX_INSIGHTS } = options;
   const finalCandidates = processRecommendationCandidates(candidates, { maxInsights });
 
+  const { renderRecommendation } = getMessageRenderer();
+
   const recommendations = finalCandidates.map((candidate) => {
     const ctx = topicContexts.get(candidate.topicId);
     return {
       topicId: candidate.topicId,
       topicLabel: ctx.topic.label,
-      recommendation: candidate.recommendation,
+      ruleId: candidate.ruleId,
+      messageId: candidate.messageId,
+      templateData: candidate.templateData,
+      recommendation: renderRecommendation(candidate),
       confidence: candidate.confidence,
       confidenceLabel: confidenceLabel(candidate.confidence),
       evidence: candidate.evidence,

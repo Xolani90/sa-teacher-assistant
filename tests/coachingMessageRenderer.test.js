@@ -1,30 +1,33 @@
 'use strict';
 /**
- * coachingMessageRenderer Tests (PR40 Phase 1, ADR-018)
+ * coachingMessageRenderer Tests (PR40, ADR-018)
  *
- * Phase 1 scope: the renderer exists, is fully correct, and nothing else
- * in the codebase calls it yet (ADR-018 §Implementation Sequencing,
- * Phase 1). These tests exercise the module in isolation:
+ * Since the ADR-018 §5 dependency-inversion cleanup, coachingMessageRenderer
+ * no longer requires coachingEngineService at all — it is a pure
+ * `messageId -> template` module with zero knowledge of the engine.
+ * Cross-module consistency (every rule's messageId has a template, and
+ * vice versa) is verified two ways in this file:
  *
  *   1. renderRecommendation() produces the correct string per messageId
  *   2. an unknown messageId throws rather than silently falling back
  *   3. validateMessageTemplates() accepts a matched rule/template set
  *   4. validateMessageTemplates() rejects a rule with no template
  *   5. validateMessageTemplates() rejects a template with no rule
- *   6. the real module-load-time validation against the live
- *      RECOMMENDATION_RULES catalogue already succeeded (this file loads
- *      at all, since coachingMessageRenderer throws at require() time on
- *      a mismatch — this is the same "loading the module is the test"
- *      pattern ADR-017's validateRecommendationRules() relies on)
+ *   6. Test V-04 below explicitly calls validateMessageTemplates()
+ *      against the real, live RECOMMENDATION_RULES catalogue — this is
+ *      no longer implicit in module load (that self-check moved to
+ *      utils/startupChecks.js, the one place both modules are required
+ *      together, run once at server boot).
  *
  * Run individually:   node tests/coachingMessageRenderer.test.js
  * Run via npm:         npm test
  */
 
 // ── Real-migrations test DB (see tests/helpers/createTestDb.js) ──────────
-// coachingMessageRenderer requires coachingEngineService at load time (to
-// validate against the live rule catalogue), which in turn requires the
-// database layer — a DB must exist in scope before that require runs.
+// Test V-04 below requires coachingEngineService directly (to exercise
+// the real RECOMMENDATION_RULES catalogue), which requires the database
+// layer — a DB must exist in scope before that require runs. This is a
+// test-only dependency, not something coachingMessageRenderer itself has.
 const { createTestDb } = require('./helpers/createTestDb');
 const testDb = createTestDb(__filename);
 

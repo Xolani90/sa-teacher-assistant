@@ -34,8 +34,15 @@ const {
 } = require('./utils/usageTracker');
 const { decryptPhone } = require('./utils/encryption');
 const { sendMessage }  = require('./services/whatsappService');
+const { runStartupChecks } = require('./utils/startupChecks');
 
 validateEnv();
+
+// ADR-018 §5: cross-validates the coaching rule catalogue against the
+// message renderer's template map. This is the one place both modules
+// are required together — see utils/startupChecks.js for why that
+// wiring lives here and not inside either module.
+runStartupChecks();
 
 // ── Global error safety net ─────────────────────────────────────────────────
 // Node ≥ 15 terminates the process on unhandled promise rejections by default.

@@ -14,13 +14,18 @@
  * ADR-018 keeps `messageId` distinct from `ruleId` even though every rule
  * maps to exactly one message today — see ADR-018 §2 for why.
  *
- * PHASE 1 (this file, as first introduced): purely additive scaffolding.
- * `renderRecommendation()` exists and is fully correct, but nothing in
- * the codebase calls it yet — coachingEngineService's rules still return
- * their own hand-composed `recommendation` strings. Phase 2 switches
- * rules to return `templateData` only and updates consumers (starting
- * with qmsFlow.js) to call `renderRecommendation()` instead of reading
- * `recommendation` off the engine's output directly.
+ * PHASE 2 (dependency-inversion cleanup): this module now knows nothing
+ * about coachingEngineService. It no longer requires the engine to
+ * validate itself at load time — `validateMessageTemplates(rules)` is a
+ * pure function of whatever `rules` array is handed to it, and it is the
+ * *caller's* job to supply RECOMMENDATION_RULES. That caller is
+ * server.js's startup sequence (see startupChecks.js), which requires
+ * both this module and coachingEngineService and wires them together —
+ * neither module requires the other. This keeps both independently
+ * requireable/testable and removes the last cross-module coupling this
+ * file had (previously: renderer → engine, one-directional but still a
+ * presentation-only module transitively pulling in the full DB stack via
+ * better-sqlite3/migrations just to validate templates).
  *
  * Run individually:   node -e "require('./services/coachingMessageRenderer')"
  */
@@ -123,17 +128,6 @@ function validateMessageTemplates(rules, templates = MESSAGE_TEMPLATES) {
     }
   }
 }
-
-// Validate against the real rule catalogue at module load. Required
-// lazily (not at top-level require) to avoid coupling this module's own
-// load order to coachingEngineService's — this module has no other
-// dependency on the engine, and top-level circular requires have already
-// bitten this codebase once (ADR-017's coachingTrendService <->
-// coachingEngineService cycle).
-(function validateAtLoad() {
-  const { RECOMMENDATION_RULES } = require('./coachingEngineService');
-  validateMessageTemplates(RECOMMENDATION_RULES);
-})();
 
 module.exports = {
   MESSAGE_TEMPLATES,
