@@ -21,3 +21,4 @@ tests/*.db-shm
 tests/*.db-wal
 tests/.tmp-db/
 pr32-checkpoint-*.zip
+*.patch
