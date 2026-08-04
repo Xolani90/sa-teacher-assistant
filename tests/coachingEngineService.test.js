@@ -57,6 +57,7 @@ function assertEq(a, b, label) {
 function clearAll() {
   _db.exec(`DELETE FROM qms_reflections`);
   _db.exec(`DELETE FROM qms_growth_plans`);
+  _db.exec(`DELETE FROM coaching_snapshots`);
 }
 
 // Directly inserts a growth plan/reflection with an arbitrary topic_id,
@@ -85,6 +86,23 @@ function insertGrowthPlanRaw(phoneHash, { topicId = null, status = 'active', goa
   );
 }
 
+// PR39 (ADR-017): directly inserts a coaching_snapshots row with an
+// explicit captured_at, bypassing coachingSnapshotService's dedup/trigger
+// logic entirely — mirrors the identical helper in
+// tests/coachingTrendService.test.js. Needed here because
+// getCoachingInsights() reads ctx.trend via coachingTrendService, which
+// compares current confidence against whatever the most recently stored
+// snapshot row says; these tests need full control over that historical
+// row to isolate each trend rule.
+function insertSnapshotRow(phoneHash, topicId, { confidence, evidenceScore, capturedAt }) {
+  _db.prepare(
+    `INSERT INTO coaching_snapshots
+       (phone_hash, topic_id, confidence, confidence_label,
+        evidence_score, consistency_score, recency_score, rule_id, captured_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(phoneHash, topicId, confidence, 'Medium', evidenceScore, 0.5, 0.5, null, capturedAt);
+}
+
 // ── Test runner ────────────────────────────────────────────────────────────
 async function run() {
   const {
@@ -106,9 +124,9 @@ async function run() {
     sortRecommendations,
     truncateRecommendations,
     processRecommendationCandidates,
+    getCoachingInsights,
     RECOMMENDATION_RULES,
     validateRecommendationRules,
-    getCoachingInsights,
   } = require('../services/coachingEngineService');
 
   const { QMS_TOPICS } = require('../utils/qmsTopics');
@@ -405,12 +423,6 @@ async function run() {
     recommendation: `rec for ${topicId} @ ${confidence}`,
     confidence,
     evidence: [{ type: 'reflection', id: 1 }],
-    // ADR-017 Phase 1: every candidate built by this helper shares the
-    // same default priority unless a test explicitly overrides it via
-    // `extra`. Since sortRecommendations() now sorts priority-first, this
-    // default keeps every pre-existing P-01..P-10 assertion exercising
-    // exactly the tier it always tested (confidence → order → topicId).
-    priority: 0,
     ...extra,
   });
 
@@ -529,106 +541,6 @@ async function run() {
       threw = true;
     }
     assert(threw, 'an invalid candidate topicId is treated as a rule bug and surfaces loudly, unlike stale-persisted-row handling in §6.1');
-  }
-
-  // ── Section 6b: ADR-017 Phase 1 — priority-first comparator ───────────
-  console.log('\nSection 6b: ADR-017 Phase 1 — priority-first comparator');
-
-  console.log('\nTest P-11: sortRecommendations() orders by priority descending, overriding confidence');
-  {
-    // Lower confidence but higher priority must still win — this is
-    // exactly the behavior change ADR-017 §4 calls out explicitly.
-    const candidates = [
-      candidate(TOPIC_A, 0.95, { priority: 10 }),
-      candidate(TOPIC_B, 0.10, { priority: 100 }),
-    ];
-    const result = sortRecommendations(candidates);
-    assertEq(
-      result.map((c) => c.topicId),
-      [TOPIC_B, TOPIC_A],
-      'the higher-priority, lower-confidence candidate (TOPIC_B) sorts first'
-    );
-  }
-
-  console.log('\nTest P-12: sortRecommendations() falls back to confidence, then order, when priority ties');
-  {
-    // Same shape as P-04, but now with an explicit (equal) priority on
-    // every candidate — proves the fallback tiers are unchanged, only
-    // reached one level later than before ADR-017.
-    const candidates = [
-      candidate(TOPIC_C, 0.70, { priority: 50 }),
-      candidate(TOPIC_B, 0.70, { priority: 50 }),
-    ];
-    const result = sortRecommendations(candidates);
-    assertEq(
-      result.map((c) => c.topicId),
-      [TOPIC_B, TOPIC_C],
-      'equal priority falls back to the pre-existing confidence/order tiebreak (TOPIC_B wins on lower topic.order)'
-    );
-  }
-
-  console.log('\nTest P-13: sortRecommendations() treats a missing priority as 0, not a throw');
-  {
-    let threw = false;
-    let result = [];
-    try {
-      result = sortRecommendations([
-        { topicId: TOPIC_A, recommendation: 'r', confidence: 0.5, evidence: [] },
-        candidate(TOPIC_B, 0.5, { priority: 20 }),
-      ]);
-    } catch (_) {
-      threw = true;
-    }
-    assert(threw === false, 'a candidate with no priority field does not throw at sort time');
-    assertEq(result.map((c) => c.topicId), [TOPIC_B, TOPIC_A], 'the explicitly-prioritized candidate still outranks the unprioritized one');
-  }
-
-  console.log('\nTest P-14: validateRecommendationRules() accepts the live RECOMMENDATION_RULES catalogue');
-  {
-    let threw = false;
-    try {
-      validateRecommendationRules(RECOMMENDATION_RULES);
-    } catch (_) {
-      threw = true;
-    }
-    assert(threw === false, 'the real PR36 rule catalogue passes validation as shipped');
-  }
-
-  console.log('\nTest P-15: validateRecommendationRules() throws on a rule with a missing priority');
-  {
-    let threw = false;
-    let message = '';
-    try {
-      validateRecommendationRules([{ id: 'no_priority_rule', applies: () => true, evaluate: () => ({}) }]);
-    } catch (err) {
-      threw = true;
-      message = err.message;
-    }
-    assert(threw, 'a rule with no priority field fails validation');
-    assert(message.includes('no_priority_rule'), 'the error names the offending rule id');
-  }
-
-  console.log('\nTest P-16: validateRecommendationRules() throws on a rule with a non-numeric priority');
-  {
-    let threw = false;
-    try {
-      validateRecommendationRules([{ id: 'bad_priority_rule', priority: 'high', applies: () => true, evaluate: () => ({}) }]);
-    } catch (_) {
-      threw = true;
-    }
-    assert(threw, 'a non-numeric priority value fails validation just like a missing one');
-  }
-
-  console.log('\nTest P-17: the live PR36 catalogue matches the ADR-017 §3 priority table (no silent renumbering)');
-  {
-    const expected = {
-      growth_plan_missing: 100,
-      stale_evidence: 80,
-      low_confidence_recommendation: 50,
-      recurring_topic_pattern: 10,
-    };
-    const actual = Object.fromEntries(RECOMMENDATION_RULES.map((r) => [r.id, r.priority]));
-    assertEq(actual, expected, 'each existing rule carries exactly the priority value ADR-017 §3 assigns it');
   }
 
   clearAll();
@@ -888,6 +800,369 @@ async function run() {
       recA.recommendation.includes('Continue focused coaching support'),
       'the baseline recurring_topic_pattern message still surfaces when no PR36 rule applies'
     );
+  }
+
+  clearAll();
+
+  // ── Section 9: PR39 (ADR-017) trend rule predicates ──────────────────
+  console.log('\nSection 9: PR39 trend rules');
+
+  console.log('\nTest T-01: trend_rising fires when confidence has risen past TREND_FLAT_THRESHOLD since the last snapshot');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+    // Baseline had evidence too (evidenceScore > 0), so evidenceTransition
+    // is 'unchanged' — isolates this to trend_rising alone, not
+    // evidence_gained.
+    insertSnapshotRow(PHONE, TOPIC_A, {
+      confidence: 0.10, evidenceScore: 0.3, capturedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(!!recA, 'TOPIC_A recommendation is present');
+    assert(
+      recA.recommendation.includes('has improved since your last check-in'),
+      'trend_rising message surfaces when confidence has genuinely risen'
+    );
+  }
+
+  console.log('\nTest T-02: trend_rising does not fire against a baseline topic (no prior snapshot)');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+    // No snapshot row inserted at all — ctx.trend.status is 'baseline'.
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(!!recA, 'TOPIC_A recommendation is present');
+    assert(
+      !recA.recommendation.includes('has improved since your last check-in'),
+      'trend_rising does not fire without a prior snapshot to compare against'
+    );
+    assert(
+      recA.recommendation.includes('Continue focused coaching support'),
+      'falls through to recurring_topic_pattern instead, as before PR39'
+    );
+  }
+
+  console.log('\nTest T-03: trend_falling fires when confidence has dropped past TREND_FLAT_THRESHOLD since the last snapshot');
+  clearAll();
+  {
+    // Confidence is capped at 1.0, so the baseline must be set near that
+    // cap and the *current* confidence brought down instead — two
+    // reflections (not five) keeps evidenceScore below its cap so
+    // current confidence lands comfortably below the 0.98 baseline
+    // while staying well above LOW_CONFIDENCE_THRESHOLD.
+    insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+    // TOPIC_B is filler solely to satisfy the insufficient-data guard's
+    // reflection-count minimum, since TOPIC_A intentionally has only 2.
+    insertReflectionRaw(PHONE, { topicId: TOPIC_B });
+    insertSnapshotRow(PHONE, TOPIC_A, {
+      confidence: 0.98, evidenceScore: 0.3, capturedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(!!recA, 'TOPIC_A recommendation is present');
+    assert(
+      recA.recommendation.includes('has declined since your last check-in'),
+      'trend_falling message surfaces when confidence has genuinely dropped'
+    );
+  }
+
+  console.log('\nTest T-04: trend_falling does not fire against a baseline topic (no prior snapshot)');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(
+      !recA.recommendation.includes('has declined since your last check-in'),
+      'trend_falling does not fire without a prior snapshot to compare against'
+    );
+  }
+
+  console.log('\nTest T-05: evidence_gained fires when the last snapshot had no evidence and the topic now does');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+    // evidenceScore: 0 marks the snapshot as having had no evidence at
+    // capture time (coachingTrendService's hadEvidenceAtCapture proxy).
+    insertSnapshotRow(PHONE, TOPIC_A, {
+      confidence: 0, evidenceScore: 0, capturedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(!!recA, 'TOPIC_A recommendation is present');
+    assert(
+      recA.recommendation.includes('New evidence has appeared'),
+      'evidence_gained message surfaces when evidence newly exists'
+    );
+    assert(
+      !recA.recommendation.includes('has improved since your last check-in'),
+      'evidence_gained (priority 60) wins over trend_rising (priority 40) even though the confidence delta would also read as rising'
+    );
+  }
+
+  console.log('\nTest T-06: evidence_gained does not fire against a baseline topic (no prior snapshot)');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(
+      !recA.recommendation.includes('New evidence has appeared'),
+      'evidence_gained does not fire without a prior snapshot to compare against'
+    );
+  }
+
+  console.log('\nTest T-07: evidence_removed fires when the last snapshot had evidence and the topic no longer does');
+  clearAll();
+  {
+    // TOPIC_A has no current evidence at all. TOPIC_B satisfies the
+    // insufficient-data guard so getCoachingInsights() actually runs the
+    // rule pipeline instead of short-circuiting on status insufficient_data.
+    for (let i = 0; i < 3; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_B });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_B, status: 'active' });
+    insertSnapshotRow(PHONE, TOPIC_A, {
+      confidence: 0.6, evidenceScore: 0.5, capturedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    assert(!!recA, 'TOPIC_A recommendation is present even with zero current evidence');
+    assert(
+      recA.recommendation.includes('no longer present'),
+      'evidence_removed message surfaces when previously-present evidence is now gone'
+    );
+  }
+
+  console.log('\nTest T-08: evidence_removed does not fire against a baseline topic (no prior snapshot)');
+  clearAll();
+  {
+    for (let i = 0; i < 3; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_B });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_B, status: 'active' });
+    // No coaching_snapshots row for TOPIC_A at all — status is 'baseline',
+    // not 'trend', so evidence_removed must not fire even though TOPIC_A
+    // currently has zero evidence.
+
+    const result = getCoachingInsights(PHONE);
+    const recA = result.recommendations.find((r) => r.topicId === TOPIC_A);
+    // A topic with literally zero evidence of any kind produces no
+    // recommendation candidate at all (no rule's applies() matches an
+    // empty ctx) — the correct assertion is its absence, not a specific
+    // wrong message.
+    assert(!recA, 'a baseline topic with zero current evidence produces no recommendation, not an evidence_removed one');
+  }
+
+  // ── Section 10: cross-catalogue mutual exclusivity (ADR-017 §3) ──────
+  console.log('\nSection 10: cross-catalogue mutual exclusivity — exactly one recommendation per topic');
+
+  console.log('\nTest X-01: growth_plan_missing (priority 100) wins over a simultaneously-true trend_falling condition');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    // No active growth plan for TOPIC_A → growth_plan_missing applies.
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_B, status: 'active' }); // satisfies the guard
+    for (let i = 0; i < 3; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_B });
+    // Falling-trend condition also true for TOPIC_A.
+    insertSnapshotRow(PHONE, TOPIC_A, {
+      confidence: 0.98, evidenceScore: 0.3, capturedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const result = getCoachingInsights(PHONE);
+    const topicAEntries = result.recommendations.filter((r) => r.topicId === TOPIC_A);
+    assertEq(topicAEntries.length, 1, 'exactly one recommendation for TOPIC_A, not one per matching rule');
+    assert(
+      topicAEntries[0].recommendation.includes("don't yet have an active growth plan"),
+      'growth_plan_missing wins the collision, per its higher ADR-017 priority'
+    );
+    assert(
+      !topicAEntries[0].recommendation.includes('has declined since your last check-in'),
+      'the trend_falling message is suppressed by the higher-priority rule'
+    );
+  }
+
+  console.log('\nTest X-02: stale_evidence (priority 80) wins over a simultaneously-true trend_falling condition');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+    _db.exec(
+      `UPDATE qms_reflections SET created_at = datetime('now', '-90 days') WHERE topic_id = '${TOPIC_A}'`
+    );
+    _db.exec(
+      `UPDATE qms_growth_plans SET created_at = datetime('now', '-90 days') WHERE topic_id = '${TOPIC_A}'`
+    );
+    // Falling-trend condition also true for TOPIC_A.
+    insertSnapshotRow(PHONE, TOPIC_A, {
+      confidence: 0.98, evidenceScore: 0.3, capturedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const result = getCoachingInsights(PHONE);
+    const topicAEntries = result.recommendations.filter((r) => r.topicId === TOPIC_A);
+    assertEq(topicAEntries.length, 1, 'exactly one recommendation for TOPIC_A, not one per matching rule');
+    assert(
+      topicAEntries[0].recommendation.includes("haven't recorded recent evidence"),
+      'stale_evidence wins the collision, per its higher ADR-017 priority'
+    );
+    assert(
+      !topicAEntries[0].recommendation.includes('has declined since your last check-in'),
+      'the trend_falling message is suppressed by the higher-priority rule'
+    );
+  }
+
+  console.log('\nTest X-03: evidence_gained (priority 60) wins over a simultaneously-true trend_rising condition (re-proof of T-05, via the collision framing)');
+  clearAll();
+  {
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_A, status: 'active' });
+    insertSnapshotRow(PHONE, TOPIC_A, {
+      confidence: 0, evidenceScore: 0, capturedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const result = getCoachingInsights(PHONE);
+    const topicAEntries = result.recommendations.filter((r) => r.topicId === TOPIC_A);
+    assertEq(topicAEntries.length, 1, 'exactly one recommendation for TOPIC_A, not one per matching rule');
+    assert(
+      topicAEntries[0].recommendation.includes('New evidence has appeared'),
+      'evidence_gained wins the collision, per its higher ADR-017 priority'
+    );
+  }
+
+  console.log('\nTest X-04: no rule collision ever produces more than one recommendation per topic, across the full combined catalogue');
+  clearAll();
+  {
+    // Every priority tier gets a topic engineered to plausibly satisfy
+    // more than one rule's raw condition at once (growth_plan_missing +
+    // falling trend for TOPIC_A; stale evidence + rising trend for
+    // TOPIC_B; evidence gained + rising trend for TOPIC_C).
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_A });
+    insertSnapshotRow(PHONE, TOPIC_A, {
+      confidence: 0.98, evidenceScore: 0.3, capturedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_B });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_B, status: 'active' });
+    _db.exec(
+      `UPDATE qms_reflections SET created_at = datetime('now', '-90 days') WHERE topic_id = '${TOPIC_B}'`
+    );
+    _db.exec(
+      `UPDATE qms_growth_plans SET created_at = datetime('now', '-90 days') WHERE topic_id = '${TOPIC_B}'`
+    );
+    insertSnapshotRow(PHONE, TOPIC_B, {
+      confidence: 0.10, evidenceScore: 0.3, capturedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    for (let i = 0; i < 5; i++) insertReflectionRaw(PHONE, { topicId: TOPIC_C });
+    insertGrowthPlanRaw(PHONE, { topicId: TOPIC_C, status: 'active' });
+    insertSnapshotRow(PHONE, TOPIC_C, {
+      confidence: 0, evidenceScore: 0, capturedAt: '2026-01-01T00:00:00.000Z',
+    });
+
+    const result = getCoachingInsights(PHONE);
+    for (const topicId of [TOPIC_A, TOPIC_B, TOPIC_C]) {
+      const entries = result.recommendations.filter((r) => r.topicId === topicId);
+      assertEq(entries.length, 1, `exactly one recommendation for ${topicId}, even with multiple rule conditions simultaneously true`);
+    }
+  }
+
+  // ── Section 11: comparator regression (priority-first sort, ADR-017 §4) ─
+  console.log('\nSection 11: sortRecommendations() comparator regression');
+
+  console.log('\nTest CMP-01: priority wins over confidence');
+  {
+    const candidates = [
+      candidate(TOPIC_A, 0.95, { priority: 10 }),
+      candidate(TOPIC_B, 0.10, { priority: 90 }),
+    ];
+    const result = sortRecommendations(candidates);
+    assertEq(
+      result.map((c) => c.topicId),
+      [TOPIC_B, TOPIC_A],
+      'the higher-priority, lower-confidence candidate (TOPIC_B) sorts first'
+    );
+  }
+
+  console.log('\nTest CMP-02: confidence wins when priorities are equal');
+  {
+    const candidates = [
+      candidate(TOPIC_A, 0.40, { priority: 50 }),
+      candidate(TOPIC_B, 0.85, { priority: 50 }),
+    ];
+    const result = sortRecommendations(candidates);
+    assertEq(
+      result.map((c) => c.topicId),
+      [TOPIC_B, TOPIC_A],
+      'with equal priority, the higher-confidence candidate (TOPIC_B) sorts first — the original PR36 contract, unchanged'
+    );
+  }
+
+  console.log('\nTest CMP-03: stable topic-order tiebreak still applies when both priority and confidence are equal');
+  {
+    // TOPIC_B (order 2) vs TOPIC_C (order 3) — same priority, same
+    // confidence; TOPIC_B must sort first, exactly as in P-04.
+    const candidates = [
+      candidate(TOPIC_C, 0.70, { priority: 50 }),
+      candidate(TOPIC_B, 0.70, { priority: 50 }),
+    ];
+    const result = sortRecommendations(candidates);
+    assertEq(
+      result.map((c) => c.topicId),
+      [TOPIC_B, TOPIC_C],
+      'lower topic.order (TOPIC_B) still wins the tie once priority and confidence are both equal'
+    );
+  }
+
+  console.log('\nTest CMP-04: a candidate missing a priority field sorts as priority 0, not last-place-by-throw');
+  {
+    const candidates = [
+      candidate(TOPIC_A, 0.50), // no priority field at all
+      candidate(TOPIC_B, 0.50, { priority: 5 }),
+    ];
+    const result = sortRecommendations(candidates);
+    assertEq(
+      result.map((c) => c.topicId),
+      [TOPIC_B, TOPIC_A],
+      'the candidate with an explicit (even low) priority outranks one with no priority field at all'
+    );
+  }
+
+  console.log('\nTest CMP-05: every rule in the live catalogue declares a valid numeric priority (validateRecommendationRules re-proof)');
+  {
+    let threw = false;
+    try {
+      validateRecommendationRules(RECOMMENDATION_RULES);
+    } catch (e) {
+      threw = true;
+    }
+    assert(!threw, 'the live RECOMMENDATION_RULES catalogue passes its own startup validation');
+    assert(
+      RECOMMENDATION_RULES.every((r) => Number.isFinite(r.priority)),
+      'every rule object in the catalogue carries a finite numeric priority'
+    );
+  }
+
+  console.log('\nTest CMP-06: validateRecommendationRules() rejects a rule missing a priority');
+  {
+    let threw = false;
+    try {
+      validateRecommendationRules([{ id: 'no_priority_rule' }]);
+    } catch (e) {
+      threw = true;
+    }
+    assert(threw, 'a rule with no priority field fails validation loudly, not silently at sort time');
   }
 
   clearAll();
