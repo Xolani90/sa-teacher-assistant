@@ -110,6 +110,9 @@ const ERROR_PATTERNS = {
 function performErrorAnalysis(assessmentId, subject = 'general') {
   const db = getDb();
 
+  const assessment = db.prepare(`SELECT * FROM assessments WHERE id = ?`).get(assessmentId);
+  const isBlueprintBacked = !!(assessment && assessment.blueprint_id);
+
   // Get all learner results for this assessment
   const learnerResults = db.prepare(`
     SELECT * FROM learner_results WHERE assessment_id = ?
@@ -135,24 +138,73 @@ function performErrorAnalysis(assessmentId, subject = 'general') {
     return { error: 'No item analysis available for this assessment — per-question marks are needed before error patterns can be identified.' };
   }
 
+  // Resolve max marks per question, needed to determine per-learner pass/fail
+  // on blueprint-backed assessments, same lookup itemAnalysisService.js uses.
+  let blueprintQuestionMeta = {};
+  if (isBlueprintBacked) {
+    const rows = db.prepare(`
+      SELECT question_number, max_marks FROM blueprint_questions WHERE blueprint_id = ?
+    `).all(assessment.blueprint_id);
+    for (const row of rows) {
+      blueprintQuestionMeta[row.question_number] = { maxMark: row.max_marks };
+    }
+  }
+
   // Identify error patterns
   const errorPatterns = [];
   const topicErrors = {};
 
   // Analyze low-performing questions
   const difficultQuestions = itemAnalysis.filter(q => q.success_rate < 0.5);
-  
+
   for (const question of difficultQuestions) {
     const topic = question.topic;
     if (!topicErrors[topic]) {
       topicErrors[topic] = {
         topic,
-        frequency: 0,
+        // Set of unique learner names affected by ANY difficult question
+        // under this topic — RC1-H-002 fix: a learner failing two
+        // questions in the same topic must still count once, not twice,
+        // or "% of learners affected" can exceed 100%.
+        affectedLearners: new Set(),
         errorType: classifyErrorType(topic, subject, question.success_rate),
         description: generateErrorDescription(topic, subject, question.success_rate),
       };
     }
-    topicErrors[topic].frequency += learnerResults.length - Math.round(question.success_rate * learnerResults.length);
+
+    const maxMark = isBlueprintBacked
+      ? (blueprintQuestionMeta[question.question_number] || {}).maxMark
+      : null;
+
+    for (const result of learnerResults) {
+      if (!result.question_data) continue;
+      let parsed;
+      try {
+        parsed = JSON.parse(result.question_data);
+      } catch (e) {
+        continue;
+      }
+      const rawMark = parsed[question.question_number];
+      if (rawMark === undefined) continue;
+
+      // Blueprint-backed: bare number. Legacy free-form: { mark, maxMark, topic }.
+      const learnerMark = isBlueprintBacked ? (rawMark || 0) : (rawMark.mark || 0);
+      const questionMax = isBlueprintBacked ? maxMark : rawMark.maxMark;
+
+      // Same half-marks threshold itemAnalysisService.js uses for successRate,
+      // so "affected" here means the same thing "unsuccessful" means there.
+      if (questionMax && learnerMark < questionMax * 0.5) {
+        topicErrors[topic].affectedLearners.add(result.learner_name);
+      }
+    }
+  }
+
+  // frequency = count of unique learners affected by this topic (not a sum
+  // of per-question failures), so it can never exceed the class size and
+  // "% of learners affected" downstream can never exceed 100%.
+  for (const entry of Object.values(topicErrors)) {
+    entry.frequency = entry.affectedLearners.size;
+    delete entry.affectedLearners;
   }
 
   // Convert to array and sort by frequency
