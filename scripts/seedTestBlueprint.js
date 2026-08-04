@@ -21,8 +21,8 @@ require('dotenv').config();
  * smoke-testing. Run it once, then run NEW TEST in WhatsApp.
  */
 
-const { hashPhone } = require('./utils/usageTracker');
-const { createBlueprint, publishBlueprint } = require('./services/blueprintRepository');
+const { hashPhone } = require('../utils/usageTracker');
+const { createBlueprint, publishBlueprint } = require('../services/blueprintRepository');
 
 const rawPhone = process.argv[2];
 if (!rawPhone) {

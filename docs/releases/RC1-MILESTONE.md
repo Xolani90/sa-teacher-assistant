@@ -133,7 +133,7 @@ be verified independently.
 ### Assessment
 | Item | Automated ref | Pass | Fail | Notes |
 |---|---|---|---|---|
-| NEW TEST (session start → blueprint → class) | `assessment-session-flow.test.js` | ☐ | ☐ | |
+| NEW TEST (session start → blueprint → class) | `assessment-session-flow.test.js` | ☐ | ☑ | FAIL — RC1-H-001: no production entry point exists to create/publish Assessment Blueprints. Remaining Assessment rows below tested under documented workaround (manually seeded blueprint) after this defect was logged. |
 | Interactive mark capture | `assessment-capture-service.test.js` | ☐ | ☐ | |
 | Bulk paste mark capture | `assessment-bulk-capture.test.js` | ☐ | ☐ | |
 | UNDO / EDIT mid-capture | `assessment-capture-undo.test.js`, `assessmentCaptureService.edit.test.js` | ☐ | ☐ | |
@@ -314,7 +314,7 @@ what answers "who was fixing this again?" six days into the pilot.
 
 | Severity | Owner | Date discovered | Date resolved | RC version containing fix | Description |
 |---|---|---|---|---|---|
-| | | | | | |
+| High | X.O | 2026-08-04 | | | **RC1-H-001** — No teacher-accessible production path exists to create and publish Assessment Blueprints. `createBlueprint()`/`publishBlueprint()` (`services/blueprintRepository.js`) have no caller outside `scripts/seedTestBlueprint.js` (a dev seeding script) and the test suite. Verified no path via: AI intent classifier (no blueprint-creation intent type), fixed WhatsApp commands (`NEW TEST`, `PRINT` both require an existing published blueprint), `routes/api.js` (zero blueprint references; its only POST/PATCH/DELETE routes are `/reflections`, unrelated), `routes/webhook.js` (only imports read-only `listBlueprints`/`getBlueprintById`), `flows/assessmentSessionFlow.js` (only reads via `listBlueprints`), `core/` (no blueprint references), and no cron/scheduler exists. Impact: `NEW TEST` and everything downstream (PRINT, interactive/bulk mark capture, UNDO/EDIT, item analysis, CLASS INTERVENTION, LEARNER PROGRESS) is unreachable for a pilot teacher on RC1 as shipped. The blueprint subsystem itself (validation, versioning, marks import, analytics, PDF export) is fully implemented and tested — only the production entry point to create/publish is missing. |
 
 ---
 
