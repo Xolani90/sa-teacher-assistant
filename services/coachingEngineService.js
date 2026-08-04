@@ -693,19 +693,27 @@ function trendRisingApplies(ctx) {
 const RECOMMENDATION_RULES = [
   {
     id: 'growth_plan_missing',
+    messageId: 'growth_plan_missing',
     priority: 100,
     applies: (ctx) => growthPlanMissingApplies(ctx),
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
       priority: 100,
+      messageId: 'growth_plan_missing',
       recommendation: `You have identified a recurring pattern in ${ctx.topic.label} `
         + `but don't yet have an active growth plan.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
+      // ADR-018 Phase 1: populated alongside `recommendation` but not yet
+      // consumed anywhere — coachingMessageRenderer can already render
+      // from this today; `recommendation` itself only stops being
+      // hand-composed here in Phase 2.
+      templateData: { topicLabel: ctx.topic.label },
     }),
   },
   {
     id: 'evidence_removed',
+    messageId: 'evidence_removed',
     priority: 90,
     // Mutually exclusive with growth_plan_missing (higher priority, so it
     // wins on priority alone even if both applied) — excluded here anyway
@@ -714,14 +722,17 @@ const RECOMMENDATION_RULES = [
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
       priority: 90,
+      messageId: 'evidence_removed',
       recommendation: `Evidence you previously recorded for ${ctx.topic.label} is no `
         + `longer present. Confirm whether this topic still needs attention.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
+      templateData: { topicLabel: ctx.topic.label },
     }),
   },
   {
     id: 'stale_evidence',
+    messageId: 'stale_evidence',
     priority: 80,
     applies: (ctx) => !growthPlanMissingApplies(ctx)
       && !evidenceRemovedApplies(ctx)
@@ -729,14 +740,17 @@ const RECOMMENDATION_RULES = [
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
       priority: 80,
+      messageId: 'stale_evidence',
       recommendation: `You haven't recorded recent evidence for ${ctx.topic.label}. `
         + `Add a recent reflection to keep recommendations current.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
+      templateData: { topicLabel: ctx.topic.label },
     }),
   },
   {
     id: 'trend_falling',
+    messageId: 'trend_falling',
     priority: 70,
     applies: (ctx) => !growthPlanMissingApplies(ctx)
       && !evidenceRemovedApplies(ctx)
@@ -745,14 +759,21 @@ const RECOMMENDATION_RULES = [
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
       priority: 70,
+      messageId: 'trend_falling',
       recommendation: `Your confidence in ${ctx.topic.label} has declined since your `
         + `last check-in. Consider revisiting this area soon.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
+      templateData: {
+        topicLabel: ctx.topic.label,
+        currentConfidence: ctx.trend.currentConfidence,
+        previousConfidence: ctx.trend.lastConfidence,
+      },
     }),
   },
   {
     id: 'evidence_gained',
+    messageId: 'evidence_gained',
     priority: 60,
     applies: (ctx) => !growthPlanMissingApplies(ctx)
       && !evidenceRemovedApplies(ctx)
@@ -762,14 +783,17 @@ const RECOMMENDATION_RULES = [
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
       priority: 60,
+      messageId: 'evidence_gained',
       recommendation: `New evidence has appeared for ${ctx.topic.label} since your last `
         + `check-in. Keep building on this momentum.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
+      templateData: { topicLabel: ctx.topic.label },
     }),
   },
   {
     id: 'low_confidence_recommendation',
+    messageId: 'low_confidence_recommendation',
     priority: 50,
     applies: (ctx) => ctx.hasEvidence
       && !growthPlanMissingApplies(ctx)
@@ -781,14 +805,17 @@ const RECOMMENDATION_RULES = [
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
       priority: 50,
+      messageId: 'low_confidence_recommendation',
       recommendation: 'Evidence is currently limited for this recommendation. '
         + 'Continue recording reflections before making major changes.',
       confidence: ctx.confidence,
       evidence: ctx.evidence,
+      templateData: {},
     }),
   },
   {
     id: 'trend_rising',
+    messageId: 'trend_rising',
     priority: 40,
     applies: (ctx) => !growthPlanMissingApplies(ctx)
       && !evidenceRemovedApplies(ctx)
@@ -800,14 +827,21 @@ const RECOMMENDATION_RULES = [
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
       priority: 40,
+      messageId: 'trend_rising',
       recommendation: `Your confidence in ${ctx.topic.label} has improved since your `
         + `last check-in. Keep up the current approach.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
+      templateData: {
+        topicLabel: ctx.topic.label,
+        currentConfidence: ctx.trend.currentConfidence,
+        previousConfidence: ctx.trend.lastConfidence,
+      },
     }),
   },
   {
     id: 'recurring_topic_pattern',
+    messageId: 'recurring_topic_pattern',
     priority: 10,
     // Any topic with currently-usable evidence is an applicable pattern —
     // the insufficient-data guard (§6.6) already establishes there's
@@ -824,9 +858,11 @@ const RECOMMENDATION_RULES = [
     evaluate: (ctx) => ({
       topicId: ctx.topicId,
       priority: 10,
+      messageId: 'recurring_topic_pattern',
       recommendation: `Continue focused coaching support on ${ctx.topic.label}.`,
       confidence: ctx.confidence,
       evidence: ctx.evidence,
+      templateData: { topicLabel: ctx.topic.label },
     }),
   },
 ];
