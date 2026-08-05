@@ -66,7 +66,31 @@ const STEP = {
   // and conflating the two would mean a wrong keypress after "PRINT" could
   // accidentally start (and silently abandon) a real marks-capture session.
   SELECT_PRINT_BLUEPRINT: 'selectPrintBlueprint',
+  // ADR-019 Step 3, Commit 5 part 2: once marks capture completes, the
+  // session isn't deleted outright anymore — it moves here so the teacher
+  // can immediately act on a scoped NavigationService menu (NEW_ASSESSMENT
+  // / PRINT) instead of having to remember/retype a command from a blank
+  // slate. Scope note: this menu only offers actions assessmentSessionFlow
+  // itself owns. CLASS_INTERVENTION/LEARNER_PROGRESS belong to
+  // workspaceFlow.js and are deliberately NOT offered here — cross-flow
+  // menu dispatch has no designed mechanism yet and is deferred to a
+  // future ADR-019 commit once there's a second real consumer to design
+  // it against.
+  COMPLETE_MENU: 'completeMenu',
 };
+
+// ADR-019 Step 3, Commit 5 part 2 — the post-completion menu. Registered
+// with NavigationService (capabilities.menus / FlowDefinition.menus in
+// webhook.js) purely for documentation/discoverability; the numeric
+// dispatch itself is handled locally below via consumeNumericReply(),
+// matching how CANCEL/STATUS already delegate ownership without this flow
+// calling evaluateMessage() wholesale (see Commit 3b comment above).
+const COMPLETE_MENU_ID = 'assessmentSession.complete';
+const COMPLETE_MENU_OPTIONS = { '1': 'NEW_ASSESSMENT', '2': 'PRINT' };
+
+function formatCompleteMenu() {
+  return 'What would you like to do next?\n\n1. Start a new assessment\n2. Print a blueprint question paper';
+}
 
 function formatBlueprintList(blueprints) {
   return blueprints
@@ -316,6 +340,19 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
   }
 
   // NEW TEST while a session is already active — don't silently clobber it.
+  // A session sitting at COMPLETE_MENU is the one exception: nothing is
+  // actually "in progress" there anymore (capture already finished), so
+  // typing NEW TEST/PRINT directly should behave exactly like picking the
+  // matching menu digit, not get told to CANCEL something that's already
+  // done.
+  if (upper === 'NEW TEST' || upper === 'PRINT') {
+    if (state.step === STEP.COMPLETE_MENU) {
+      navigationService.closeMenu(phoneHash);
+      assessmentSessionState.delete(phoneHash);
+      return handleAssessmentSessionFlow(from, upper, message, preClassifiedIntent, deps);
+    }
+  }
+
   if (upper === 'NEW TEST') {
     await safeSendMessage(from,
       `You already have an assessment session in progress.\n\n${describeStatus(state)}\n\nSend *CANCEL* first if you want to abandon it and start a new one.`
@@ -485,11 +522,17 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
     const bulkNotice = isBulk ? formatBulkResultNotice(result.result) : '';
 
     if (isComplete(result.state)) {
-      assessmentSessionState.delete(phoneHash);
+      // ADR-019 Commit 5 part 2: the session moves to COMPLETE_MENU rather
+      // than being deleted, and the completion menu opens immediately —
+      // before PDF generation — so the options are live from the moment
+      // the teacher sees the completion message, not after a follow-up
+      // PDF send. The menu is included in this same message.
+      assessmentSessionState.set(phoneHash, { step: STEP.COMPLETE_MENU, lastActivity: Date.now() });
+      navigationService.openMenu(phoneHash, { id: COMPLETE_MENU_ID, options: COMPLETE_MENU_OPTIONS });
 
       const completionPrefix = bulkNotice ? `${bulkNotice}\n\n` : '';
       await safeSendMessage(from,
-        `${completionPrefix}Capture complete.\n\n${result.state.learnerCount} learners\n${result.state.questions.length} questions\n\nGenerating assessment...`
+        `${completionPrefix}Capture complete.\n\n${result.state.learnerCount} learners\n${result.state.questions.length} questions\n\nGenerating assessment...\n\n${formatCompleteMenu()}`
       );
 
       const diagnostic = await processAssessmentData(phoneHash, {
@@ -523,6 +566,31 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
     return true;
   }
 
+  // ── COMPLETE_MENU (ADR-019 Commit 5 part 2) ────────────────────────────
+  // Only a valid numeric selection against the still-open NavigationService
+  // menu is acted on. Anything else (an invalid digit, free text, a
+  // replayed digit after the menu's already been consumed) just re-renders
+  // the menu — it never falls through to the ACTIVE-step marks parsing,
+  // since there's no capture in progress here to misinterpret it as.
+  if (state.step === STEP.COMPLETE_MENU) {
+    const consumed = navigationService.consumeNumericReply(phoneHash, trimmed);
+    if (consumed.matched) {
+      assessmentSessionState.delete(phoneHash);
+      if (consumed.value === 'NEW_ASSESSMENT') {
+        return handleAssessmentSessionFlow(from, 'NEW TEST', message, preClassifiedIntent, deps);
+      }
+      if (consumed.value === 'PRINT') {
+        return handleAssessmentSessionFlow(from, 'PRINT', message, preClassifiedIntent, deps);
+      }
+    }
+
+    // Re-open the menu on an invalid/expired reply so a mistyped digit
+    // doesn't strand the teacher with no way back in.
+    navigationService.openMenu(phoneHash, { id: COMPLETE_MENU_ID, options: COMPLETE_MENU_OPTIONS });
+    await safeSendMessage(from, formatCompleteMenu());
+    return true;
+  }
+
   return false;
 }
 
@@ -536,6 +604,8 @@ function describeStatus(state) {
       return formatStatus(state);
     case STEP.SELECT_PRINT_BLUEPRINT:
       return `Session status: choosing a Blueprint to print.\n\n${formatBlueprintList(state.blueprints)}`;
+    case STEP.COMPLETE_MENU:
+      return `Session status: assessment complete.\n\n${formatCompleteMenu()}`;
     default:
       return 'Session status: unknown.';
   }
@@ -551,9 +621,19 @@ function currentPrompt(state) {
       return formatCapturePrompt(state);
     case STEP.SELECT_PRINT_BLUEPRINT:
       return 'Reply with a number to choose which Blueprint to print.';
+    case STEP.COMPLETE_MENU:
+      return formatCompleteMenu();
     default:
       return '';
   }
 }
 
-module.exports = { handleAssessmentSessionFlow, generateAndSendBlueprintPdf, generateAndSendPrintablePaper, STEP, describeStatus };
+module.exports = {
+  handleAssessmentSessionFlow,
+  generateAndSendBlueprintPdf,
+  generateAndSendPrintablePaper,
+  STEP,
+  describeStatus,
+  COMPLETE_MENU_ID,
+  COMPLETE_MENU_OPTIONS,
+};

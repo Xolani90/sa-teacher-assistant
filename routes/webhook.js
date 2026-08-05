@@ -83,8 +83,16 @@ const assessmentSessionState  = new SessionStore('assessmentSession',   24 * 60 
 require('../services/navigationService').registerFlow({
   id: 'assessmentSession',
   commands: ['NEW TEST', 'PRINT', 'RESUME'],
-  capabilities: { status: true, cancel: true, back: false, menus: false },
-  menus: {},
+  // ADR-019 Commit 5 part 2: assessmentSession now opens a scoped menu
+  // (the post-completion NEW_ASSESSMENT/PRINT prompt) via
+  // navigationService.openMenu() — see flows/assessmentSessionFlow.js.
+  // The menus map below is documentation/discoverability only, matching
+  // FlowDefinition.menus's documented purpose; it is not itself consulted
+  // by openMenu() today.
+  capabilities: { status: true, cancel: true, back: false, menus: true },
+  menus: {
+    complete: ['Start a new assessment', 'Print a blueprint question paper'],
+  },
   hooks: {
     cleanup: (phoneHash) => assessmentSessionState.delete(phoneHash),
     describeStatus: (phoneHash) => {

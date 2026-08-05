@@ -194,8 +194,9 @@ async function run() {
   });
 
   await send('Sipho Dlamini 4 8\nLebo Molefe 5 9');
-  assert(assessmentSessionState.get(phoneHash) === undefined, 'session cleared after bulk paste completes capture');
+  assert(assessmentSessionState.get(phoneHash)?.step === 'completeMenu', 'ADR-019: session moves to the completion menu (not deleted) after bulk paste completes capture');
   assert(/Capture complete/i.test(firstMessage()), 'completion message sent after bulk paste finishes the session');
+  assert(/what would you like to do next/i.test(firstMessage()), 'ADR-019: the completion menu is included in the same completion message');
   assert(lastDiagnosticCall !== null, 'processAssessmentData() was called on bulk completion');
   assert(
     lastDiagnosticCall.payload.learnerResults.length === 2 &&
@@ -216,7 +217,7 @@ async function run() {
 
   const handledDespitePdfFailure = await send('Sipho Dlamini 4 8\nLebo Molefe 5 9');
   assert(handledDespitePdfFailure === true, 'ADR-005A: a PDF generation failure does not throw out of the flow');
-  assert(assessmentSessionState.get(phoneHash) === undefined, 'ADR-005A: marks capture still completed and session still cleared despite the PDF failure');
+  assert(assessmentSessionState.get(phoneHash)?.step === 'completeMenu', 'ADR-005A/ADR-019: marks capture still completed and session moved to the completion menu despite the PDF failure');
   assert(lastDiagnosticCall !== null && lastDiagnosticCall.payload.learnerResults.length === 2, 'ADR-005A: marks were still committed via processAssessmentData() despite the PDF failure');
   assert(/couldn.t generate the analytics PDF/i.test(lastMessage()), 'ADR-005A: teacher is told the PDF failed, as a follow-up, not silently dropped');
   generateBlueprintAssessmentPdfImpl = async (assessmentId) => {
