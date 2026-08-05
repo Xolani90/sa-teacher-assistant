@@ -1,9 +1,9 @@
 'use strict';
 /**
  * NavigationService tests (ADR-019 — Unified Conversational Navigation
- * Framework, Next Step 2: the navigation layer landed as new, additive
- * infrastructure). Nothing here exercises webhook.js/messageProcessor.js —
- * those aren't touched until the assessmentSessionFlow.js migration.
+ * Framework, Step 3 / Commit 1: FlowRegistry contract only). Nothing here
+ * exercises webhook.js/messageProcessor.js — those aren't touched until
+ * Commit 2 (navigation wiring) and Commit 3 (Assessment migration).
  *
  * Run individually: node tests/navigation-service.test.js
  * Run via npm:       npm test
@@ -28,32 +28,94 @@ function freshPhoneHash() {
   return crypto.randomBytes(16).toString('hex');
 }
 
-// ── §1 registerFlow / getFlowDefinition ─────────────────────────────────
+// ── §1 registerFlow / getFlowDefinition — happy path ────────────────────
 {
   nav.registerFlow({
     id: 'assessmentSession',
-    commands: ['UNDO', 'STATUS', 'EDIT', 'CANCEL'],
-    supportsCancel: true,
-    supportsBack: false,
+    commands: ['PRINT', 'NEW TEST'],
+    capabilities: { status: true, cancel: true, back: false, menus: false },
   });
   const def = nav.getFlowDefinition('assessmentSession');
   assert(def && def.id === 'assessmentSession', 'registerFlow stores a retrievable definition');
-  assert(def.commands.includes('STATUS'), 'registered commands are preserved');
+  assert(def.commands.includes('PRINT'), 'registered commands are preserved');
+  assert(def.capabilities.status === true, 'capabilities are preserved');
   assert(nav.getFlowDefinition('doesNotExist') === null, 'unknown flow id returns null');
 }
 
 // re-registration is idempotent (overwrite, not throw/duplicate)
 {
-  nav.registerFlow({ id: 'assessmentSession', commands: ['STATUS'] });
+  nav.registerFlow({ id: 'assessmentSession', commands: ['STATUS'], capabilities: { status: true } });
   const def = nav.getFlowDefinition('assessmentSession');
   assert(def.commands.length === 1 && def.commands[0] === 'STATUS', 're-registering a flow id overwrites its definition');
   // restore full definition for later tests
   nav.registerFlow({
     id: 'assessmentSession',
-    commands: ['UNDO', 'STATUS', 'EDIT', 'CANCEL'],
-    supportsCancel: true,
-    supportsBack: false,
+    commands: ['PRINT', 'NEW TEST'],
+    capabilities: { status: true, cancel: true, back: false, menus: false },
   });
+}
+
+// missing capabilities/menus default to safe values, not a throw
+{
+  nav.registerFlow({ id: 'minimalFlow', commands: [] });
+  const def = nav.getFlowDefinition('minimalFlow');
+  assert(def.capabilities.status === false && def.capabilities.cancel === false, 'omitted capabilities default to false');
+  assert(typeof def.menus === 'object', 'omitted menus defaults to an empty object');
+  assert(def.hooks.cleanup === undefined, 'omitted hooks are simply absent, not required');
+}
+
+// ── §1 registerFlow — per-definition validation (fail fast) ─────────────
+{
+  let threw = false;
+  try { nav.registerFlow({ commands: [] }); } catch (e) { threw = true; }
+  assert(threw, 'registerFlow rejects a definition with no id');
+}
+{
+  let threw = false;
+  try { nav.registerFlow({ id: 'bad', commands: 'STATUS' }); } catch (e) { threw = true; }
+  assert(threw, 'registerFlow rejects commands that is not an array');
+}
+{
+  let threw = false;
+  try { nav.registerFlow({ id: 'bad', commands: ['STATUS', 'STATUS'] }); } catch (e) { threw = true; }
+  assert(threw, 'registerFlow rejects duplicate commands within the same flow');
+}
+{
+  let threw = false;
+  let message = '';
+  try { nav.registerFlow({ id: 'bad', commands: ['CANCEL'] }); } catch (e) { threw = true; message = e.message; }
+  assert(threw, 'registerFlow rejects a flow declaring a reserved global command as its own');
+  assert(message.includes('reserved'), 'the rejection explains that the command is reserved to NavigationService');
+}
+{
+  let threw = false;
+  try { nav.registerFlow({ id: 'bad', capabilities: { status: 'yes' } }); } catch (e) { threw = true; }
+  assert(threw, 'registerFlow rejects a non-boolean capability');
+}
+{
+  let threw = false;
+  try { nav.registerFlow({ id: 'bad', hooks: { cleanup: 'not a function' } }); } catch (e) { threw = true; }
+  assert(threw, 'registerFlow rejects a hook that is not a function');
+}
+{
+  let threw = false;
+  try { nav.registerFlow({ id: 'bad', menus: ['not', 'an', 'object'] }); } catch (e) { threw = true; }
+  assert(threw, 'registerFlow rejects menus that is not an object');
+}
+
+// ── FlowRegistry.validate() — cross-registry invariants ──────────────────
+{
+  const result = nav.validate();
+  assert(result.valid === true, 'validate() passes for the current, well-formed registry');
+  assert(Array.isArray(result.errors) && result.errors.length === 0, 'validate() returns an empty errors array when valid');
+}
+{
+  // Shared command names across flows are explicitly allowed — NOT a
+  // registry error. STATUS/PRINT/etc. are resolved by active-flow
+  // ownership at evaluateMessage() time, not by uniqueness.
+  nav.registerFlow({ id: 'growthPlan', commands: ['STATUS'], capabilities: { status: true } });
+  const result = nav.validate();
+  assert(result.valid === true, 'validate() allows the same command string declared by more than one flow');
 }
 
 // ── §3/§4 — menus + numeric collision rule ──────────────────────────────
@@ -101,11 +163,20 @@ function freshPhoneHash() {
 // ── §5 — renderHelp ──────────────────────────────────────────────────────
 {
   const help = nav.renderHelp('assessmentSession');
-  assert(help.includes('UNDO') && help.includes('STATUS') && help.includes('EDIT') && help.includes('CANCEL'), 'renderHelp lists the flow\'s declared commands');
+  assert(help.includes('PRINT') && help.includes('NEW TEST'), "renderHelp lists the flow's declared commands");
   assert(help.includes('HOME') && help.includes('MENU') && help.includes('HELP'), 'renderHelp always lists the global commands');
+  assert(help.includes('CANCEL'), 'renderHelp includes CANCEL when capabilities.cancel is true');
 
   const helpUnknownFlow = nav.renderHelp('noSuchFlow');
   assert(helpUnknownFlow.includes('HOME'), 'renderHelp degrades gracefully for an unregistered flow id (global commands only)');
+}
+{
+  nav.registerFlow({
+    id: 'customHelpFlow',
+    commands: [],
+    hooks: { describeHelp: () => 'CUSTOM HELP TEXT' },
+  });
+  assert(nav.renderHelp('customHelpFlow') === 'CUSTOM HELP TEXT', 'hooks.describeHelp overrides the auto-generated help text when present');
 }
 
 // ── §6 — MENU is global and inert; isGlobalCommand ──────────────────────
@@ -120,32 +191,63 @@ function freshPhoneHash() {
 {
   const ph = freshPhoneHash();
   nav.openMenu(ph, { id: 'm', options: { '1': 'A' } });
-  let extraCleared = false;
-  const fakeStore = { delete: () => { extraCleared = true; } };
-  const msg = nav.handleHome(ph, { extraStores: [fakeStore] });
+  let cleanedUp = false;
+  nav.registerFlow({
+    id: 'cleanupFlow',
+    commands: [],
+    hooks: { cleanup: (calledPh) => { if (calledPh === ph) cleanedUp = true; } },
+  });
+  const msg = nav.handleHome(ph);
   assert(nav.getOpenMenu(ph) === null, 'HOME closes any open menu');
-  assert(extraCleared === true, 'HOME clears every extra store it is given');
+  assert(cleanedUp === true, "HOME invokes every registered flow's hooks.cleanup with the phoneHash");
   assert(typeof msg === 'string' && msg.length > 0, 'HOME returns a reply message');
 }
-
 {
-  const backNotSupported = nav.handleBack('assessmentSession'); // supportsBack: false
-  assert(backNotSupported.handled === false, 'BACK is refused when the flow did not declare supportsBack');
-  assert(backNotSupported.message === "BACK isn't available here.", 'BACK refusal uses the specified copy');
-
-  nav.registerFlow({ id: 'backable', commands: [], supportsBack: true });
-  const backSupported = nav.handleBack('backable');
-  assert(backSupported.handled === true, 'BACK is allowed when the flow declared supportsBack');
+  // A flow with no cleanup hook must not break HOME for every other flow.
+  const ph = freshPhoneHash();
+  nav.registerFlow({ id: 'statelessFlow', commands: [] }); // no hooks at all
+  let threw = false;
+  try { nav.handleHome(ph); } catch (e) { threw = true; }
+  assert(threw === false, 'HOME tolerates flows that declare no cleanup hook');
 }
 
 {
-  const cancelSupported = nav.handleCancel('assessmentSession'); // supportsCancel: true
-  assert(cancelSupported.handled === true, 'CANCEL is centrally handled for a flow declaring supportsCancel');
+  const backNotSupported = nav.handleBack('assessmentSession'); // capabilities.back: false
+  assert(backNotSupported.handled === false, 'BACK is refused when the flow did not declare capabilities.back');
+  assert(backNotSupported.message === "BACK isn't available here.", 'BACK refusal uses the specified copy');
+
+  nav.registerFlow({ id: 'backable', commands: [], capabilities: { back: true } });
+  const backSupported = nav.handleBack('backable');
+  assert(backSupported.handled === true, 'BACK is allowed when the flow declared capabilities.back');
+}
+
+{
+  const cancelSupported = nav.handleCancel('assessmentSession'); // capabilities.cancel: true
+  assert(cancelSupported.handled === true, 'CANCEL is centrally handled for a flow declaring capabilities.cancel');
   assert(typeof cancelSupported.confirmationPrompt === 'string', 'CANCEL returns a confirmation prompt');
 
-  nav.registerFlow({ id: 'noCancel', commands: [], supportsCancel: false });
+  nav.registerFlow({ id: 'noCancel', commands: [], capabilities: { cancel: false } });
   const cancelRefused = nav.handleCancel('noCancel');
   assert(cancelRefused.handled === false, 'CANCEL is refused for a flow that did not opt in');
+}
+
+// ── STATUS ownership policy ───────────────────────────────────────────────
+{
+  const owner = nav.resolveStatusOwner('assessmentSession'); // capabilities.status: true
+  assert(owner.owner === 'flow' && owner.flowId === 'assessmentSession', 'STATUS belongs to an active flow that declares capabilities.status');
+}
+{
+  nav.registerFlow({ id: 'noStatus', commands: [], capabilities: { status: false } });
+  const owner = nav.resolveStatusOwner('noStatus');
+  assert(owner.owner === 'account', 'STATUS falls back to account/quota when the active flow does not declare capabilities.status');
+}
+{
+  const owner = nav.resolveStatusOwner(null);
+  assert(owner.owner === 'account', 'STATUS falls back to account/quota when there is no active flow');
+}
+{
+  const owner = nav.resolveStatusOwner('doesNotExist');
+  assert(owner.owner === 'account', 'STATUS falls back to account/quota for an unregistered flow id');
 }
 
 // ── §2 — evaluateMessage five-step order ────────────────────────────────

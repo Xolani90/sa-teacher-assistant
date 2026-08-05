@@ -1,12 +1,15 @@
 // services/navigationService.js
-// ADR-019: Unified Conversational Navigation Framework — Step 2 of the
-// ADR's "Next Steps": the navigation layer itself, landed as new, additive
-// infrastructure. Nothing in this file is wired into webhook.js,
-// messageProcessor.js, or any existing flow yet — that happens in the
-// follow-up PR that migrates assessmentSessionFlow.js (Next Step 3).
+// ADR-019: Unified Conversational Navigation Framework.
+//
+// Step 3 / Commit 1 of 5 — FlowRegistry contract only. This commit
+// reshapes the FlowDefinition contract, adds registration + cross-registry
+// validation, and updates renderHelp()/handleHome() to the new shape.
+// Nothing in this file is wired into webhook.js, messageProcessor.js, or
+// any existing flow yet — that begins in Commit 2 (navigation wiring) and
+// Commit 3 (Assessment becomes the first production consumer).
 //
 // Owns:
-//   - FlowDefinition registration (§1)
+//   - FlowDefinition registration + validation (§1)
 //   - the fixed five-step message-evaluation order (§2), exposed as
 //     evaluateMessage() for the future router to call
 //   - scoped session.menu objects with an explicit lifecycle (§3)
@@ -27,6 +30,11 @@ const { SessionStore } = require('../utils/sessionStore');
 const MENU_TTL_MS = 15 * 60 * 1000;
 const menuStore = new SessionStore('navigationMenu', MENU_TTL_MS);
 
+// Reserved to the navigation layer. A flow may never declare one of these
+// as one of its own `commands` — see validateDefinition() / validate().
+// Ordinary flow-specific commands (STATUS, PRINT, SAVE, ...) ARE allowed
+// to be declared by more than one flow: NavigationService resolves them
+// by active-flow ownership at evaluateMessage() time, not by uniqueness.
 const GLOBAL_COMMANDS = ['HOME', 'MENU', 'HELP', 'CANCEL', 'BACK'];
 
 // §1 — Flow registry. Flows call registerFlow() once at module load with a
@@ -34,14 +42,125 @@ const GLOBAL_COMMANDS = ['HOME', 'MENU', 'HELP', 'CANCEL', 'BACK'];
 const registry = new Map();
 
 /**
+ * @typedef {Object} FlowCapabilities
+ * @property {boolean} status - flow exposes its own STATUS meaning
+ * @property {boolean} cancel - flow opts into centrally-handled CANCEL
+ * @property {boolean} back   - flow opts into centrally-handled BACK
+ * @property {boolean} menus  - flow may open scoped session.menu prompts
+ */
+
+/**
+ * @typedef {Object} FlowHooks
+ * @property {function(string):void} [cleanup]        - invoked by HOME;
+ *   flow owns deleting its own state, NavigationService never touches a
+ *   flow's state maps directly.
+ * @property {function(string):string} [describeStatus] - invoked when
+ *   capabilities.status is true and the flow is active; if omitted, the
+ *   flow is expected to keep handling STATUS itself for now.
+ * @property {function(string):string} [describeHelp]  - transitional
+ *   override for renderHelp(); optional, since renderHelp() already
+ *   auto-generates help text from commands + capabilities by default.
+ */
+
+/**
  * @typedef {Object} FlowDefinition
  * @property {string} id
- * @property {string[]} [commands]        - e.g. ["UNDO", "STATUS", "EDIT", "CANCEL"]
- * @property {boolean} [supportsCancel]   - opt into centrally-handled CANCEL
- * @property {boolean} [supportsBack]     - opt into centrally-handled BACK
- * @property {Object.<string, string[]>} [menus] - named menu templates the
+ * @property {string[]} commands           - e.g. ["PRINT", "NEW TEST"]
+ * @property {Object.<string, string[]>} menus - named menu templates the
  *   flow can open, keyed by menu id, each an ordered list of option labels
+ * @property {FlowCapabilities} capabilities
+ * @property {FlowHooks} [hooks]
  */
+
+function isPlainObject(v) {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+}
+
+/**
+ * Validates a single FlowDefinition in isolation — everything intrinsic
+ * to one flow's own declaration, independent of what else is registered.
+ * Throws synchronously with a descriptive message; registerFlow() never
+ * partially registers a malformed definition.
+ */
+function validateDefinition(definition) {
+  if (!isPlainObject(definition)) {
+    throw new Error('[NAV] registerFlow requires a FlowDefinition object');
+  }
+  if (typeof definition.id !== 'string' || definition.id.trim() === '') {
+    throw new Error('[NAV] FlowDefinition.id is required and must be a non-empty string');
+  }
+  if (definition.commands !== undefined && !Array.isArray(definition.commands)) {
+    throw new Error(`[NAV] FlowDefinition("${definition.id}").commands must be an array`);
+  }
+  const commands = definition.commands || [];
+  const seen = new Set();
+  for (const cmd of commands) {
+    if (typeof cmd !== 'string' || cmd.trim() === '') {
+      throw new Error(`[NAV] FlowDefinition("${definition.id}").commands must contain only non-empty strings`);
+    }
+    const upper = cmd.trim().toUpperCase();
+    if (seen.has(upper)) {
+      throw new Error(`[NAV] FlowDefinition("${definition.id}") declares duplicate command "${cmd}"`);
+    }
+    seen.add(upper);
+    if (GLOBAL_COMMANDS.includes(upper)) {
+      // Reserved-command violations are a cross-registry-visible rule in
+      // spirit, but they're checkable per-definition (GLOBAL_COMMANDS is
+      // fixed), so we fail fast here rather than waiting for validate().
+      throw new Error(
+        `[NAV] FlowDefinition("${definition.id}") declares "${cmd}", which is reserved to NavigationService. ` +
+        `Use capabilities.cancel/back/status instead of declaring HOME/MENU/HELP/CANCEL/BACK as a flow command.`
+      );
+    }
+  }
+
+  if (definition.menus !== undefined && !isPlainObject(definition.menus)) {
+    throw new Error(`[NAV] FlowDefinition("${definition.id}").menus must be an object`);
+  }
+  const menus = definition.menus || {};
+  for (const [menuId, options] of Object.entries(menus)) {
+    if (!Array.isArray(options)) {
+      throw new Error(`[NAV] FlowDefinition("${definition.id}").menus["${menuId}"] must be an array of option labels`);
+    }
+  }
+
+  const capabilities = definition.capabilities || {};
+  if (!isPlainObject(definition.capabilities || {})) {
+    throw new Error(`[NAV] FlowDefinition("${definition.id}").capabilities must be an object`);
+  }
+  for (const key of ['status', 'cancel', 'back', 'menus']) {
+    if (capabilities[key] !== undefined && typeof capabilities[key] !== 'boolean') {
+      throw new Error(`[NAV] FlowDefinition("${definition.id}").capabilities.${key} must be a boolean`);
+    }
+  }
+
+  const hooks = definition.hooks || {};
+  if (!isPlainObject(definition.hooks || {})) {
+    throw new Error(`[NAV] FlowDefinition("${definition.id}").hooks must be an object`);
+  }
+  for (const key of ['cleanup', 'describeStatus', 'describeHelp']) {
+    if (hooks[key] !== undefined && typeof hooks[key] !== 'function') {
+      throw new Error(`[NAV] FlowDefinition("${definition.id}").hooks.${key} must be a function`);
+    }
+  }
+
+  return {
+    id: definition.id,
+    commands,
+    menus,
+    capabilities: {
+      status: Boolean(capabilities.status),
+      cancel: Boolean(capabilities.cancel),
+      back: Boolean(capabilities.back),
+      menus: Boolean(capabilities.menus),
+    },
+    hooks: {
+      cleanup: hooks.cleanup,
+      describeStatus: hooks.describeStatus,
+      describeHelp: hooks.describeHelp,
+    },
+  };
+}
 
 /**
  * Registers a flow's navigation metadata. Idempotent — re-registering the
@@ -51,20 +170,49 @@ const registry = new Map();
  * @param {FlowDefinition} definition
  */
 function registerFlow(definition) {
-  if (!definition || !definition.id) {
-    throw new Error('[NAV] registerFlow requires a definition with an id');
-  }
-  registry.set(definition.id, {
-    id: definition.id,
-    commands: definition.commands || [],
-    supportsCancel: Boolean(definition.supportsCancel),
-    supportsBack: Boolean(definition.supportsBack),
-    menus: definition.menus || {},
-  });
+  const normalized = validateDefinition(definition);
+  registry.set(normalized.id, normalized);
 }
 
 function getFlowDefinition(flowId) {
   return registry.get(flowId) || null;
+}
+
+/**
+ * §1 cross-registry invariants — everything that can only be checked by
+ * seeing the whole registry at once, run once at application startup
+ * after every flow module has called registerFlow(). Per-definition
+ * concerns (malformed shape, reserved commands, duplicate commands
+ * within one flow) are already rejected eagerly by registerFlow() itself
+ * and are NOT re-checked here.
+ *
+ * Intentionally does NOT reject the same command string (e.g. "STATUS")
+ * being declared by more than one flow — that's expected: NavigationService
+ * resolves shared commands by active-flow ownership, not by uniqueness.
+ *
+ * @returns {{valid: true} | {valid: false, errors: string[]}}
+ */
+function validate() {
+  const errors = [];
+  const seenIds = new Set();
+
+  for (const def of registry.values()) {
+    if (seenIds.has(def.id)) {
+      errors.push(`Duplicate flow id registered: "${def.id}"`);
+    }
+    seenIds.add(def.id);
+
+    for (const cmd of def.commands) {
+      if (GLOBAL_COMMANDS.includes(cmd.toUpperCase())) {
+        // Defense in depth — registerFlow() already rejects this at
+        // registration time, so reaching here would indicate the
+        // registry was mutated outside registerFlow().
+        errors.push(`Flow "${def.id}" declares reserved command "${cmd}"`);
+      }
+    }
+  }
+
+  return errors.length ? { valid: false, errors } : { valid: true, errors: [] };
 }
 
 // ── §3/§4 — Scoped menus ─────────────────────────────────────────────────
@@ -137,22 +285,23 @@ const NO_MENU_OPEN_REPLY =
 
 /**
  * Renders the HELP listing for a flow purely from its registered metadata.
- * Flows never format their own help text once migrated onto this layer.
+ * Flows never format their own help text once migrated onto this layer,
+ * unless they supply hooks.describeHelp as a transitional override.
  */
 function renderHelp(flowId) {
   const def = getFlowDefinition(flowId);
-  const flowCommands = def ? def.commands : [];
-  const globalOnly = GLOBAL_COMMANDS.filter(
-    (c) => !flowCommands.includes(c) && (c !== 'CANCEL' || !def?.supportsCancel) && (c !== 'BACK' || !def?.supportsBack)
-  );
+  if (def?.hooks?.describeHelp) {
+    return def.hooks.describeHelp(flowId);
+  }
 
+  const flowCommands = def ? def.commands : [];
   const lines = ['*Available commands*'];
   if (flowCommands.length) {
     lines.push(flowCommands.join(', '));
   }
   const globalLine = ['HOME', 'MENU', 'HELP']
-    .concat(def?.supportsCancel ? ['CANCEL'] : [])
-    .concat(def?.supportsBack ? ['BACK'] : [])
+    .concat(def?.capabilities.cancel ? ['CANCEL'] : [])
+    .concat(def?.capabilities.back ? ['BACK'] : [])
     .filter((c) => !flowCommands.includes(c));
   lines.push(globalLine.join(', '));
 
@@ -162,23 +311,27 @@ function renderHelp(flowId) {
 // ── §8 — HOME / BACK / CANCEL ────────────────────────────────────────────
 
 /**
- * HOME clears workflow, menu, and any temporary prompt state, returning
- * the teacher to the root screen. Callers pass the state stores that
- * should be cleared (the navigation layer doesn't know every flow's Map).
+ * HOME clears the open menu and every registered flow's own state via its
+ * optional hooks.cleanup(phoneHash). NavigationService never enumerates or
+ * touches a concrete flow's state maps directly — flow lifecycle stays
+ * owned by the flow itself. Flows with no persistent state (stateless,
+ * menu-only, or one-shot flows) simply omit hooks.cleanup.
  */
-function handleHome(phoneHash, { extraStores = [] } = {}) {
+function handleHome(phoneHash) {
   closeMenu(phoneHash);
-  extraStores.forEach((store) => store.delete(phoneHash));
+  for (const def of registry.values()) {
+    def.hooks?.cleanup?.(phoneHash);
+  }
   return "You're back at the main menu. Reply MENU to see what I can do.";
 }
 
 /**
  * BACK only affects navigation, never data, and only works if the active
- * flow declared supportsBack for the current step.
+ * flow declared capabilities.back for the current step.
  */
 function handleBack(flowId) {
   const def = getFlowDefinition(flowId);
-  if (!def || !def.supportsBack) {
+  if (!def || !def.capabilities.back) {
     return { handled: false, message: "BACK isn't available here." };
   }
   return { handled: true };
@@ -186,18 +339,37 @@ function handleBack(flowId) {
 
 /**
  * CANCEL confirmation copy, centralised for any flow declaring
- * supportsCancel = true. The flow still performs its own cleanup — this
- * only owns the wording so it isn't reinvented per flow.
+ * capabilities.cancel = true. The flow still performs its own cleanup via
+ * hooks.cleanup — this only owns the wording so it isn't reinvented per
+ * flow.
  */
 function handleCancel(flowId) {
   const def = getFlowDefinition(flowId);
-  if (!def || !def.supportsCancel) {
+  if (!def || !def.capabilities.cancel) {
     return { handled: false, message: 'CANCEL isn\'t available here.' };
   }
   return {
     handled: true,
     confirmationPrompt: 'Cancel this and lose your progress? Reply YES to confirm, or anything else to keep going.',
   };
+}
+
+/**
+ * STATUS ownership policy: if an active flow declares capabilities.status,
+ * STATUS belongs to that flow; otherwise it falls back to the caller's
+ * account/quota implementation. NavigationService only resolves ownership
+ * here — it does not itself know how to render either kind of STATUS.
+ *
+ * @returns {{owner: 'flow', flowId: string} | {owner: 'account'}}
+ */
+function resolveStatusOwner(activeFlowId) {
+  if (activeFlowId) {
+    const def = getFlowDefinition(activeFlowId);
+    if (def?.capabilities.status) {
+      return { owner: 'flow', flowId: activeFlowId };
+    }
+  }
+  return { owner: 'account' };
 }
 
 function isGlobalCommand(text) {
@@ -253,6 +425,7 @@ function evaluateMessage(phoneHash, text, { activeFlowId = null } = {}) {
 module.exports = {
   registerFlow,
   getFlowDefinition,
+  validate,
   openMenu,
   getOpenMenu,
   closeMenu,
@@ -261,6 +434,7 @@ module.exports = {
   handleHome,
   handleBack,
   handleCancel,
+  resolveStatusOwner,
   isGlobalCommand,
   evaluateMessage,
   GLOBAL_COMMANDS,
