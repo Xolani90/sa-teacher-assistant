@@ -19,6 +19,32 @@
 // ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
 const { createTestDb } = require('./helpers/createTestDb');
 
+let navigationService;
+
+// Mirrors the assessmentSession FlowDefinition registered in
+// routes/webhook.js (id, capabilities, menus, hooks). Kept byte-for-byte
+// in sync with that registration per ADR-019's "Known technical debt"
+// section — until registration is extracted into shared infrastructure,
+// this duplication is intentional and any change to one side must be
+// mirrored in the other.
+function registerAssessmentSessionFlow(assessmentSessionState, describeAssessmentSessionStatus) {
+  navigationService.registerFlow({
+    id: 'assessmentSession',
+    commands: ['NEW TEST', 'PRINT', 'RESUME'],
+    capabilities: { status: true, cancel: true, back: false, menus: true },
+    menus: {
+      complete: ['Start a new assessment', 'Print a blueprint question paper'],
+    },
+    hooks: {
+      cleanup: (phoneHash) => assessmentSessionState.delete(phoneHash),
+      describeStatus: (phoneHash) => {
+        const state = assessmentSessionState.get(phoneHash);
+        return state ? describeAssessmentSessionStatus(state) : null;
+      },
+    },
+  });
+}
+
 let passed = 0;
 let failed = 0;
 
@@ -36,9 +62,18 @@ async function run() {
   const testDb = createTestDb(__filename);
 
   const { SessionStore } = require('../utils/sessionStore');
-  const { handleAssessmentSessionFlow } = require('../flows/assessmentSessionFlow');
+  navigationService = require('../services/navigationService');
+  const { handleAssessmentSessionFlow, describeStatus: describeAssessmentSessionStatus } = require('../flows/assessmentSessionFlow');
 
   const assessmentSessionState = new SessionStore('assessmentSession', 24 * 60 * 60 * 1000);
+
+  // Registration fix (ADR-019 Recommendation 2, Strict registration):
+  // without this, NavigationService's registry is empty under test and
+  // assessmentSessionFlow.js's now-unguarded
+  // `getFlowDefinition('assessmentSession').hooks.*` calls throw the
+  // same "Cannot read properties of null (reading 'hooks')" error that
+  // growthPlan hit before Recommendation 1's fix.
+  registerAssessmentSessionFlow(assessmentSessionState, describeAssessmentSessionStatus);
 
   const PHONE = '+27831234567';
   const hashPhone = (p) => `hash_${p}`;
