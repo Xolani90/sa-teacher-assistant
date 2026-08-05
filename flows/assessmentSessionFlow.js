@@ -47,6 +47,15 @@ const {
   toLearnerResults,
 } = require('../services/assessmentCaptureService');
 
+// ADR-019 Step 3, Commit 3b: STATUS and CANCEL now delegate to
+// NavigationService rather than this flow owning that logic inline.
+// Ownership migration only — see the CANCEL/STATUS branches below for
+// why handleCancel() is deliberately NOT used (it always attaches a
+// YES-confirmation prompt, which would be a behavioural change, not a
+// migration). getFlowDefinition() + resolveStatusOwner() carry no such
+// policy, so they're the pieces that fit this commit's scope.
+const navigationService = require('../services/navigationService');
+
 const STEP = {
   SELECT_BLUEPRINT: 'selectBlueprint',
   SELECT_CLASS: 'selectClass',
@@ -273,14 +282,36 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
   }
 
   // ── A session is in progress: CANCEL and STATUS work from any step ────
+  //
+  // ADR-019 Commit 3b: both branches now route through NavigationService
+  // rather than this flow inlining its own state-clearing / status-
+  // rendering. Deliberately NOT using navigationService.handleCancel() —
+  // it always returns a YES-confirmation prompt, and today's CANCEL is
+  // immediate. Adopting that prompt here would be a UX change smuggled
+  // into an ownership migration, which Commit 3b explicitly rules out.
+  // getFlowDefinition() exposes the same hooks.cleanup already registered
+  // in Commit 3, so this is genuinely NavigationService-owned cleanup —
+  // just without borrowing handleCancel()'s confirmation policy.
   if (upper === 'CANCEL') {
-    assessmentSessionState.delete(phoneHash);
+    const def = navigationService.getFlowDefinition('assessmentSession');
+    if (def?.capabilities.cancel && def.hooks.cleanup) {
+      def.hooks.cleanup(phoneHash);
+    } else {
+      // Defensive fallback only — should be unreachable given Commit 3's
+      // registration, but never silently no-op a cancel request.
+      assessmentSessionState.delete(phoneHash);
+    }
     await safeSendMessage(from, 'Assessment session cancelled. No marks were saved.');
     return true;
   }
 
   if (upper === 'STATUS') {
-    await safeSendMessage(from, describeStatus(state));
+    const owner = navigationService.resolveStatusOwner('assessmentSession');
+    const def = navigationService.getFlowDefinition('assessmentSession');
+    const message = (owner.owner === 'flow' && def?.hooks?.describeStatus)
+      ? def.hooks.describeStatus(phoneHash)
+      : describeStatus(state); // defensive fallback — same function either way
+    await safeSendMessage(from, message);
     return true;
   }
 
