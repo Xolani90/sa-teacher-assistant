@@ -9,6 +9,12 @@
 // replies, topic clarification, or generation. Dependencies injected via
 // buildProcessMessageDeps() in webhook.js; no reverse dependency on
 // webhook.js.
+//
+// ADR-019 Step 3, Commit 2: also calls NavigationService.evaluateMessage()
+// once per message as the integration point for the future navigation
+// router — its result is currently discarded (see inline comment at the
+// call site). Commit 3 begins acting on that result, scoped to the
+// assessment-session flow only.
 
 'use strict';
 
@@ -154,6 +160,19 @@ async function processMessage(message, deps) {
     deps.reflectionState.get(phoneHash) ||
     deps.growthPlanState.get(phoneHash)
   );
+
+  // ── ADR-019 Step 3, Commit 2: NavigationService integration point ──────
+  // Computes the routing decision NavigationService.evaluateMessage() would
+  // make for this message, but does not act on it and does not log it —
+  // this commit exists solely to prove the dependency can be inserted into
+  // the pipeline without changing observable behavior in any way (no new
+  // output, no new side effects). The result is discarded on purpose.
+  // Correctness of evaluateMessage() itself is covered in isolation by
+  // tests/navigation-service.test.js, not exercised here. Commit 3 is the
+  // first commit where messageProcessor acts on any part of this result,
+  // starting with the assessment-session flow only.
+  const activeFlowId = deps.assessmentSessionState.get(phoneHash) ? 'assessmentSession' : null;
+  require('../services/navigationService').evaluateMessage(phoneHash, text, { activeFlowId });
 
   if (alreadyMidFlow) {
     // Route straight through without classifying — each handler will
