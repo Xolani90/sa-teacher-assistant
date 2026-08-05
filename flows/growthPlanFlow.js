@@ -42,6 +42,18 @@
 
 const { renderTopicListMessage, resolveTopicSelection, labelForTopicId } = require('../utils/qmsTopicSelection');
 
+// NavigationService migration (Navigation Platform §9 step 4, mirroring
+// ADR-019 Step 3 Commit 3b for Assessment): STATUS and CANCEL now delegate
+// to NavigationService's registered hooks (routes/webhook.js's growthPlan
+// registerFlow() call, §9 step 2) rather than this flow owning that logic
+// inline. Ownership migration only — ordering, wording, and side effects
+// are unchanged from before this commit. Deliberately NOT using
+// navigationService.handleCancel() — it always attaches a YES-confirmation
+// prompt, and today's CANCEL is immediate; adopting that prompt here would
+// be a UX change smuggled into an ownership migration, exactly the trap
+// Assessment's Commit 3b called out and avoided.
+const navigationService = require('../services/navigationService');
+
 const YES_RE = /^y(es)?$/i;
 const NO_RE = /^n(o)?$/i;
 
@@ -110,9 +122,41 @@ async function handleGrowthPlanFlow(from, text, preClassifiedIntent, deps) {
   }
 
   const trimmed = text.trim();
-  if (trimmed.toUpperCase() === 'CANCEL') {
-    growthPlanState.delete(phoneHash);
+  const upper = trimmed.toUpperCase();
+
+  // ADR-019 Step 3 Commit 3b pattern, applied to growthPlan: CANCEL now
+  // routes through the hooks.cleanup registered in webhook.js's
+  // registerFlow({ id: 'growthPlan', ... }) call, rather than this flow
+  // deleting session state directly. Same wording, same immediacy —
+  // ownership changes, teacher-visible behaviour does not.
+  if (upper === 'CANCEL') {
+    const def = navigationService.getFlowDefinition('growthPlan');
+    if (def?.capabilities.cancel && def.hooks.cleanup) {
+      def.hooks.cleanup(phoneHash);
+    } else {
+      // Defensive fallback only — should be unreachable given the
+      // registration already in place, but never silently no-op a
+      // cancel request.
+      growthPlanState.delete(phoneHash);
+    }
     await safeSendMessage(from, `No problem — cancelled.`);
+    return true;
+  }
+
+  // STATUS while a growth plan session is active: previously unhandled
+  // here (it would fall through and be consumed as ordinary step input).
+  // Now resolved via the describeStatus hook registered alongside CANCEL
+  // in the same registerFlow() call, matching Assessment's STATUS
+  // delegation exactly. resolveStatusOwner() confirms this flow is the
+  // active session before deferring to it; the state-driven fallback
+  // covers the same defensive case as Assessment's equivalent branch.
+  if (upper === 'STATUS') {
+    const owner = navigationService.resolveStatusOwner('growthPlan');
+    const def = navigationService.getFlowDefinition('growthPlan');
+    const message = (owner.owner === 'flow' && def?.hooks?.describeStatus)
+      ? def.hooks.describeStatus(phoneHash)
+      : null;
+    await safeSendMessage(from, message || 'No growth plan in progress.');
     return true;
   }
 
