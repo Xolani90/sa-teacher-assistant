@@ -155,6 +155,50 @@ function buildReflectionDeps() {
 const { handleGrowthPlanFlow } = require('../flows/growthPlanFlow');
 const { createGrowthPlan } = require('../services/growthPlanService');
 
+// NavigationService migration (Navigation Platform §9 step 2): registration
+// only — does not yet change live routing. growthPlanFlow's own CANCEL
+// branch (flows/growthPlanFlow.js line ~113) and the awaitingCorrectionChoice
+// 1/2/3 prompt continue to own actual runtime behaviour untouched, same
+// incremental-rollback approach as ADR-019 Step 3, Commit 3 for Assessment.
+// describeStatus is new (growthPlanFlow had no local STATUS handling before
+// this — STATUS previously always fell through to account/quota even with
+// an active session), gated behind capabilities.status so it's a pure
+// addition, not a behaviour change to anything that already worked.
+function describeGrowthPlanStatus(phoneHash) {
+  const state = growthPlanState.get(phoneHash);
+  if (!state) return null;
+
+  const stepLabels = {
+    awaitingGoal: 'waiting for the goal',
+    awaitingTopic: 'waiting for the topic',
+    reviewSummary: 'reviewing before save',
+    awaitingCorrectionChoice: 'choosing what to correct',
+  };
+  const stepLabel = stepLabels[state.step] || state.step;
+
+  return (
+    `🎯 *Growth Plan in progress* — ${stepLabel}.\n` +
+    `Reply *CANCEL* to discard, or continue where you left off.`
+  );
+}
+
+require('../services/navigationService').registerFlow({
+  id: 'growthPlan',
+  commands: [],
+  // capabilities.menus documents the awaitingCorrectionChoice 1/2/3 prompt
+  // for discoverability, same as assessmentSession's `menus` block — it is
+  // not itself consulted by openMenu() yet; growthPlanFlow.js still renders
+  // and matches this prompt locally until playbook step 6.
+  capabilities: { status: true, cancel: true, back: false, menus: true },
+  menus: {
+    correctionChoice: ['Goal', 'Topic', 'Cancel'],
+  },
+  hooks: {
+    cleanup: (phoneHash) => growthPlanState.delete(phoneHash),
+    describeStatus: describeGrowthPlanStatus,
+  },
+});
+
 function buildGrowthPlanDeps() {
   return Object.freeze({
     growthPlanState,
