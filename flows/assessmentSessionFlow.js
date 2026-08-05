@@ -525,4 +525,4 @@ function currentPrompt(state) {
   }
 }
 
-module.exports = { handleAssessmentSessionFlow, generateAndSendBlueprintPdf, generateAndSendPrintablePaper, STEP };
+module.exports = { handleAssessmentSessionFlow, generateAndSendBlueprintPdf, generateAndSendPrintablePaper, STEP, describeStatus };

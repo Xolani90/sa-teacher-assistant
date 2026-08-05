@@ -71,6 +71,28 @@ const lastGeneratedState      = new SessionStore('lastGenerated',      30 * 60 *
 const observationState        = new SessionStore('observation',        30 * 60 * 1000);
 const observationHistoryState = new SessionStore('observationHistory',  15 * 60 * 1000);
 const assessmentSessionState  = new SessionStore('assessmentSession',   24 * 60 * 60 * 1000); // ADR-006 — long TTL: a teacher may resume marks capture the next day
+
+// ADR-019 Step 3, Commit 3: assessmentSessionFlow becomes the first
+// production FlowDefinition registered with NavigationService. This is
+// registration only — it does not yet change any live routing. HELP/MENU
+// and the flow's own STATUS/CANCEL branches (flows/assessmentSessionFlow.js)
+// are left completely untouched and continue to own actual runtime
+// behaviour; commandHandler's global HELP/MENU/STATUS also remain
+// untouched per ADR-019's incremental-rollback plan (Commit 4 removes the
+// now-superseded local branches, once this registration has proven out).
+require('../services/navigationService').registerFlow({
+  id: 'assessmentSession',
+  commands: ['NEW TEST', 'PRINT', 'RESUME'],
+  capabilities: { status: true, cancel: true, back: false, menus: false },
+  menus: {},
+  hooks: {
+    cleanup: (phoneHash) => assessmentSessionState.delete(phoneHash),
+    describeStatus: (phoneHash) => {
+      const state = assessmentSessionState.get(phoneHash);
+      return state ? describeAssessmentSessionStatus(state) : null;
+    },
+  },
+});
 const rosterState             = new SessionStore('roster',              30 * 60 * 1000); // ADR-006 PR3 — ROSTER/ADD/REMOVE/CLEAR
 const reflectionState          = new SessionStore('reflection',          30 * 60 * 1000);
 const growthPlanState          = new SessionStore('growthPlan',          30 * 60 * 1000);
@@ -155,7 +177,7 @@ function buildWorksheetDeps() {
 const { handleAssessmentFlow } = require('../flows/assessmentFlow');
 
 // ── Assessment session flow module (ADR-006 — Blueprint Assessment Sessions) ──
-const { handleAssessmentSessionFlow } = require('../flows/assessmentSessionFlow');
+const { handleAssessmentSessionFlow, describeStatus: describeAssessmentSessionStatus } = require('../flows/assessmentSessionFlow');
 const { listBlueprints, getBlueprintById } = require('../services/blueprintRepository');
 const { getRoster: getClassRoster } = require('../services/learnerRosterService');
 
