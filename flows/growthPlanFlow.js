@@ -42,16 +42,16 @@
 
 const { renderTopicListMessage, resolveTopicSelection, labelForTopicId } = require('../utils/qmsTopicSelection');
 
-// NavigationService migration (Navigation Platform §9 step 4, mirroring
-// ADR-019 Step 3 Commit 3b for Assessment): STATUS and CANCEL now delegate
+// NavigationService migration (Navigation Platform §9 steps 2/4/5,
+// mirroring ADR-019 Step 3 for Assessment): STATUS and CANCEL delegate
 // to NavigationService's registered hooks (routes/webhook.js's growthPlan
-// registerFlow() call, §9 step 2) rather than this flow owning that logic
-// inline. Ownership migration only — ordering, wording, and side effects
-// are unchanged from before this commit. Deliberately NOT using
-// navigationService.handleCancel() — it always attaches a YES-confirmation
-// prompt, and today's CANCEL is immediate; adopting that prompt here would
-// be a UX change smuggled into an ownership migration, exactly the trap
-// Assessment's Commit 3b called out and avoided.
+// registerFlow() call) as the single authoritative execution path.
+// Transitional fallback branches (kept during step 4 while the delegation
+// was proven out) were removed once full regression confirmed safety —
+// same sequencing Assessment's Commit 3b → Commit 4 followed. Deliberately
+// NOT using navigationService.handleCancel() — it always attaches a
+// YES-confirmation prompt, and growthPlan's CANCEL is immediate; adopting
+// that prompt here would be a UX change, not an ownership migration.
 const navigationService = require('../services/navigationService');
 
 const YES_RE = /^y(es)?$/i;
@@ -124,39 +124,22 @@ async function handleGrowthPlanFlow(from, text, preClassifiedIntent, deps) {
   const trimmed = text.trim();
   const upper = trimmed.toUpperCase();
 
-  // ADR-019 Step 3 Commit 3b pattern, applied to growthPlan: CANCEL now
-  // routes through the hooks.cleanup registered in webhook.js's
-  // registerFlow({ id: 'growthPlan', ... }) call, rather than this flow
-  // deleting session state directly. Same wording, same immediacy —
-  // ownership changes, teacher-visible behaviour does not.
+  // ADR-019 Step 3 Commit 4 pattern, applied to growthPlan: STATUS/CANCEL
+  // fully own the NavigationService path now — transitional fallbacks
+  // removed once the delegation (previous commit) proved out under full
+  // regression. Single authoritative execution path, no conditional
+  // branches left over from the migration.
   if (upper === 'CANCEL') {
-    const def = navigationService.getFlowDefinition('growthPlan');
-    if (def?.capabilities.cancel && def.hooks.cleanup) {
-      def.hooks.cleanup(phoneHash);
-    } else {
-      // Defensive fallback only — should be unreachable given the
-      // registration already in place, but never silently no-op a
-      // cancel request.
-      growthPlanState.delete(phoneHash);
-    }
+    navigationService.getFlowDefinition('growthPlan').hooks.cleanup(phoneHash);
     await safeSendMessage(from, `No problem — cancelled.`);
     return true;
   }
 
-  // STATUS while a growth plan session is active: previously unhandled
-  // here (it would fall through and be consumed as ordinary step input).
-  // Now resolved via the describeStatus hook registered alongside CANCEL
-  // in the same registerFlow() call, matching Assessment's STATUS
-  // delegation exactly. resolveStatusOwner() confirms this flow is the
-  // active session before deferring to it; the state-driven fallback
-  // covers the same defensive case as Assessment's equivalent branch.
   if (upper === 'STATUS') {
-    const owner = navigationService.resolveStatusOwner('growthPlan');
-    const def = navigationService.getFlowDefinition('growthPlan');
-    const message = (owner.owner === 'flow' && def?.hooks?.describeStatus)
-      ? def.hooks.describeStatus(phoneHash)
-      : null;
-    await safeSendMessage(from, message || 'No growth plan in progress.');
+    const message = navigationService
+      .getFlowDefinition('growthPlan')
+      .hooks.describeStatus(phoneHash);
+    await safeSendMessage(from, message);
     return true;
   }
 
