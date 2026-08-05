@@ -57,6 +57,22 @@ const navigationService = require('../services/navigationService');
 const YES_RE = /^y(es)?$/i;
 const NO_RE = /^n(o)?$/i;
 
+// ADR-019 Step 3 Commit 6 (Navigation Platform §9 step 6) — the
+// awaitingCorrectionChoice 1/2/3 prompt now resolves its digit via
+// NavigationService.consumeNumericReply() instead of local `trimmed === 'N'`
+// checks, matching assessmentSessionFlow.js's COMPLETE_MENU_ID /
+// COMPLETE_MENU_OPTIONS convention. openMenu() only stores state — it does
+// not render or send anything — so the existing prompt text/safeSendMessage
+// call sites are unchanged. State mutation (step transitions, `correcting:
+// true`, deletion) stays owned by this flow; NavigationService only answers
+// "which option was picked."
+const CORRECTION_MENU_ID = 'growthPlan.correctionChoice';
+const CORRECTION_MENU_OPTIONS = { '1': 'GOAL', '2': 'TOPIC', '3': 'CANCEL' };
+
+function formatCorrectionChoiceMenu() {
+  return `Which part would you like to change?\n\n1. Goal\n2. Topic\n3. Cancel`;
+}
+
 /**
  * Builds the review summary message for the current collected fields.
  *
@@ -250,12 +266,8 @@ async function handleGrowthPlanFlow(from, text, preClassifiedIntent, deps) {
         step: 'awaitingCorrectionChoice',
         lastActivity: Date.now(),
       });
-      await safeSendMessage(from,
-        `Which part would you like to change?\n\n` +
-        `1. Goal\n` +
-        `2. Topic\n` +
-        `3. Cancel`
-      );
+      navigationService.openMenu(phoneHash, { id: CORRECTION_MENU_ID, options: CORRECTION_MENU_OPTIONS });
+      await safeSendMessage(from, formatCorrectionChoiceMenu());
       return true;
     }
 
@@ -267,35 +279,42 @@ async function handleGrowthPlanFlow(from, text, preClassifiedIntent, deps) {
   }
 
   if (state.step === 'awaitingCorrectionChoice') {
-    if (trimmed === '3') {
-      growthPlanState.delete(phoneHash);
-      await safeSendMessage(from, `No problem — cancelled.`);
-      return true;
+    const consumed = navigationService.consumeNumericReply(phoneHash, trimmed);
+
+    if (consumed.matched) {
+      switch (consumed.value) {
+        case 'CANCEL':
+          growthPlanState.delete(phoneHash);
+          await safeSendMessage(from, `No problem — cancelled.`);
+          return true;
+
+        case 'GOAL':
+          growthPlanState.set(phoneHash, {
+            ...state,
+            step: 'awaitingGoal',
+            correcting: true,
+            lastActivity: Date.now(),
+          });
+          await safeSendMessage(from, `What's the goal you're working toward?`);
+          return true;
+
+        case 'TOPIC':
+          growthPlanState.set(phoneHash, {
+            ...state,
+            step: 'awaitingTopic',
+            correcting: true,
+            lastActivity: Date.now(),
+          });
+          await safeSendMessage(from, renderTopicListMessage());
+          return true;
+      }
     }
 
-    if (trimmed === '1') {
-      growthPlanState.set(phoneHash, {
-        ...state,
-        step: 'awaitingGoal',
-        correcting: true,
-        lastActivity: Date.now(),
-      });
-      await safeSendMessage(from, `What's the goal you're working toward?`);
-      return true;
-    }
-
-    if (trimmed === '2') {
-      growthPlanState.set(phoneHash, {
-        ...state,
-        step: 'awaitingTopic',
-        correcting: true,
-        lastActivity: Date.now(),
-      });
-      await safeSendMessage(from, renderTopicListMessage());
-      return true;
-    }
-
+    // Invalid/expired reply (unknown option, or no menu open at all —
+    // e.g. after a process restart) — re-open the menu so the teacher
+    // isn't stranded, then re-render the same fallback prompt as before.
     growthPlanState.set(phoneHash, { ...state, lastActivity: Date.now() });
+    navigationService.openMenu(phoneHash, { id: CORRECTION_MENU_ID, options: CORRECTION_MENU_OPTIONS });
     await safeSendMessage(from,
       `Please reply with a number:\n\n` +
       `1. Goal\n` +
