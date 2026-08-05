@@ -250,37 +250,142 @@ function freshPhoneHash() {
   assert(owner.owner === 'account', 'STATUS falls back to account/quota for an unregistered flow id');
 }
 
-// ── §2 — evaluateMessage five-step order ────────────────────────────────
+// ── §2 — evaluateMessage precedence (ADR-019 Step 3 Commit 5 addendum) ──
+// Supersedes the Commit 1 ordering. This block asserts the CURRENT
+// contract only — no archaeological tests for the prior order.
+// New precedence: global command > active menu (valid selection) >
+// active workflow > discovery.
 {
   const ph = freshPhoneHash();
-  const activeFlow = nav.evaluateMessage(ph, 'anything', { activeFlowId: 'assessmentSession' });
-  assert(activeFlow.step === 'active_flow', 'step 1: an active flow claims the message before anything else');
+  const globalStep = nav.evaluateMessage(ph, 'help', {});
+  assert(globalStep.step === 'global_command' && globalStep.command === 'HELP', 'global commands are recognised case-insensitively');
 }
 
 {
   const ph = freshPhoneHash();
   nav.openMenu(ph, { id: 'm2', options: { '1': 'DO_THING' } });
   const menuStep = nav.evaluateMessage(ph, '1', {});
-  assert(menuStep.step === 'active_menu' && menuStep.value === 'DO_THING', 'step 2: an open menu claims a matching numeric reply');
+  assert(menuStep.step === 'active_menu' && menuStep.value === 'DO_THING', 'a valid numeric reply is consumed by an open menu');
 }
 
 {
   const ph = freshPhoneHash();
   const collision = nav.evaluateMessage(ph, '5', {});
-  assert(collision.step === 'numeric_no_menu', 'step 2/§4: a bare digit with no open menu is refused, never guessed at');
+  assert(collision.step === 'numeric_no_menu', 'a bare digit with no open menu is refused, never guessed at');
   assert(collision.message === nav.NO_MENU_OPEN_REPLY, 'the collision-guard message matches the ADR-specified copy');
 }
 
 {
   const ph = freshPhoneHash();
-  const globalStep = nav.evaluateMessage(ph, 'help', {});
-  assert(globalStep.step === 'global_command' && globalStep.command === 'HELP', 'step 3: global commands are recognised case-insensitively');
+  const activeFlow = nav.evaluateMessage(ph, 'anything', { activeFlowId: 'assessmentSession' });
+  assert(activeFlow.step === 'active_flow', 'an active flow claims the message once globals and menu resolution have declined it');
 }
 
 {
   const ph = freshPhoneHash();
   const fallthrough = nav.evaluateMessage(ph, 'Grade 7 fractions worksheet', {});
-  assert(fallthrough.step === 'discovery', 'ordinary free text falls through to discovery/AI intent (steps 4/5), left to the caller');
+  assert(fallthrough.step === 'discovery', 'ordinary free text falls through to discovery/AI intent, left to the caller');
+}
+
+// ── invariant: STATUS resolution preempts an active workflow ────────────
+// STATUS is deliberately NOT in GLOBAL_COMMANDS — it's flow-owned meaning,
+// resolved via resolveStatusOwner(), not answered by NavigationService
+// itself. It still gets its own pre-menu, pre-workflow evaluation stage.
+{
+  const ph = freshPhoneHash();
+  const result = nav.evaluateMessage(ph, 'STATUS', { activeFlowId: 'assessmentSession' });
+  assert(result.step === 'status_request', 'STATUS resolution preempts active workflow');
+  assert(result.owner === 'flow' && result.flowId === 'assessmentSession', 'STATUS resolution reflects the same ownership resolveStatusOwner() would give directly');
+}
+{
+  assert(nav.isGlobalCommand('STATUS') === false, 'STATUS is intentionally excluded from GLOBAL_COMMANDS — it is resolved, not answered, by NavigationService');
+}
+
+// ── invariant: global commands preempt an active menu ────────────────────
+{
+  const ph = freshPhoneHash();
+  nav.openMenu(ph, { id: 'preempt_test', options: { '1': 'PRINT' } });
+  const result = nav.evaluateMessage(ph, 'CANCEL', {});
+  assert(result.step === 'global_command' && result.command === 'CANCEL', 'global commands preempt an active menu');
+  assert(nav.getOpenMenu(ph)?.id === 'preempt_test', 'the menu itself is untouched by evaluateMessage — the caller decides what CANCEL does to it');
+}
+
+// ── invariant: valid menu selection preempts the active workflow ────────
+{
+  const ph = freshPhoneHash();
+  nav.openMenu(ph, { id: 'preempt_flow', options: { '1': 'NEW_ASSESSMENT' } });
+  const result = nav.evaluateMessage(ph, '1', { activeFlowId: 'assessmentSession' });
+  assert(result.step === 'active_menu' && result.value === 'NEW_ASSESSMENT', 'a valid menu selection preempts an active workflow, even though the flow is still "active"');
+}
+
+// ── invariant: the workflow only ever sees a message after globals AND
+// menu resolution have both declined it ─────────────────────────────────
+{
+  const ph = freshPhoneHash();
+  nav.openMenu(ph, { id: 'decline_test', options: { '1': 'A' } });
+  const stillMenu = nav.evaluateMessage(ph, 'some free text', { activeFlowId: 'assessmentSession' });
+  // Free text isn't numeric, so the menu declines it (only claims valid
+  // numeric selections) and it should reach the active flow, not the menu.
+  assert(stillMenu.step === 'active_flow', 'free text while a menu is open is declined by the menu and reaches the active workflow');
+}
+
+// ── the explicit interaction test that motivated this redesign ──────────
+{
+  const ph = freshPhoneHash();
+  nav.openMenu(ph, { id: 'assessmentSession.complete', options: { '1': 'NEW_ASSESSMENT', '2': 'PRINT' } });
+  const result = nav.evaluateMessage(ph, 'STATUS', { activeFlowId: 'assessmentSession' });
+  assert(result.step === 'status_request' && result.owner === 'flow' && result.flowId === 'assessmentSession', 'given an active flow AND an open completion menu, STATUS still resolves to the flow, ahead of the menu');
+  assert(nav.getOpenMenu(ph)?.id === 'assessmentSession.complete', 'the completion menu remains open — STATUS does not consume or close it');
+}
+
+// ── §9 — Menu routing precedence (invalid menu input) ────────────────────
+{
+  const ph = freshPhoneHash();
+  nav.openMenu(ph, { id: 'invalid_input_test', options: { '1': 'A', '2': 'B' } });
+  const result = nav.evaluateMessage(ph, '9', {});
+  assert(result.step === 'invalid_menu_option', 'an invalid numeric reply against an open menu is its own distinct step, not the no-menu collision guard');
+  assert(result.message === nav.INVALID_MENU_OPTION_REPLY, 'invalid menu input gets the re-render copy, not the "no menu open" copy');
+  assert(nav.getOpenMenu(ph)?.id === 'invalid_input_test', 'the menu remains open after an invalid numeric reply');
+}
+{
+  const ph = freshPhoneHash();
+  nav.openMenu(ph, { id: 'invalid_input_flow_test', options: { '1': 'A' } });
+  const result = nav.evaluateMessage(ph, '9', { activeFlowId: 'assessmentSession' });
+  assert(result.step === 'invalid_menu_option', 'invalid menu input never falls through to the active workflow, even when one is active');
+}
+
+// ── §10 — Menu lifecycle ──────────────────────────────────────────────────
+{
+  const ph = freshPhoneHash();
+  nav.openMenu(ph, { id: 'lifecycle_a', options: { '1': 'A' } });
+  nav.openMenu(ph, { id: 'lifecycle_b', options: { '1': 'B' } });
+  assert(nav.getOpenMenu(ph)?.id === 'lifecycle_b', 'opening a second menu replaces the first — menus never stack');
+}
+{
+  const ph = freshPhoneHash();
+  nav.openMenu(ph, { id: 'lifecycle_home', options: { '1': 'A' } });
+  nav.handleHome(ph);
+  assert(nav.getOpenMenu(ph) === null, 'HOME destroys the active menu');
+}
+{
+  const ph = freshPhoneHash();
+  nav.openMenu(ph, { id: 'lifecycle_selected', options: { '1': 'DONE_ACTION' } });
+  const result = nav.evaluateMessage(ph, '1', {});
+  assert(result.step === 'active_menu', 'sanity: the selection was consumed');
+  assert(nav.getOpenMenu(ph) === null, 'successful selection destroys the menu');
+}
+
+// ── §11 — Idempotency ──────────────────────────────────────────────────────
+{
+  const ph = freshPhoneHash();
+  nav.openMenu(ph, { id: 'idempotency_test', options: { '2': 'PRINT' } });
+  const first = nav.evaluateMessage(ph, '2', {});
+  assert(first.step === 'active_menu' && first.value === 'PRINT', 'first delivery of the reply consumes the menu and resolves the action');
+
+  // Simulate a replayed/duplicate WhatsApp delivery of the same message.
+  const replay = nav.evaluateMessage(ph, '2', {});
+  assert(replay.step === 'numeric_no_menu', 'a replayed numeric reply after consumption does not re-fire the action');
+  assert(replay.message === nav.NO_MENU_OPEN_REPLY, 'the replay gets the "no menu open" response, not a second PRINT');
 }
 
 console.log(`\n=== Results: ${passed}/${passed + failed} tests passed ===`);

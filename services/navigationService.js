@@ -376,44 +376,84 @@ function isGlobalCommand(text) {
   return GLOBAL_COMMANDS.includes(String(text || '').trim().toUpperCase());
 }
 
-// ── §2 — Fixed message-evaluation order ──────────────────────────────────
+// ── §2 — Fixed message-evaluation order (ADR-019 Step 3 Commit 5 addendum) ─
 //
 // evaluateMessage() is the future single entry point for webhook routing.
 // It does NOT call into flows itself (flows are injected by the caller,
 // since the navigation layer has no reverse dependency on them); it just
 // enforces the order and hands back a routing decision.
 //
+// Revised precedence (supersedes the Commit 1 ordering). NavigationService
+// draws a deliberate line between two kinds of "navigation" requests:
+//   - platform-owned (HOME/MENU/HELP/CANCEL/BACK): a single, fixed meaning
+//     regardless of which flow is active — NavigationService answers these
+//     itself.
+//   - flow-owned (STATUS): NavigationService never renders STATUS; it only
+//     decides who should (resolveStatusOwner), because STATUS's meaning is
+//     intentionally different per active flow. STATUS is therefore its own
+//     evaluation stage, not folded into GLOBAL_COMMANDS.
+//   1. Platform navigation commands (HOME/MENU/HELP/CANCEL/BACK) — checked
+//      first, even with an active flow or an open menu.
+//   2. STATUS resolution — resolveStatusOwner(activeFlowId), also checked
+//      before any menu or workflow, since a teacher may ask for status at
+//      any point in the conversation and it is not a menu selection.
+//   3. Active menu — claims only replies that resolve to a defined menu
+//      option. A numeric reply that does NOT resolve to a defined option
+//      is invalid menu input: the menu stays open and must be re-rendered
+//      by the caller — it never falls through to the active workflow. A
+//      numeric reply with no menu open at all is the original §4
+//      collision guard.
+//   4. Active workflow — the flow's own state machine, but only once
+//      platform commands, STATUS, and menu resolution have all declined
+//      the message.
+//   5/6. Workflow discovery / AI intent — both the caller's concern.
+//
 // activeFlowId   - id of the flow currently claiming this phoneHash's
 //                  session, or null
 // text           - the inbound message text
 //
 // Returns one of:
-//   { step: 'active_flow' }                         — defer to the flow's own handler
-//   { step: 'active_menu', menuId, value }           — a scoped menu claimed a numeric reply
-//   { step: 'numeric_no_menu', message }             — §4 collision guard fired
 //   { step: 'global_command', command }              — HOME/MENU/HELP/CANCEL/BACK
-//   { step: 'discovery' }                            — caller should attempt flow discovery
-//   { step: 'ai_intent' }                            — fall through to free-text classification
+//   { step: 'status_request', owner, flowId? }        — STATUS; owner is 'flow' or 'account'
+//   { step: 'active_menu', menuId, value }            — a scoped menu claimed a numeric reply
+//   { step: 'invalid_menu_option', message }          — menu open, digit doesn't match; re-render, stay open
+//   { step: 'numeric_no_menu', message }              — §4 collision guard fired (no menu open at all)
+//   { step: 'active_flow' }                           — defer to the flow's own handler
+//   { step: 'discovery' }                             — caller should attempt flow discovery
+//   { step: 'ai_intent' }                             — fall through to free-text classification
+const INVALID_MENU_OPTION_REPLY =
+  "That's not one of the options. Please reply with one of the numbers shown.";
+
 function evaluateMessage(phoneHash, text, { activeFlowId = null } = {}) {
-  // 1. Active workflow — the flow's own state machine gets first refusal.
-  if (activeFlowId) {
-    return { step: 'active_flow' };
+  // 1. Platform navigation commands — a fixed, flow-independent meaning.
+  if (isGlobalCommand(text)) {
+    return { step: 'global_command', command: String(text).trim().toUpperCase() };
   }
 
-  // 2. Active menu.
+  // 2. STATUS — flow-owned meaning, resolved (not answered) here. Kept
+  // deliberately separate from GLOBAL_COMMANDS; see comment above.
+  if (String(text || '').trim().toUpperCase() === 'STATUS') {
+    return { step: 'status_request', ...resolveStatusOwner(activeFlowId) };
+  }
+
+  // 3. Active menu — valid selection only; invalid options never fall
+  // through to the workflow.
   const numericAttempt = consumeNumericReply(phoneHash, text);
   if (numericAttempt.matched) {
     return { step: 'active_menu', menuId: numericAttempt.menuId, value: numericAttempt.value };
   }
+  if (numericAttempt.reason === 'unknown_option') {
+    return { step: 'invalid_menu_option', message: INVALID_MENU_OPTION_REPLY };
+  }
   if (/^\d+$/.test(String(text || '').trim())) {
-    // It was numeric but didn't match an open menu — §4 fires here rather
-    // than letting it fall through to discovery/AI guessing.
+    // Numeric, but no menu is open at all — the original §4 collision guard.
     return { step: 'numeric_no_menu', message: NO_MENU_OPEN_REPLY };
   }
 
-  // 3. Global navigation commands.
-  if (isGlobalCommand(text)) {
-    return { step: 'global_command', command: String(text).trim().toUpperCase() };
+  // 4. Active workflow — only reached once platform commands, STATUS, and
+  // menu resolution have all declined the message.
+  if (activeFlowId) {
+    return { step: 'active_flow' };
   }
 
   // 4/5. Workflow discovery vs. AI intent are both the caller's concern —
@@ -439,4 +479,5 @@ module.exports = {
   evaluateMessage,
   GLOBAL_COMMANDS,
   NO_MENU_OPEN_REPLY,
+  INVALID_MENU_OPTION_REPLY,
 };
