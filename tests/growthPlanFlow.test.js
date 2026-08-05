@@ -1,6 +1,7 @@
 'use strict';
 
 const { handleGrowthPlanFlow } = require('../flows/growthPlanFlow');
+const navigationService = require('../services/navigationService');
 
 let passed = 0;
 let failed = 0;
@@ -165,6 +166,31 @@ async function run() {
   for (const { name, drive } of cancelSteps) {
     const deps = createDeps();
     const from = '+27000000003';
+
+    // Mirrors routes/webhook.js's growthPlan registerFlow() call
+    // (composition root, lines ~185-200). This test requires
+    // flows/growthPlanFlow.js directly and never executes webhook.js, so
+    // NavigationService's registry has no 'growthPlan' entry unless it's
+    // registered here — otherwise getFlowDefinition('growthPlan') returns
+    // null and the flow's CANCEL branch throws on `.hooks`. registerFlow()
+    // is idempotent (overwrite-by-id), so re-registering every iteration
+    // with hooks bound to *this* iteration's fresh deps.growthPlanState is
+    // safe and keeps each cancelSteps case isolated. Only `hooks.cleanup`
+    // is exercised by this test; `hooks.describeStatus` is included for
+    // shape-parity with the real registration but is a placeholder since
+    // no test here sends STATUS.
+    navigationService.registerFlow({
+      id: 'growthPlan',
+      commands: [],
+      capabilities: { status: true, cancel: true, back: false, menus: true },
+      menus: {
+        correctionChoice: ['Goal', 'Topic', 'Cancel'],
+      },
+      hooks: {
+        cleanup: (phoneHash) => deps.growthPlanState.delete(phoneHash),
+        describeStatus: () => 'not exercised in this test',
+      },
+    });
 
     await drive(deps, from);
     await handleGrowthPlanFlow(from, 'CANCEL', null, deps);
