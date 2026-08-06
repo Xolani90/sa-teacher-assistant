@@ -22,7 +22,7 @@ const { getDb } = require('../utils/database');
 const { performItemAnalysis } = require('./itemAnalysisService');
 const { performErrorAnalysis } = require('./errorAnalysisService');
 const { groupLearners } = require('./learnerGroupingService');
-const { generateInterventionPlan } = require('./interventionPlanService');
+const { computeInterventionPlan } = require('./interventionPlanService');
 
 /**
  * Fetches the most recently saved AI-generated intervention plan text for an
@@ -76,7 +76,13 @@ function generateInterventionReport(assessmentId) {
   if (savedAiPlan) {
     interventionPlan = { source: 'ai', text: savedAiPlan };
   } else if (!learnerGrouping.error) {
-    const fallback = generateInterventionPlan(assessment.phone_hash, assessmentId);
+    // RC1-H-004 fix: read-only — was previously calling generateInterventionPlan(),
+    // which persists a new intervention_plans row on every call. That meant every
+    // report view (diagnostic/HOD/parent, and per-named-learner parent reports)
+    // inserted a duplicate row for the same assessment, on top of the one already
+    // saved by diagnosticWorkflowService's Step 6. computeInterventionPlan() returns
+    // the identical plan contents without writing to the database.
+    const fallback = computeInterventionPlan(assessment.phone_hash, assessmentId);
     if (fallback && !fallback.error) {
       interventionPlan = { source: 'rules', ...fallback };
     }

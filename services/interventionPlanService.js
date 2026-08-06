@@ -14,11 +14,18 @@ const { performErrorAnalysis } = require('./errorAnalysisService');
  * Generates an intervention plan based on assessment data.
  *
  * @param {string} phoneHash - Teacher's phone hash
+/**
+ * Computes an intervention plan based on assessment data WITHOUT persisting
+ * it. Use this when you only need the plan's contents (e.g. to render a
+ * report) — use generateInterventionPlan() when the plan itself should be
+ * saved as a new intervention_plans row (e.g. the initial diagnostic run).
+ *
+ * @param {string} phoneHash - Teacher's phone hash
  * @param {number} assessmentId - Assessment ID
  * @param {Object} options - Optional parameters
- * @returns {Object} Intervention plan
+ * @returns {Object} Intervention plan (not saved to the database)
  */
-function generateInterventionPlan(phoneHash, assessmentId, options = {}) {
+function computeInterventionPlan(phoneHash, assessmentId, options = {}) {
   const db = getDb();
 
   // Get assessment details
@@ -95,9 +102,6 @@ function generateInterventionPlan(phoneHash, assessmentId, options = {}) {
     updated_at: new Date().toISOString(),
   };
 
-  // Save to database
-  saveInterventionPlan(plan);
-
   return {
     ...plan,
     strategies: strategies, // Return as array, not JSON string
@@ -106,6 +110,35 @@ function generateInterventionPlan(phoneHash, assessmentId, options = {}) {
 }
 
 /**
+ * Generates an intervention plan based on assessment data AND PERSISTS it
+ * as a new row in intervention_plans. Callers that only need to read the
+ * plan's contents (e.g. report rendering) should use computeInterventionPlan()
+ * instead — this function is for the one intentional creation point per
+ * assessment (see diagnosticWorkflowService.js Step 6).
+ *
+ * @param {string} phoneHash - Teacher's phone hash
+ * @param {number} assessmentId - Assessment ID
+ * @param {Object} options - Optional parameters
+ * @returns {Object} Intervention plan
+ */
+function generateInterventionPlan(phoneHash, assessmentId, options = {}) {
+  const result = computeInterventionPlan(phoneHash, assessmentId, options);
+  if (result.error) {
+    return result;
+  }
+
+  const { summary, strategies, ...planFields } = result;
+
+  // Save to database (strategies must be the JSON string form, matching
+  // the schema — computeInterventionPlan() returns it as an array for
+  // in-memory consumers, so re-stringify for persistence).
+  saveInterventionPlan({ ...planFields, strategies: JSON.stringify(strategies) });
+
+  return result;
+}
+
+/**
+
  * Generates intervention goals based on target groups and problem areas.
  *
  * @param {Array} targetGroups - Target learner groups
@@ -428,6 +461,7 @@ function updateInterventionPlanStatus(planId, status) {
 
 module.exports = {
   generateInterventionPlan,
+  computeInterventionPlan,
   saveInterventionPlan,
   getActiveInterventionPlans,
   updateInterventionPlanStatus,
