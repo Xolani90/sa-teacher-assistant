@@ -15,7 +15,7 @@ A row only gets a browser ✅ after an actual click-through, noted below.
 | Classes list | ✅ | ✅ `api-classes.test.js`, `pr18-api-classes-wiring.test.js` | ✅ |
 | Class detail | ✅ | ✅ `classDetailService.test.js`, `api-class-detail.test.js` | ⏳ |
 | Class snapshot | ✅ | ✅ `classSnapshotService.test.js`, `api-class-snapshot.test.js` | ⏳ |
-| Learner detail | ✅ | ✅ `learnerRepository.test.js`, `learnerTimelineService.test.js` | ⏳ |
+| Learner detail | ✅ | ✅ `learnerRepository.test.js`, `learnerTimelineService.test.js` | ✅ |
 | Learners list | ✅ | ✅ `api-learners.test.js`, `pr20-api-learners-wiring.test.js` | ⏳ |
 | Observation workspace | ✅ | ✅ (multiple `observationFlow-*`, `observationRepository-*`) | ⏳ |
 | Observation detail | ✅ | ✅ | ⏳ (prior session used seeded test data — that's not a browser click-through; re-check) |
@@ -100,6 +100,31 @@ table.
   `PROJECT_DECISIONS.md` — ADR-014's claim was accurate; `VERIFIED.md` was
   just being appropriately conservative until independently re-checked
   here.
+- **Verified by:** manual browser test + live API response review, this
+  session
+
+### Learner Detail
+
+- **Verified:** 2026-08-06
+- **Environment:** local development (backend `localhost:3000`, dashboard `localhost:5173`)
+- **Learner used:** Kagisho Van Wyk (id 5, Grade 6A Mathematics — has real
+  assessment, intervention, and observation data)
+- **Evidence:**
+  - ✓ `GET /api/learners/:learnerId/detail` response fields match exactly
+    what `LearnerDetail.jsx` reads: `learner.name/className/grade/classId`,
+    `performance.overallAverage/passRate/trend`,
+    `assessmentHistory[].resultId/title/subject/term/percentage`,
+    `curriculumCoverage.dataAvailable`, `interventions.plans[].priority`,
+    `observations.totalSessions/recent[]`, `recommendedActions[]`
+  - ✓ `performance.trend: "insufficient-data"` is a handled trend key →
+    renders "Not enough data yet" (not a raw/broken value)
+  - ✓ `curriculumCoverage.dataAvailable: false` correctly falls to the
+    empty state, not a blank/broken section
+  - ✓ `interventions.plans[0].priority: "medium"` correctly passes the
+    high/medium filter and renders in the priorities list
+  - ✓ Both observation cards render with title and date, correctly
+    link to `/observations/:assessmentId`
+  - No mismatches, no zeroed-out fields
 - **Verified by:** manual browser test + live API response review, this
   session
 

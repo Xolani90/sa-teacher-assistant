@@ -17,7 +17,7 @@ Legend: ✅ done · 🚧 partial · ⚪ not started · ❓ unverified
 | Class analytics (ADR-015) | ✅ `classAnalyticsService.js` | ❓ not yet located in dashboard pages | ❓ | ✅ `classAnalyticsService.test.js` | ❓ |
 | Class intervention | ✅ `classInterventionService.js` | ❓ | ❓ | ✅ `classInterventionService.test.js`, `class-intervention-pdf.test.js` | ❓ |
 | Learners list | ✅ `getTeacherLearners` | ❓ (list page not yet located) | ✅ `GET /api/learners` | ✅ `api-learners.test.js`, `pr20-api-learners-wiring.test.js`, `getTeacherLearners.test.js` | ❓ |
-| Learner detail | ✅ `learnerRepository.js` etc. | ✅ `LearnerDetail.jsx` (267 lines) | ✅ `GET /api/learners/:id/detail` | ✅ `learnerRepository.test.js`, `learnerTimelineService.test.js` | ❓ |
+| Learner detail | ✅ `learnerRepository.js` etc. | ✅ `LearnerDetail.jsx` (267 lines) | ✅ `GET /api/learners/:id/detail` | ✅ `learnerRepository.test.js`, `learnerTimelineService.test.js` | ✅ |
 | Learner intervention plan | ✅ | ❓ | ✅ `GET /api/learners/:id/intervention-plan` | ✅ `learner-intervention-pdf.test.js` | ❓ |
 | Observation workspace | ✅ multiple services | ✅ `ObservationWorkspace.jsx` | ❓ needs confirming | ✅ many (`observationFlow-*`, `observationRepository-*`, `observationAnalysisService.test.js`) | ❓ |
 | Observation detail | ✅ | ✅ `ObservationDetail.jsx` | ❓ | ✅ | ✅ (per prior session notes — recently verified with seeded test data; not independently re-checked in this audit) |
@@ -100,7 +100,7 @@ PROJECT_DECISIONS.md.
 ### Learner Detail
 
 ```
-Status: ✓ Backend  ✓ API  ✓ Tests  ⏳ Browser
+Status: ✓ Backend  ✓ API  ✓ Tests  ✓ Browser
 
 Frontend:
   dashboard/src/pages/LearnerDetail.jsx (267 lines)
@@ -113,7 +113,11 @@ Tests:
   tests/learnerRepository.test.js
   tests/learnerTimelineService.test.js
 
-Verified: No
+Verified: Yes — 2026-08-06, live browser + Network tab, Kagisho Van Wyk
+(id 5, Grade 6A Mathematics). Response fields match component expectations
+field-for-field: KPIs, assessment history, curriculum coverage (correctly
+empty-stated when dataAvailable: false), intervention priority filter,
+observation cards with working links, recommended actions. No mismatches.
 ```
 
 Remaining rows (Learners list, Observation, Assessment, QMS, etc.) have

@@ -57,7 +57,7 @@ the result here — don't edit this table standalone.
 | Classes (list) | ✅ | ✅ | ✅ | ✅ | ⏳ (all four boxes green — candidate for Release Ready, do one more pass to confirm before flipping) |
 | Class Detail | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Class Snapshot | ✅ | ✅ | ✅ | ✅ | ✅ (ADR-014 discrepancy resolved) |
-| Learner Detail | ✅ | ✅ | ✅ | ⏳ | ⏳ |
+| Learner Detail | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Learners (list) | ✅ | ❌ confirmed absent | ✅ | n/a | ⏳ (product decision needed) |
 | Observation Workspace | ✅ | ✅ | ✅ | ⏳ | ⏳ |
 | Observation Detail | ✅ | ✅ | ✅ | ⏳ (prior claim used seeded data, doesn't count) | ⏳ |

@@ -22,8 +22,8 @@ Mirrors `RELEASE_CHECKLIST.md`; this is just the execution-order view of it.
 ```
 [x] Classes page — verified 2026-08-06, clean
 [x] Class Detail — verified 2026-08-06; ADR-014 vs VERIFIED.md discrepancy resolved
-[ ] Learner Detail  ← next
-[ ] Observation Workspace
+[x] Learner Detail — verified 2026-08-06, clean
+[ ] Observation Workspace  ← next
 [ ] Observation Detail (prior "verified" used seeded data, not a real click-through — redo properly)
 [ ] Assessment Detail (PR28 — confirm curl-testing is done first)
 [ ] QMS Workspace

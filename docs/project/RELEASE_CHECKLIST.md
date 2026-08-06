@@ -52,7 +52,7 @@ Learner Detail
   [x] API wired
   [x] Backend
   [x] Tests         (learnerRepository.test.js, learnerTimelineService.test.js)
-  [ ] Browser
+  [x] Browser        — verified 2026-08-06, see VERIFIED.md
 
 Learners (list)
   [x] Frontend page — CONFIRMED does not exist (no /learners route in App.jsx)
