@@ -73,6 +73,11 @@ function generateInterventionPlan(phoneHash, assessmentId, options = {}) {
     phoneHash,
     assessmentId,
     problemArea: problemAreas.join(', ') || 'General performance improvement',
+    // RC1-H-003 fix: interventionReportsService.js reads the array form
+    // (problemAreas, plural) to build teacher/HOD summaries; problemArea
+    // (singular) remains for the pre-formatted display string other
+    // consumers (e.g. formatInterventionPlanSummary) already rely on.
+    problemAreas,
     // RC1-H-002 fix: interventionReportsService.js reads the array form
     // (targetGroups, plural) to compute a target group size; targetGroup
     // (singular) remains for the pre-formatted display string other
