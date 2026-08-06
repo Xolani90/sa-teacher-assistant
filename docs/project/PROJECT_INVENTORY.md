@@ -19,7 +19,7 @@ Legend: ✅ done · 🚧 partial · ⚪ not started · ❓ unverified
 | Learners list | ✅ `getTeacherLearners` | ❓ (list page not yet located) | ✅ `GET /api/learners` | ✅ `api-learners.test.js`, `pr20-api-learners-wiring.test.js`, `getTeacherLearners.test.js` | ❓ |
 | Learner detail | ✅ `learnerRepository.js` etc. | ✅ `LearnerDetail.jsx` (267 lines) | ✅ `GET /api/learners/:id/detail` | ✅ `learnerRepository.test.js`, `learnerTimelineService.test.js` | ✅ |
 | Learner intervention plan | ✅ | ❓ | ✅ `GET /api/learners/:id/intervention-plan` | ✅ `learner-intervention-pdf.test.js` | ❓ |
-| Observation workspace | ✅ multiple services | ✅ `ObservationWorkspace.jsx` | ❓ needs confirming | ✅ many (`observationFlow-*`, `observationRepository-*`, `observationAnalysisService.test.js`) | ❓ |
+| Observation workspace | ✅ multiple services | ✅ `ObservationWorkspace.jsx` | ✅ `GET /api/observations` | ✅ many (`observationFlow-*`, `observationRepository-*`, `observationAnalysisService.test.js`) | ✅ |
 | Observation detail | ✅ | ✅ `ObservationDetail.jsx` | ❓ | ✅ | ✅ (per prior session notes — recently verified with seeded test data; not independently re-checked in this audit) |
 | Assessment detail | ✅ `assessmentDetailService.js` (per memory, not yet re-read in this audit) | ✅ `AssessmentDetail.jsx` (largest page, 12.9KB) | ❓ | ✅ `assessment-capture-service.test.js`, `assessmentCaptureService.edit.test.js`, `assessment-session-*.test.js` | ❓ |
 | QMS | ✅ multiple services (`qmsAnalyticsService`, `qmsCoachingWorkflow`, etc.) | ✅ `QMS.jsx` + `components/qms/` | ❓ | ✅ `qmsFlow.test.js`, `qmsAnalyticsService.test.js`, `qmsTopics.test.js`, `qmsTopicSelection.test.js`, `qmsTopicMigration.test.js`, `qmsCoachingWorkflow.test.js` | ❓ |
@@ -118,6 +118,31 @@ Verified: Yes — 2026-08-06, live browser + Network tab, Kagisho Van Wyk
 field-for-field: KPIs, assessment history, curriculum coverage (correctly
 empty-stated when dataAvailable: false), intervention priority filter,
 observation cards with working links, recommended actions. No mismatches.
+```
+
+### Observation Workspace
+
+```
+Status: ✓ Backend  ✓ API  ✓ Tests  ✓ Browser
+
+Frontend:
+  dashboard/src/pages/ObservationWorkspace.jsx
+
+Backend:
+  routes/api.js (GET /api/observations — thin wrapper over
+  observationRepository.getObservationHistory, server-side grade/subject
+  filters)
+
+Tests:
+  tests/observationFlow-*.test.js
+  tests/observationRepository-*.test.js
+  tests/observationAnalysisService.test.js
+
+Verified: Yes — 2026-08-06, live browser + Network tab. Response fields
+(assessmentName, subject, grade, createdAt, learnerCount, id) all match
+what the page renders, row-for-row. `recordCount` is returned by the API
+but not consumed by the UI — not a bug, just unused data (learnerCount is
+what's displayed). Rows link correctly to /observations/:id.
 ```
 
 Remaining rows (Learners list, Observation, Assessment, QMS, etc.) have

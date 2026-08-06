@@ -64,7 +64,7 @@ Learners (list)
 Observation Workspace
   [x] Backend
   [x] Tests         (observationFlow-*, observationRepository-*, observationAnalysisService.test.js)
-  [ ] Browser
+  [x] Browser        — verified 2026-08-06, see VERIFIED.md
 
 Observation Detail
   [x] Backend

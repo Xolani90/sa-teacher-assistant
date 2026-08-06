@@ -59,7 +59,7 @@ the result here — don't edit this table standalone.
 | Class Snapshot | ✅ | ✅ | ✅ | ✅ | ✅ (ADR-014 discrepancy resolved) |
 | Learner Detail | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Learners (list) | ✅ | ❌ confirmed absent | ✅ | n/a | ⏳ (product decision needed) |
-| Observation Workspace | ✅ | ✅ | ✅ | ⏳ | ⏳ |
+| Observation Workspace | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Observation Detail | ✅ | ✅ | ✅ | ⏳ (prior claim used seeded data, doesn't count) | ⏳ |
 | Assessment Detail | ✅ (PR28, being curl-tested) | ✅ | ✅ (broad, not isolated to this route) | ⏳ | ⏳ |
 | QMS Workspace | ✅ | ✅ | ✅ | ⏳ | ⏳ |
