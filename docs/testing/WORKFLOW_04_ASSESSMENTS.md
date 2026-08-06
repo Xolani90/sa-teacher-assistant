@@ -19,7 +19,7 @@ per `docs/testing/RC_TEMPLATE.md`.
 ## Implementation Coverage
 - `GET /api/assessments/:assessmentId/detail` — aggregated Assessment Detail via `assessmentDetailService.getAssessmentDetail`, the evidence view behind a class/learner's overall percentage.
 - `GET /api/assessments/:assessmentId/pdf` — on-demand Blueprint Assessment PDF generation (`pdfService.generateBlueprintAssessmentPdf`), returns a signed download URL via `core/generationPipeline.buildPdfUrl`, not raw file bytes. Ownership is re-checked here (via `getAssessmentDetail`) before generation, independent of any check inside the PDF generator itself.
-- Active bug context: intervention report values (`averageFacilityValue`, `averageDiscrimination`, `Target group size`) have shown up zeroed in some cases, traced to a suspected field-name mismatch between the write path (`assessmentCaptureService.js`) and read path (`itemAnalysisService.js`) in `question_data` JSON. Verify these fields explicitly in this workflow rather than assuming they're correct because the endpoint returns 200.
+- Active bug context: intervention report values (`averageFacilityValue`, `averageDiscrimination`, `Target group size`) were previously suspected zeroed due to a `question_data` field-name mismatch. **Investigated and marked Not Reproducible on build `670c37b`** — see `docs/testing/INVESTIGATION_LOG.md`. Still verify these fields explicitly in this workflow (W4-04/05/06 below) rather than assuming correctness — if a real assessment reproduces zeroing during RC-1 execution, update the investigation log with the new evidence rather than treating it as newly discovered.
 
 ## Preconditions
 - Logged-in teacher session (Workflow 1 passed).
@@ -43,8 +43,11 @@ per `docs/testing/RC_TEMPLATE.md`.
   for an ID it does not own (must be 404, not 403 — ADR-008 §8)
 - `averageFacilityValue`, `averageDiscrimination`, or `Target group
   size` render as zero/null for an assessment with real captured data
-  (known active bug area — do not pass this silently; log even if it
-  looks like "existing known issue")
+  where zero is not the correct value (e.g. not explained by the <10-
+  learner insufficient-data threshold — see
+  `docs/testing/INVESTIGATION_LOG.md`). If this reproduces, it's a new
+  confirmed defect, not a re-flag of the NR investigation — log full
+  evidence (assessmentId, `question_data`, diagnostic script output)
 - Server 500 on `.../detail` or `.../pdf` for a valid, owned assessmentId
 - Uncaught console exception while browsing Assessment Detail or
   triggering PDF generation
