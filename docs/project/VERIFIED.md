@@ -18,7 +18,7 @@ A row only gets a browser ✅ after an actual click-through, noted below.
 | Learner detail | ✅ | ✅ `learnerRepository.test.js`, `learnerTimelineService.test.js` | ✅ |
 | Learners list | ✅ | ✅ `api-learners.test.js`, `pr20-api-learners-wiring.test.js` | ⏳ |
 | Observation workspace | ✅ | ✅ (multiple `observationFlow-*`, `observationRepository-*`) | ✅ |
-| Observation detail | ✅ | ✅ | ⏳ (prior session used seeded test data — that's not a browser click-through; re-check) |
+| Observation detail | ✅ | ✅ | ✅ |
 | Assessment detail | ✅ | ✅ (`assessment-capture-*`, `assessment-session-*`) | ⏳ |
 | Class Detail | ✅ | ✅ (`classDetailService.test.js`, `api-class-detail.test.js`) | ✅ |
 | Class Snapshot | ✅ | ✅ (`classSnapshotService.test.js`, `api-class-snapshot.test.js`) | ✅ |

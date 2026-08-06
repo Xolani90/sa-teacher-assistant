@@ -20,7 +20,7 @@ Legend: ✅ done · 🚧 partial · ⚪ not started · ❓ unverified
 | Learner detail | ✅ `learnerRepository.js` etc. | ✅ `LearnerDetail.jsx` (267 lines) | ✅ `GET /api/learners/:id/detail` | ✅ `learnerRepository.test.js`, `learnerTimelineService.test.js` | ✅ |
 | Learner intervention plan | ✅ | ❓ | ✅ `GET /api/learners/:id/intervention-plan` | ✅ `learner-intervention-pdf.test.js` | ❓ |
 | Observation workspace | ✅ multiple services | ✅ `ObservationWorkspace.jsx` | ✅ `GET /api/observations` | ✅ many (`observationFlow-*`, `observationRepository-*`, `observationAnalysisService.test.js`) | ✅ |
-| Observation detail | ✅ | ✅ `ObservationDetail.jsx` | ❓ | ✅ | ✅ (per prior session notes — recently verified with seeded test data; not independently re-checked in this audit) |
+| Observation detail | ✅ | ✅ `ObservationDetail.jsx` | ✅ `GET /api/observations/:assessmentId` | ✅ | ✅ (independently re-verified 2026-08-06 with a live click-through, not seeded shortcuts) |
 | Assessment detail | ✅ `assessmentDetailService.js` (per memory, not yet re-read in this audit) | ✅ `AssessmentDetail.jsx` (largest page, 12.9KB) | ❓ | ✅ `assessment-capture-service.test.js`, `assessmentCaptureService.edit.test.js`, `assessment-session-*.test.js` | ❓ |
 | QMS | ✅ multiple services (`qmsAnalyticsService`, `qmsCoachingWorkflow`, etc.) | ✅ `QMS.jsx` + `components/qms/` | ❓ | ✅ `qmsFlow.test.js`, `qmsAnalyticsService.test.js`, `qmsTopics.test.js`, `qmsTopicSelection.test.js`, `qmsTopicMigration.test.js`, `qmsCoachingWorkflow.test.js` | ❓ |
 | Home / command center | ❓ | ✅ `Home.jsx` (10.4KB) | ❓ | ❓ | ✅ ("Good morning, Thabo" dashboard confirmed live per PR24 session) |
@@ -143,6 +143,29 @@ Verified: Yes — 2026-08-06, live browser + Network tab. Response fields
 what the page renders, row-for-row. `recordCount` is returned by the API
 but not consumed by the UI — not a bug, just unused data (learnerCount is
 what's displayed). Rows link correctly to /observations/:id.
+```
+
+### Observation Detail
+
+```
+Status: ✓ Backend  ✓ API  ✓ Tests  ✓ Browser
+
+Frontend:
+  dashboard/src/pages/ObservationDetail.jsx
+
+Backend:
+  routes/api.js (GET /api/observations/:assessmentId)
+  services/observationDetailService.js
+
+Tests:
+  (see summary table — observationFlow-*, observationRepository-*,
+  observationAnalysisService.test.js)
+
+Verified: Yes — 2026-08-06, live browser + Network tab, observation id 2
+(8 records, 5 learners). Session header, correction lineage, and all 8
+record cards match the API response field-for-field, including the
+resolved/follow-up pill logic. This is a genuine click-through, replacing
+the earlier seeded-data-only verification.
 ```
 
 Remaining rows (Learners list, Observation, Assessment, QMS, etc.) have

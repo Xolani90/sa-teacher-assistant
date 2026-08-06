@@ -60,7 +60,7 @@ the result here — don't edit this table standalone.
 | Learner Detail | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Learners (list) | ✅ | ❌ confirmed absent | ✅ | n/a | ⏳ (product decision needed) |
 | Observation Workspace | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Observation Detail | ✅ | ✅ | ✅ | ⏳ (prior claim used seeded data, doesn't count) | ⏳ |
+| Observation Detail | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Assessment Detail | ✅ (PR28, being curl-tested) | ✅ | ✅ (broad, not isolated to this route) | ⏳ | ⏳ |
 | QMS Workspace | ✅ | ✅ | ✅ | ⏳ | ⏳ |
 | Class Analytics | ✅ | ❌ no consumer wired | ✅ | n/a | ⏳ (product decision needed) |

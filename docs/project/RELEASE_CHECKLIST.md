@@ -69,8 +69,8 @@ Observation Workspace
 Observation Detail
   [x] Backend
   [x] Tests
-  [ ] Browser        — prior session used seeded test data, not a full
-                        click-through; re-verify before ticking
+  [x] Browser        — verified 2026-08-06, see VERIFIED.md; genuine
+                        click-through, supersedes prior seeded-data claim
 
 Assessment Detail (PR28)
   [ ] Backend        — in progress, being curl-tested
