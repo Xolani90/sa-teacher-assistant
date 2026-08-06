@@ -62,7 +62,7 @@ the result here — don't edit this table standalone.
 | Observation Workspace | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Observation Detail | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Assessment Detail | ✅ (PR28, curl-tested 2026-08-06) | ✅ | ✅ (broad, not isolated to this route) | ✅ | ✅ |
-| QMS Workspace | ✅ | ✅ | ✅ | ⏳ | ⏳ |
+| QMS Workspace | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Class Analytics | ✅ | ❌ no consumer wired | ✅ | n/a | ⏳ (product decision needed) |
 | Class Intervention | ✅ | ❌ no consumer wired | ✅ | n/a | ⏳ (product decision needed) |
 | Item Analysis | ✅ (buggy — zeroing values) | ❓ | ❓ | ❌ | ❌ blocked on bug fix |

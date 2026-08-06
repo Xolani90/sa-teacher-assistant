@@ -22,7 +22,7 @@ A row only gets a browser ✅ after an actual click-through, noted below.
 | Assessment detail | ✅ | ✅ (`assessment-capture-*`, `assessment-session-*`) | ✅ |
 | Class Detail | ✅ | ✅ (`classDetailService.test.js`, `api-class-detail.test.js`) | ✅ |
 | Class Snapshot | ✅ | ✅ (`classSnapshotService.test.js`, `api-class-snapshot.test.js`) | ✅ |
-| QMS workspace | ✅ | ✅ (`qmsFlow`, `qmsAnalyticsService`, `qmsTopics*`, `qmsCoachingWorkflow`) | ⏳ |
+| QMS workspace | ✅ | ✅ (`qmsFlow`, `qmsAnalyticsService`, `qmsTopics*`, `qmsCoachingWorkflow`) | ✅ |
 | Item analysis | ✅ | ❓ | ❌ known bug — do not mark ⏳ until `question_data` field mismatch is fixed |
 | Intervention plan (AI) | ✅ | ❓ | ❌ known bug — AI misstates group counts |
 
@@ -148,6 +148,27 @@ table.
     Risk) checked against actual data — correct in all 5 cases
 - **Verified by:** curl (backend) + component source cross-check
   (frontend), this session
+
+### QMS Workspace
+
+- **Verified:** 2026-08-06
+- **Environment:** local development (backend `localhost:3000`, dashboard `localhost:5173`)
+- **Evidence:**
+  - ✓ `GET /api/tse/status` and `GET /api/reflections` both fire on load
+    and resolve correctly
+  - ✓ `counts.{curriculum,assessment,intervention,observation,resource}`
+    (0, 1, 7, 0, 0) match what each `QMSCategoryCard` displays
+  - ✓ `missingCategories` correctly lists the three zero-count categories,
+    each rendering the "No evidence yet" dashed-border state
+  - ✓ `gaps: []` correctly suppresses the `GapsSection` (guarded by
+    `gaps.length > 0`)
+  - ✓ non-null `strength` correctly renders the "On track" summary banner
+  - ✓ empty `reflections: []` handled cleanly by `ReflectionPanel`
+  - Note (not a bug): `latest` field in the `/api/tse/status` response
+    isn't consumed by the frontend — same unused-data pattern as
+    `recordCount` on Observation Workspace, not a defect
+- **Verified by:** manual browser test + live API response review, this
+  session
 
 ## Rule going forward
 

@@ -82,7 +82,7 @@ Assessment Detail (PR28)
 QMS Workspace
   [x] Backend
   [x] Tests          (qmsFlow, qmsAnalyticsService, qmsTopics*, qmsCoachingWorkflow)
-  [ ] Browser
+  [x] Browser        — verified 2026-08-06, see VERIFIED.md
 
 Item Analysis
   [ ] Backend         — ❌ known bug, do not attempt to verify until fixed

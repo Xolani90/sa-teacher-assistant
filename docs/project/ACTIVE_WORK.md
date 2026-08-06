@@ -10,14 +10,17 @@ Update this file whenever the active task changes — not just at session end.
 
 ## Current Priority
 
-**Phase B — Browser Verification**
+**Phase B — Browser Verification: complete** (2026-08-06)
 
-Status: Not yet started (Phase A evidence audit is complete as of commit
-`1ef2a1a`)
+All items below were personally verified via live browser + Network tab
+review (or curl, for Assessment Detail's backend). See `VERIFIED.md` for
+full evidence and `RELEASE_CHECKLIST.md` for the release-gate view.
 
-## Remaining — Phase B checklist
+Next priority: the two known defects below (Item Analysis, Intervention
+Plan AI), which can now be picked up — Phase B was the only thing blocking
+them.
 
-Mirrors `RELEASE_CHECKLIST.md`; this is just the execution-order view of it.
+## Phase B checklist — complete
 
 ```
 [x] Classes page — verified 2026-08-06, clean
@@ -26,32 +29,26 @@ Mirrors `RELEASE_CHECKLIST.md`; this is just the execution-order view of it.
 [x] Observation Workspace — verified 2026-08-06, clean
 [x] Observation Detail (prior "verified" used seeded data, not a real click-through — redo properly) — redone 2026-08-06, clean
 [x] Assessment Detail (PR28 — confirm curl-testing is done first) — curl-tested and browser-verified 2026-08-06
-[ ] QMS Workspace  ← next
+[x] QMS Workspace — verified 2026-08-06, clean
 ```
-
-For each: open the page, exercise the main flow, check Network tab, compare
-JSON to what the UI expects, log the result in `VERIFIED.md`, tick the
-matching row in `RELEASE_CHECKLIST.md`.
 
 ## Blocked
 
 Nothing currently blocked.
 
-## Known defects (don't re-diagnose, resume from here)
+## Known defects (pick up now — Phase B is done)
 
 **Item Analysis** — `averageFacilityValue`, `averageDiscrimination`,
 `Target group size` all zero out. Hypothesis: field-name mismatch in
 `question_data` JSON between `assessmentCaptureService.js` (write) and
 `itemAnalysisService.js` (read). Not yet confirmed which fields actually
-differ — that's the concrete next step if this gets picked up before Phase B
-finishes. Not a blocker on Phase B; can run in parallel since it's a
-confirmed existing defect, not new work.
+differ — that's the concrete next step.
 
 **Intervention Plan (AI)** — `fullInterventionPlan.js` prompt lets the model
 restate group counts, sometimes incorrectly. Fix direction: inject the
 computed value directly rather than asking the model to restate it.
 
-## Future (after Phase B, not before)
+## Future (now unblocked — Phase B is done)
 
 - Connect Class Analytics to a frontend consumer (service + tests exist,
   nothing calls it yet — confirmed via `App.jsx` route table)
@@ -61,7 +58,7 @@ computed value directly rather than asking the model to restate it.
   an oversight to silently fix)
 - Frontend test coverage (currently 0 files in `dashboard/`)
 - PR29–PR32 (analytics, QMS polish, reporting, home analytics) — hold until
-  Phase B and the two known defects are done
+  the two known defects above are fixed
 - Release checklist completion
 - Production deployment validation
 - Final QA pass

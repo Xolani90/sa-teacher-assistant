@@ -193,6 +193,32 @@ including the PercentagePill Strong/Developing/At Risk thresholds against
 actual data.
 ```
 
+### QMS Workspace
+
+```
+Status: ✓ Backend  ✓ API  ✓ Tests  ✓ Browser
+
+Frontend:
+  dashboard/src/pages/QMS.jsx
+  dashboard/src/components/qms/QMSSummaryBanner.jsx
+  dashboard/src/components/qms/QMSCategoryCard.jsx
+  dashboard/src/components/qms/ReflectionPanel.jsx
+
+Backend:
+  routes/api.js (GET /api/tse/status, GET /api/reflections)
+  services/tseEvidenceService.js
+  services/reflectionService.js
+
+Tests:
+  qmsFlow-*.test.js, qmsAnalyticsService.test.js, qmsTopics*.test.js,
+  qmsCoachingWorkflow.test.js
+
+Verified: Yes — 2026-08-06, live browser + Network tab. counts,
+missingCategories, gaps, strength, and reflections all match component
+expectations field-for-field. `latest` field returned by the API is
+unused by the frontend — not a bug, same pattern as other list pages.
+```
+
 Remaining rows (Learners list, Observation, Assessment, QMS, etc.) have
 service/test file names confirmed in the summary table above but haven't had
 their exact frontend-consumer path or route line number individually
