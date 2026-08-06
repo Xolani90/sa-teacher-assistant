@@ -73,7 +73,9 @@ Observation Detail
                         click-through, supersedes prior seeded-data claim
 
 Assessment Detail (PR28)
-  [ ] Backend        — in progress, being curl-tested
+  [x] Backend        — curl-tested 2026-08-06, response well-formed,
+                        figures independently recomputed and confirmed
+                        correct
   [x] Tests          (assessment-capture-*, assessment-session-*)
   [ ] Browser
 

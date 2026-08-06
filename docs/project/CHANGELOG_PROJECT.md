@@ -35,7 +35,10 @@ now exists from commit `4483866` onward (docs/project layer, base
   test data (see `PROJECT_DECISIONS.md` for a note on what "verified" means
   here vs. the stricter browser-checklist standard).
 - **PR28 — Assessment Detail:** service + two route handlers authored and
-  spliced into `routes/api.js`; in progress, being curl-tested.
+  spliced into `routes/api.js`; curl-tested 2026-08-06 against
+  `GET /api/assessments/1/detail` — response well-formed and figures
+  independently verified correct (classAverage, passRate, and both topic
+  averages recompute correctly from the underlying per-learner data).
 - **Repo audit (this session):** confirmed Classes/ClassDetail/LearnerDetail
   frontend pages are genuinely wired to real backend endpoints (no mocks).
   Found zero test files in `dashboard/`. Found ADR-014's own "verified"
