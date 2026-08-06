@@ -10,17 +10,17 @@ with recorded evidence, not to an assumption of pass.
 | Field | Value |
 |---|---|
 | Release Candidate | RC-1 |
-| Git Commit Audited | |
-| Git Branch | |
-| Environment | ☐ Local Dev ☐ Staging ☐ Production |
-| Audit Start Date | |
-| Audit Completion Date | |
-| Audited By | |
+| Git Commit Audited | 92945af4bdd4e6514d2250649d2502aef43c5b8 |
+| Git Branch | main |
+| Environment | ☑ Local Dev ☐ Staging ☐ Production |
+| Audit Start Date | 2026-08-06 |
+| Audit Completion Date | (in progress — 1 of 7 workflows done) |
+| Audited By | Xolani Tshabalala |
 
 ## Workflow Results
 | Workflow | Functional | Security | Console | Overall | Workflow Doc |
 |---|---|---|---|---|---|
-| W1 Authentication | | | | | [WORKFLOW_01_AUTHENTICATION.md](./WORKFLOW_01_AUTHENTICATION.md) |
+| W1 Authentication | PASS | PASS | Clean | PASS | [WORKFLOW_01_AUTHENTICATION.md](./WORKFLOW_01_AUTHENTICATION.md) |
 | W2 Classes | | | | | [WORKFLOW_02_CLASSES.md](./WORKFLOW_02_CLASSES.md) |
 | W3 Learners | | | | | [WORKFLOW_03_LEARNERS.md](./WORKFLOW_03_LEARNERS.md) |
 | W4 Assessments | | | | | [WORKFLOW_04_ASSESSMENTS.md](./WORKFLOW_04_ASSESSMENTS.md) |
@@ -36,9 +36,11 @@ Aggregate counts, sourced from each workflow's Findings Register.
 
 | Severity | Count | Resolved | Open / Accepted |
 |---|---|---|---|
-| Critical | | | |
-| Major | | | |
-| Minor | | | |
+| Critical | 0 | — | — |
+| Major | 0 | — | — |
+| Minor | 1 | — | 1 (favicon.ico 404, W1) |
+
+*(Running totals from W1 only — will update as W2–W7 land.)*
 
 ### Open Findings Requiring Disposition
 | ID | Workflow | Severity | Description | Disposition |
