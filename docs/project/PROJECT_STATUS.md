@@ -1,22 +1,31 @@
 # Project Status
 
 **Last updated:** 2026-08-06
-**Repository:** main @ `4483866` (docs/project layer commit, pushed to
-`origin/main`, base was `dd6ec21`)
+**Repository:** main @ `1ef2a1a` (docs/project layer, current HEAD as of
+this update — check `git log -1` at the start of every session and correct
+this line before doing anything else if it's stale)
+**Current milestone:** Phase B — Browser Verification (Phase A evidence
+audit complete)
+**Active task:** see `ACTIVE_WORK.md`
+**Remaining blockers:** none currently
+**Next action:** see `ACTIVE_WORK.md` → "Remaining — Phase B checklist"
 **Backend tests:** not run this session (counted, not executed — see below)
 **Frontend build:** not run this session
 **Browser verified this session:** none (see `VERIFIED.md`)
-**Current focus:** PR28 (assessment detail) + item-analysis bug + intervention-plan prompt bug
 
 This file is a snapshot, not history. Update the header block above every
 session. If you open this file and the header is more than a few days old,
 don't trust the body below without re-checking `PROJECT_INVENTORY.md`.
 
 This file is the **single source of truth** for the project's current
-state. The other documents in `docs/project/` either reference this file or
-are updated only on significant events — they should not re-derive or
-contradict the facts here:
+state — the control panel. Every session should start here, update the
+header block above (HEAD commit, milestone, active task, blockers, next
+action), and use `ACTIVE_WORK.md` for the execution queue. The other
+documents in `docs/project/` either reference this file or are updated only
+on significant events — they should not re-derive or contradict the facts
+here:
 
+- `ACTIVE_WORK.md` — what to work on right now, nothing else
 - `PROJECT_INVENTORY.md` — full per-feature detail (this file's summary table expanded)
 - `VERIFIED.md` / `RELEASE_CHECKLIST.md` — browser-verification tracking, derived from the same facts
 - `PROJECT_ROADMAP.md` — updated when scope changes

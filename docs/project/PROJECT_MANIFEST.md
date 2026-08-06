@@ -16,13 +16,14 @@ PROJECT_STATUS.md wins; go fix the other file.
 Read in this order
 -------------------
 1. PROJECT_STATUS.md    — current facts, measured counts
-2. NEXT_SESSION.md      — where to resume right now
-3. RELEASE_CHECKLIST.md — what's gating a release candidate
-4. VERIFIED.md           — evidence log of what's actually been proven live
-5. PROJECT_DECISIONS.md — architectural decisions, quick reference
-6. PROJECT_ROADMAP.md   — remaining work only
-7. PROJECT_INVENTORY.md — full per-feature detail with file-level evidence
-8. CHANGELOG_PROJECT.md — milestone history
+2. ACTIVE_WORK.md        — what to work on right now
+3. NEXT_SESSION.md      — where to resume right now
+4. RELEASE_CHECKLIST.md — what's gating a release candidate
+5. VERIFIED.md           — evidence log of what's actually been proven live
+6. PROJECT_DECISIONS.md — architectural decisions, quick reference
+7. PROJECT_ROADMAP.md   — remaining work only
+8. PROJECT_INVENTORY.md — full per-feature detail with file-level evidence
+9. CHANGELOG_PROJECT.md — milestone history
 
 Architecture
 ------------
