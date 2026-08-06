@@ -23,7 +23,7 @@ A row only gets a browser ✅ after an actual click-through, noted below.
 | Class Detail | ✅ | ✅ (`classDetailService.test.js`, `api-class-detail.test.js`) | ✅ |
 | Class Snapshot | ✅ | ✅ (`classSnapshotService.test.js`, `api-class-snapshot.test.js`) | ✅ |
 | QMS workspace | ✅ | ✅ (`qmsFlow`, `qmsAnalyticsService`, `qmsTopics*`, `qmsCoachingWorkflow`) | ✅ |
-| Item analysis | ✅ | ❓ | ❌ known bug — do not mark ⏳ until `question_data` field mismatch is fixed |
+| Item analysis | ✅ | ❓ | ❓ hypothesis disproven 2026-08-06 — facility value confirmed correct; see PROJECT_DECISIONS.md |
 | Intervention plan (AI) | ✅ | ❓ | ❌ known bug — AI misstates group counts |
 
 Legend: ✅ done and confirmed · ⏳ implemented, not yet browser-verified ·

@@ -31,6 +31,40 @@ appropriately conservative until independently re-checked. Both Class
 Detail and Class Snapshot are now ✅ Browser in `VERIFIED.md` and
 `RELEASE_CHECKLIST.md`.
 
+## ✅ Resolved (2026-08-06): "Item Analysis" field-mismatch hypothesis disproven
+
+`ACTIVE_WORK.md` previously carried a hypothesis that `averageFacilityValue`,
+`averageDiscrimination`, and "Target group size" all zeroed out due to a
+field-name mismatch in `question_data` between `assessmentCaptureService.js`
+(write) and `itemAnalysisService.js` (read).
+
+**Investigation:** ran `scripts/debugItemAnalysis.js` against assessment id
+1 — a real 5-learner blueprint-backed assessment — dumping the raw
+`assessments` row, every `learner_results` row's `question_data`, the
+matching `blueprint_questions` rows, and the live `performItemAnalysis()`
+output.
+
+**Finding:** the hypothesis does not hold.
+
+- `averageFacilityValue: 0.7` was independently recomputed by hand from
+  the raw learner marks for all 4 questions and confirmed correct
+- `averageDiscrimination: 0` and `itemQuality: "insufficient_data"` are
+  correct, intentional output — the class has 5 learners, and
+  `itemAnalysisService.js` deliberately reports 0/insufficient-data below
+  10 learners rather than a misleading discrimination score. The tool's
+  own generated summary text states this plainly.
+- The blueprint-backed read path (`question_data` as
+  `{ questionNumber: marksAwarded }`, joined against `blueprint_questions`
+  for topic/maxMarks) is working correctly, matching what
+  `blueprintAnalytics.js` already does for the same assessment (verified
+  during PR28 browser verification, see `VERIFIED.md`)
+
+**Open thread, not yet investigated:** "Target group size" reading 0 may
+be a real, separate defect — but it lives in a different pipeline
+(`interventionReportsService.js` / `interventionPlanService.js`), not item
+analysis. Being tracked independently in `ACTIVE_WORK.md` rather than
+assumed to share a root cause with the above.
+
 ## Authentication
 
 - **Decision:** JWT + WhatsApp OTP (HMAC-SHA256 hashed), no passwords.

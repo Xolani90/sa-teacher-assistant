@@ -85,8 +85,15 @@ QMS Workspace
   [x] Browser        — verified 2026-08-06, see VERIFIED.md
 
 Item Analysis
-  [ ] Backend         — ❌ known bug, do not attempt to verify until fixed
-  [ ] Tests
+  [x] Backend         — facility value confirmed correct against real data
+                        2026-08-06 (scripts/debugItemAnalysis.js);
+                        discrimination=0 is by-design for <10 learners.
+                        Original field-mismatch hypothesis disproven —
+                        see PROJECT_DECISIONS.md. "Target group size" is
+                        being tracked as a separate, unverified issue in
+                        the intervention-reporting pipeline.
+  [ ] Tests           — no regression test yet for the confirmed-correct
+                        behavior; add one before calling this fully done
   [ ] Browser
 
 Intervention Plan (AI-generated)

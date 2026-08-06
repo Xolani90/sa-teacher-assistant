@@ -16,9 +16,9 @@ All items below were personally verified via live browser + Network tab
 review (or curl, for Assessment Detail's backend). See `VERIFIED.md` for
 full evidence and `RELEASE_CHECKLIST.md` for the release-gate view.
 
-Next priority: the two known defects below (Item Analysis, Intervention
-Plan AI), which can now be picked up — Phase B was the only thing blocking
-them.
+Next priority: the "Target group size" symptom, as an independent
+investigation in the intervention-reporting pipeline — the original
+combined "Item Analysis" hypothesis (below) was disproven 2026-08-06.
 
 ## Phase B checklist — complete
 
@@ -38,11 +38,29 @@ Nothing currently blocked.
 
 ## Known defects (pick up now — Phase B is done)
 
-**Item Analysis** — `averageFacilityValue`, `averageDiscrimination`,
-`Target group size` all zero out. Hypothesis: field-name mismatch in
-`question_data` JSON between `assessmentCaptureService.js` (write) and
-`itemAnalysisService.js` (read). Not yet confirmed which fields actually
-differ — that's the concrete next step.
+**Item Analysis** — investigation in progress, original hypothesis
+disproven 2026-08-06.
+
+Evidence (via `scripts/debugItemAnalysis.js` against assessment id 1, a
+real 5-learner blueprint-backed assessment):
+
+- Blueprint-backed analysis path confirmed working — `question_data`
+  reads correctly, `blueprint_questions` join resolves correctly
+- `averageFacilityValue: 0.7` — independently recomputed by hand from raw
+  learner marks and confirmed correct for all 4 questions
+- `averageDiscrimination: 0` and `itemQuality: "insufficient_data"` are
+  correct, by-design output for a class under 10 learners — not a bug;
+  the tool's own summary text states this explicitly
+- Original hypothesis ("field-name mismatch between
+  `assessmentCaptureService.js` write and `itemAnalysisService.js` read")
+  is **not supported by evidence** and is retired
+
+Remaining open thread: whether "Target group size" reading 0 is a real,
+separate defect in the intervention-reporting pipeline
+(`interventionReportsService.js` / `interventionPlanService.js`), not
+item analysis. Not yet investigated with live evidence — treat as a new,
+independent investigation rather than assuming it's connected to the
+above.
 
 **Intervention Plan (AI)** — `fullInterventionPlan.js` prompt lets the model
 restate group counts, sometimes incorrectly. Fix direction: inject the

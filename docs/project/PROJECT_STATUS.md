@@ -65,7 +65,7 @@ the result here — don't edit this table standalone.
 | QMS Workspace | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Class Analytics | ✅ | ❌ no consumer wired | ✅ | n/a | ⏳ (product decision needed) |
 | Class Intervention | ✅ | ❌ no consumer wired | ✅ | n/a | ⏳ (product decision needed) |
-| Item Analysis | ✅ (buggy — zeroing values) | ❓ | ❓ | ❌ | ❌ blocked on bug fix |
+| Item Analysis | ✅ (facility value confirmed correct 2026-08-06; discrimination=0 is by-design for <10 learners, not a bug) | ❓ | ❓ | ❌ | ❌ pending: separate "Target group size" investigation |
 | Intervention Plan (AI) | ✅ (buggy — miscounts groups) | n/a | ❓ | ❌ | ❌ blocked on bug fix |
 
 Legend: ✅ confirmed · ⏳ pending/not yet done · ❌ confirmed missing or
@@ -95,7 +95,9 @@ before calling either "Release Ready."
 
 - ✅ PR28 — assessment detail service/routes, curl-tested 2026-08-06,
   backend confirmed correct; browser verification next
-- 🚧 Item analysis bug investigation
+- 🚧 "Target group size" investigation (intervention-reporting pipeline —
+  independent of item analysis; original combined hypothesis disproven
+  2026-08-06, see PROJECT_DECISIONS.md)
 - 🚧 Intervention plan prompt bug investigation
 
 ## Believed complete, not yet browser-verified
