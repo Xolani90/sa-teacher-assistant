@@ -35,7 +35,11 @@ A workflow is **PASS** only when:
   with a logged disposition)
 
 RC-1 is release-ready only once all seven workflows are individually
-signed off as PASS against the same git commit.
+signed off as PASS against the same git commit. Once execution is
+complete, aggregate results into
+[`RC1_SIGNOFF.md`](./RC1_SIGNOFF.md) — the single artifact that reports
+overall release status without requiring anyone to open all seven
+workflow files individually.
 
 ## Stop Conditions
 Each workflow defines its own Critical stop conditions in its Stop
