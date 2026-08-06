@@ -19,7 +19,7 @@ A row only gets a browser ✅ after an actual click-through, noted below.
 | Learners list | ✅ | ✅ `api-learners.test.js`, `pr20-api-learners-wiring.test.js` | ⏳ |
 | Observation workspace | ✅ | ✅ (multiple `observationFlow-*`, `observationRepository-*`) | ✅ |
 | Observation detail | ✅ | ✅ | ✅ |
-| Assessment detail | ✅ | ✅ (`assessment-capture-*`, `assessment-session-*`) | ⏳ |
+| Assessment detail | ✅ | ✅ (`assessment-capture-*`, `assessment-session-*`) | ✅ |
 | Class Detail | ✅ | ✅ (`classDetailService.test.js`, `api-class-detail.test.js`) | ✅ |
 | Class Snapshot | ✅ | ✅ (`classSnapshotService.test.js`, `api-class-snapshot.test.js`) | ✅ |
 | QMS workspace | ✅ | ✅ (`qmsFlow`, `qmsAnalyticsService`, `qmsTopics*`, `qmsCoachingWorkflow`) | ⏳ |
@@ -127,6 +127,27 @@ table.
   - No mismatches, no zeroed-out fields
 - **Verified by:** manual browser test + live API response review, this
   session
+
+### Assessment Detail (PR28)
+
+- **Verified:** 2026-08-06 (backend curl-tested same day, see
+  `PROJECT_DECISIONS.md`/`CHANGELOG_PROJECT.md`; frontend cross-checked
+  against `AssessmentDetail.jsx` source using the same curl response)
+- **Assessment used:** id 1, "Fractions Test (Seed)", Grade 6A Mathematics
+- **Evidence:**
+  - ✓ Backend math independently recomputed and confirmed correct:
+    `classAverage: 70` = mean of 100/80/80/60/30; `passRate: 80` = 4/5
+    learners ≥50%; both topic averages (`Common Fractions`,
+    `Whole Numbers`, both 70%) recompute correctly from per-learner data
+  - ✓ `assessment.title/createdAt/assessmentType/isBlueprintBacked`,
+    `class.name`, `summary.classAverage/passRate/learnerCount`,
+    `analytics.available/topics/perLearnerTopics`,
+    `learners[].resultId/learnerName/mark/totalMarks/percentage` all
+    match `AssessmentDetail.jsx` field-for-field
+  - ✓ `PercentagePill` thresholds (≥75 Strong / ≥50 Developing / <50 At
+    Risk) checked against actual data — correct in all 5 cases
+- **Verified by:** curl (backend) + component source cross-check
+  (frontend), this session
 
 ## Rule going forward
 

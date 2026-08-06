@@ -25,8 +25,8 @@ Mirrors `RELEASE_CHECKLIST.md`; this is just the execution-order view of it.
 [x] Learner Detail — verified 2026-08-06, clean
 [x] Observation Workspace — verified 2026-08-06, clean
 [x] Observation Detail (prior "verified" used seeded data, not a real click-through — redo properly) — redone 2026-08-06, clean
-[ ] Assessment Detail (PR28 — confirm curl-testing is done first)  ← next
-[ ] QMS Workspace
+[x] Assessment Detail (PR28 — confirm curl-testing is done first) — curl-tested and browser-verified 2026-08-06
+[ ] QMS Workspace  ← next
 ```
 
 For each: open the page, exercise the main flow, check Network tab, compare

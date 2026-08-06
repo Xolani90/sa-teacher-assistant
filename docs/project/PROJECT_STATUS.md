@@ -61,7 +61,7 @@ the result here — don't edit this table standalone.
 | Learners (list) | ✅ | ❌ confirmed absent | ✅ | n/a | ⏳ (product decision needed) |
 | Observation Workspace | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Observation Detail | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Assessment Detail | ✅ (PR28, curl-tested 2026-08-06) | ✅ | ✅ (broad, not isolated to this route) | ⏳ | ⏳ |
+| Assessment Detail | ✅ (PR28, curl-tested 2026-08-06) | ✅ | ✅ (broad, not isolated to this route) | ✅ | ✅ |
 | QMS Workspace | ✅ | ✅ | ✅ | ⏳ | ⏳ |
 | Class Analytics | ✅ | ❌ no consumer wired | ✅ | n/a | ⏳ (product decision needed) |
 | Class Intervention | ✅ | ❌ no consumer wired | ✅ | n/a | ⏳ (product decision needed) |

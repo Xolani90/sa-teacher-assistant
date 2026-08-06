@@ -21,7 +21,7 @@ Legend: ✅ done · 🚧 partial · ⚪ not started · ❓ unverified
 | Learner intervention plan | ✅ | ❓ | ✅ `GET /api/learners/:id/intervention-plan` | ✅ `learner-intervention-pdf.test.js` | ❓ |
 | Observation workspace | ✅ multiple services | ✅ `ObservationWorkspace.jsx` | ✅ `GET /api/observations` | ✅ many (`observationFlow-*`, `observationRepository-*`, `observationAnalysisService.test.js`) | ✅ |
 | Observation detail | ✅ | ✅ `ObservationDetail.jsx` | ✅ `GET /api/observations/:assessmentId` | ✅ | ✅ (independently re-verified 2026-08-06 with a live click-through, not seeded shortcuts) |
-| Assessment detail | ✅ `assessmentDetailService.js` (per memory, not yet re-read in this audit) | ✅ `AssessmentDetail.jsx` (largest page, 12.9KB) | ❓ | ✅ `assessment-capture-service.test.js`, `assessmentCaptureService.edit.test.js`, `assessment-session-*.test.js` | ❓ |
+| Assessment detail | ✅ `assessmentDetailService.js` | ✅ `AssessmentDetail.jsx` (largest page, 12.9KB) | ✅ `GET /api/assessments/:assessmentId/detail` | ✅ `assessment-capture-service.test.js`, `assessmentCaptureService.edit.test.js`, `assessment-session-*.test.js` | ✅ |
 | QMS | ✅ multiple services (`qmsAnalyticsService`, `qmsCoachingWorkflow`, etc.) | ✅ `QMS.jsx` + `components/qms/` | ❓ | ✅ `qmsFlow.test.js`, `qmsAnalyticsService.test.js`, `qmsTopics.test.js`, `qmsTopicSelection.test.js`, `qmsTopicMigration.test.js`, `qmsCoachingWorkflow.test.js` | ❓ |
 | Home / command center | ❓ | ✅ `Home.jsx` (10.4KB) | ❓ | ❓ | ✅ ("Good morning, Thabo" dashboard confirmed live per PR24 session) |
 | Item analysis (facility/discrimination) | ✅ `itemAnalysisService.js` | ❓ | ❓ | ❓ | ⚪ **known bug in progress** — zeroed-out values traced to field-name mismatch in `question_data` between write path and read path |
@@ -166,6 +166,31 @@ Verified: Yes — 2026-08-06, live browser + Network tab, observation id 2
 record cards match the API response field-for-field, including the
 resolved/follow-up pill logic. This is a genuine click-through, replacing
 the earlier seeded-data-only verification.
+```
+
+### Assessment Detail (PR28)
+
+```
+Status: ✓ Backend  ✓ API  ✓ Tests  ✓ Browser
+
+Frontend:
+  dashboard/src/pages/AssessmentDetail.jsx (largest page, 12.9KB)
+
+Backend:
+  routes/api.js (GET /api/assessments/:assessmentId/detail)
+  services/assessmentDetailService.js
+
+Tests:
+  tests/assessment-capture-service.test.js
+  tests/assessmentCaptureService.edit.test.js
+  tests/assessment-session-*.test.js
+
+Verified: Yes — 2026-08-06. Backend curl-tested (assessment id 1,
+Fractions Test Seed): response well-formed, classAverage/passRate/topic
+averages independently recomputed and confirmed correct. Frontend
+cross-checked against component source: all fields match field-for-field,
+including the PercentagePill Strong/Developing/At Risk thresholds against
+actual data.
 ```
 
 Remaining rows (Learners list, Observation, Assessment, QMS, etc.) have

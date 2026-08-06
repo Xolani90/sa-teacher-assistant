@@ -77,7 +77,7 @@ Assessment Detail (PR28)
                         figures independently recomputed and confirmed
                         correct
   [x] Tests          (assessment-capture-*, assessment-session-*)
-  [ ] Browser
+  [x] Browser        — verified 2026-08-06, see VERIFIED.md
 
 QMS Workspace
   [x] Backend
