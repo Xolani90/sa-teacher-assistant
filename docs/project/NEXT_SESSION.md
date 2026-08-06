@@ -6,28 +6,33 @@ were we?" problem, so keep it short and current rather than comprehensive.
 
 ---
 
-**Current branch:** unknown — no `.git` in this archive, confirm locally
+**Current branch:** main
+**Last commit:** `4483866` (docs/project layer, pushed to `origin/main`, base `dd6ec21`)
 **Last completed:**
-- `docs/project/` documentation layer created (6 files): PROJECT_STATUS,
-  PROJECT_INVENTORY, VERIFIED, PROJECT_ROADMAP, PROJECT_DECISIONS,
-  CHANGELOG_PROJECT
-- Repo audit confirming Classes/ClassDetail/LearnerDetail frontend pages
-  are genuinely wired to real backend endpoints
+- `docs/project/` documentation layer complete (9 files, including
+  `PROJECT_MANIFEST.md` as index and `RELEASE_CHECKLIST.md` as release gate)
+- Full evidence audit (Phase A): every page in `dashboard/src/pages/` traced
+  to backend route + service + tests; `App.jsx` route table read directly
+- Confirmed real gap: no standalone Learners list page/route exists (not a
+  documentation miss — genuinely absent, decide if it's wanted before building)
 
-**Current task:** Browser verification pass (see `PROJECT_ROADMAP.md`
-"Immediate" section)
+**Current task:** Evidence audit (Phase A) is complete — see
+`PROJECT_INVENTORY.md` for full evidence blocks on every page. Next up:
+Phase B, browser verification (see `PROJECT_ROADMAP.md` "Immediate" section)
 
 **Next steps:**
-1. Open Classes page live, confirm real data renders, log result in
+1. Decide whether a standalone Learners list is actually wanted (confirmed
+   missing — not a bug, a genuine open question) before building it
+2. Open Classes page live, confirm real data renders, log result in
    `VERIFIED.md`
-2. Open Class Detail, confirm both detail and snapshot sections render
-3. Resolve the ADR-014 vs. `VERIFIED.md` discrepancy (see
+3. Open Class Detail, confirm both detail and snapshot sections render
+4. Resolve the ADR-014 vs. `VERIFIED.md` discrepancy (see
    `PROJECT_DECISIONS.md` — was class snapshot actually verified before, or
    not?)
-4. Open Learner Detail, confirm timeline renders
-5. Re-verify Observation Detail with an actual browser click-through, not
+5. Open Learner Detail, confirm timeline renders
+6. Re-verify Observation Detail with an actual browser click-through, not
    just seeded test data
-6. Record every mismatch found here before fixing anything, so nothing gets
+7. Record every mismatch found here before fixing anything, so nothing gets
    silently reworked mid-session
 
 **Blocked by:** nothing

@@ -1,9 +1,8 @@
 # Project Status
 
 **Last updated:** 2026-08-06
-**Repository:** no `.git` directory present in this archive — commit hash
-unknown. Run `git rev-parse HEAD` locally and paste it here; don't leave
-this line stale, and don't fabricate a hash.
+**Repository:** main @ `4483866` (docs/project layer commit, pushed to
+`origin/main`, base was `dd6ec21`)
 **Backend tests:** not run this session (counted, not executed — see below)
 **Frontend build:** not run this session
 **Browser verified this session:** none (see `VERIFIED.md`)
@@ -84,8 +83,16 @@ Counted directly from the repo, not estimated:
 | Frontend test files (`dashboard/`) | 0 |
 | Frontend pages (`dashboard/src/pages/*.jsx`) | 9 |
 | Frontend pages browser-verified | 2 (Login, Home) |
-| Frontend pages with confirmed API wiring (code-read, not browser) | 3 (Classes, ClassDetail, LearnerDetail) |
-| Frontend pages not yet checked for wiring | 4 (AssessmentDetail, ObservationDetail, ObservationWorkspace, QMS) |
+| Frontend pages with confirmed API wiring (code-read, not browser) | 8 of 9 (all except Login, which uses direct client calls not authedFetch — also fine, just different pattern) |
+| Backend features with no confirmed frontend consumer | 2 (Class Analytics, Class Intervention — services + tests exist, no UI wired) |
+| Frontend routes/pages confirmed genuinely missing | 1 (standalone Learners list — confirmed absent from `App.jsx`'s route table, not just unfound) |
+
+**Evidence audit status: complete.** Every page in `dashboard/src/pages/`
+has been traced to its backend route, service, and test files (see
+`PROJECT_INVENTORY.md` for full evidence blocks). `App.jsx`'s route table
+was read directly to confirm what does and doesn't exist, rather than
+inferring from filenames. Next phase is browser verification, not further
+code archaeology.
 
 This replaces the earlier 82%-style estimate. No blended percentage is
 given here on purpose — "9 pages, 2 verified" is more useful and harder to

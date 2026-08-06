@@ -4,10 +4,11 @@ Human-readable milestones. Coarser than the ADRs, finer than a vague "recent
 months" summary. Add an entry when something ships and is confirmed working
 — not when it's merely started.
 
-Note: no `.git` directory is present in this archive, so exact dates/commits
-below are approximate, reconstructed from ADR content and session context
-rather than git log. Replace with real commit dates once working from the
-actual repo with git history intact.
+Note: dates below for milestones prior to the docs/project layer are
+approximate, reconstructed from ADR content and session context — the
+archive this was originally built from had no `.git` history. Git history
+now exists from commit `4483866` onward (docs/project layer, base
+`dd6ec21`); anything after that point should use real commit dates.
 
 ## 2026 (approximate)
 
@@ -39,7 +40,14 @@ actual repo with git history intact.
   frontend pages are genuinely wired to real backend endpoints (no mocks).
   Found zero test files in `dashboard/`. Found ADR-014's own "verified"
   claim conflicts with the stricter release-checklist standard. Created the
-  `docs/project/` documentation layer (this file and five others).
+  `docs/project/` documentation layer (nine files).
+- **docs/project layer committed and pushed:** commit `4483866` on
+  `origin/main`, base `dd6ec21`. All nine files (`PROJECT_STATUS.md`,
+  `PROJECT_INVENTORY.md`, `VERIFIED.md`, `PROJECT_ROADMAP.md`,
+  `PROJECT_DECISIONS.md`, `CHANGELOG_PROJECT.md`, `RELEASE_CHECKLIST.md`,
+  `PROJECT_MANIFEST.md`, `NEXT_SESSION.md`) are now real, tracked files in
+  the repo — this is the first point where git history exists for any of
+  this documentation.
 
 ## Earlier context (dates unknown, predates this changelog)
 

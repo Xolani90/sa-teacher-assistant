@@ -30,8 +30,10 @@ docs/adr/ — 21 ADR/design documents. Index at docs/adr/ADR-INDEX.md.
 
 Current Priority
 -----------------
-Browser verification of already-implemented features. See
-RELEASE_CHECKLIST.md for the exact list of unchecked boxes.
+Phase A (evidence audit) is complete — every dashboard page traced to its
+backend route/service/tests, App.jsx route table read directly. Phase B
+(browser verification) is next. See RELEASE_CHECKLIST.md for the exact list
+of unchecked boxes.
 
 Do NOT build new features until the Release Checklist is complete, unless a
 critical defect requires it (current exceptions in flight: the item-analysis
@@ -48,7 +50,8 @@ until it's resolved one way or the other.
 
 Caveat on this manifest
 -------------------------
-No .git directory exists in the working archive this documentation layer was
-built from, so no commit hash is recorded anywhere in these docs. Anyone
-picking this up from a real clone should confirm PROJECT_STATUS.md's header
-against `git log` and `git status` before trusting anything here as current.
+Git history now exists on `origin/main` as of commit `4483866` (docs/project
+layer, base `dd6ec21`). PROJECT_STATUS.md's header should be checked against
+`git log`/`git status` at the start of each session and kept current — it's
+no longer a placeholder, so let it go stale and it'll actively mislead
+instead of just being empty.
