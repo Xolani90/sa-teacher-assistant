@@ -39,6 +39,7 @@ export default function AssessmentDetail() {
   const [error, setError] = useState(null);
   const [detail, setDetail] = useState(null);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const [pdfError, setPdfError] = useState(null);
   const [expandedLearner, setExpandedLearner] = useState(null);
 
   const load = useCallback(async () => {
@@ -60,11 +61,12 @@ export default function AssessmentDetail() {
 
   const handleDownloadPdf = async () => {
     setPdfLoading(true);
+    setPdfError(null);
     try {
       const { url } = await authedFetch(`/api/assessments/${assessmentId}/pdf`);
       window.open(url, '_blank', 'noopener,noreferrer');
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Could not generate the PDF right now.');
+      setPdfError(err instanceof ApiError ? err.message : 'Could not generate the PDF right now.');
     } finally {
       setPdfLoading(false);
     }
@@ -97,6 +99,12 @@ export default function AssessmentDetail() {
         onDownloadPdf={handleDownloadPdf}
         pdfLoading={pdfLoading}
       />
+
+      {pdfError && (
+        <div style={{ marginBottom: 'var(--space-6)' }}>
+          <ErrorBanner message={pdfError} onRetry={handleDownloadPdf} />
+        </div>
+      )}
 
       <KpiRow summary={summary} analytics={analytics} />
 

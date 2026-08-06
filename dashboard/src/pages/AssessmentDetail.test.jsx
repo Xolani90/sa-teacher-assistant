@@ -171,7 +171,7 @@ describe('AssessmentDetail', () => {
     openSpy.mockRestore();
   });
 
-  it('re-enables the download button and leaves the assessment on screen when the PDF request fails', async () => {
+  it('shows an inline, retryable error banner when the PDF request fails, without disturbing the loaded assessment', async () => {
     mockFetchRoutes({
       '/detail': { body: BLUEPRINT_DETAIL },
       '/pdf': { body: { error: 'Could not generate the PDF right now.' }, ok: false, status: 500 },
@@ -183,16 +183,40 @@ describe('AssessmentDetail', () => {
     const downloadButton = await screen.findByRole('button', { name: /download pdf/i });
     await user.click(downloadButton);
 
-    // The component tracks the PDF failure in the same `error` state as
-    // the page-load error, but only renders it via ErrorBanner when
-    // status === STATUS_ERROR — a PDF failure doesn't flip status, so
-    // there's no visible error banner here. What's observable is that
-    // the button recovers from its loading state, window.open is never
-    // called, and the already-loaded assessment stays on screen.
-    await screen.findByRole('button', { name: /download pdf/i });
+    expect(await screen.findByText('Could not generate the PDF right now.')).toBeInTheDocument();
     expect(downloadButton).not.toBeDisabled();
     expect(openSpy).not.toHaveBeenCalled();
+    // The already-loaded assessment content should remain visible — this
+    // is a separate `pdfError` state from the page-load error, so it
+    // doesn't replace the page with a full-page ErrorBanner.
     expect(screen.getByText('Term 2 Fractions Test')).toBeInTheDocument();
+    openSpy.mockRestore();
+  });
+
+  it('clears the PDF error banner and opens the file after a successful retry', async () => {
+    const fetchMock = mockFetchRoutes({
+      '/detail': { body: BLUEPRINT_DETAIL },
+      '/pdf': { body: { error: 'Could not generate the PDF right now.' }, ok: false, status: 500 },
+    });
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => {});
+    const user = userEvent.setup();
+    renderAssessmentDetail();
+
+    await user.click(await screen.findByRole('button', { name: /download pdf/i }));
+    expect(await screen.findByText('Could not generate the PDF right now.')).toBeInTheDocument();
+
+    // Retry succeeds this time.
+    fetchMock.mockImplementation(async (url) => {
+      if (url.includes('/pdf')) {
+        return { ok: true, status: 200, text: async () => JSON.stringify({ url: 'https://example.com/report.pdf' }) };
+      }
+      return { ok: true, status: 200, text: async () => JSON.stringify(BLUEPRINT_DETAIL) };
+    });
+    await user.click(screen.getByRole('button', { name: /retry/i }));
+
+    expect(await screen.findByText('Term 2 Fractions Test')).toBeInTheDocument();
+    expect(screen.queryByText('Could not generate the PDF right now.')).not.toBeInTheDocument();
+    expect(openSpy).toHaveBeenCalledWith('https://example.com/report.pdf', '_blank', 'noopener,noreferrer');
     openSpy.mockRestore();
   });
 
