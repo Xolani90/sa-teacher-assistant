@@ -12,7 +12,7 @@ A row only gets a browser ✅ after an actual click-through, noted below.
 | OTP verification / JWT | ✅ | ❓ | ✅ |
 | Protected routes | ✅ | ❓ | ✅ |
 | Home dashboard | ❓ | ❓ | ✅ |
-| Classes list | ✅ | ✅ `api-classes.test.js`, `pr18-api-classes-wiring.test.js` | ⏳ |
+| Classes list | ✅ | ✅ `api-classes.test.js`, `pr18-api-classes-wiring.test.js` | ✅ |
 | Class detail | ✅ | ✅ `classDetailService.test.js`, `api-class-detail.test.js` | ⏳ |
 | Class snapshot | ✅ | ✅ `classSnapshotService.test.js`, `api-class-snapshot.test.js` | ⏳ |
 | Learner detail | ✅ | ✅ `learnerRepository.test.js`, `learnerTimelineService.test.js` | ⏳ |
@@ -60,16 +60,23 @@ table.
 - **Verified by:** manual browser test (screenshots reviewed, not
   independently re-run in this audit)
 
+### Classes list
+
+- **Verified:** 2026-08-06
+- **Environment:** local development (backend `localhost:3000`, dashboard `localhost:5173`)
+- **Evidence:**
+  - ✓ `GET /api/classes` returned 4 classes, correct shape (`id`, `name`,
+    `grade`, `subject`, `learnerCount`, `createdAt`, `updatedAt`)
+  - ✓ All 4 cards rendered on screen matching the response exactly
+  - ✓ Console clean — only React Router v6→v7 future-flag deprecation
+    warnings (library noise, not app bugs) and a cosmetic `favicon.ico` 404
+  - Note (not a bug): ids 3 and 4 are both named "Grade 6B Mathematics
+    (Analytics Stress Test)" — leftover test data, not a rendering defect
+- **Verified by:** manual browser test, this session, live
+
 ## Rule going forward
 
 A row only moves to browser ✅ after an actual session, with a full entry
 added to "Verified By" above — date, environment, specific evidence, who/how
 it was verified. Passing backend tests is necessary but not sufficient to
 call a feature done.
-
-## Rule going forward
-
-A feature moves from "not yet verified" to "verified" only after an actual
-browser session confirms it, with a one-line note of what was checked (e.g.
-"clicked into Class Detail for class X, snapshot section rendered correct
-learner count"). Passing backend tests is necessary but not sufficient.
