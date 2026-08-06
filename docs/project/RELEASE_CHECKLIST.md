@@ -27,16 +27,14 @@ Class Detail
   [x] API wired
   [x] Backend
   [x] Tests         (classDetailService.test.js, api-class-detail.test.js)
-  [ ] Browser
+  [x] Browser        — verified 2026-08-06, see VERIFIED.md
 
 Class Snapshot
   [x] API wired
   [x] Backend
   [x] Tests         (classSnapshotService.test.js, api-class-snapshot.test.js)
-  [ ] Browser        — ⚠️ ADR-014 claims this was verified with seeded data;
-                        not the same as the browser-click-through standard
-                        used elsewhere in this checklist. Resolve before
-                        ticking (see PROJECT_DECISIONS.md).
+  [x] Browser        — verified 2026-08-06, see VERIFIED.md; ADR-014
+                        discrepancy resolved, see PROJECT_DECISIONS.md
 
 Class Analytics
   [ ] Frontend consumer located

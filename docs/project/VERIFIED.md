@@ -20,6 +20,8 @@ A row only gets a browser ✅ after an actual click-through, noted below.
 | Observation workspace | ✅ | ✅ (multiple `observationFlow-*`, `observationRepository-*`) | ⏳ |
 | Observation detail | ✅ | ✅ | ⏳ (prior session used seeded test data — that's not a browser click-through; re-check) |
 | Assessment detail | ✅ | ✅ (`assessment-capture-*`, `assessment-session-*`) | ⏳ |
+| Class Detail | ✅ | ✅ (`classDetailService.test.js`, `api-class-detail.test.js`) | ✅ |
+| Class Snapshot | ✅ | ✅ (`classSnapshotService.test.js`, `api-class-snapshot.test.js`) | ✅ |
 | QMS workspace | ✅ | ✅ (`qmsFlow`, `qmsAnalyticsService`, `qmsTopics*`, `qmsCoachingWorkflow`) | ⏳ |
 | Item analysis | ✅ | ❓ | ❌ known bug — do not mark ⏳ until `question_data` field mismatch is fixed |
 | Intervention plan (AI) | ✅ | ❓ | ❌ known bug — AI misstates group counts |
@@ -73,6 +75,33 @@ table.
   - Note (not a bug): ids 3 and 4 are both named "Grade 6B Mathematics
     (Analytics Stress Test)" — leftover test data, not a rendering defect
 - **Verified by:** manual browser test, this session, live
+
+### Class Detail / Class Snapshot
+
+- **Verified:** 2026-08-06
+- **Environment:** local development (backend `localhost:3000`, dashboard `localhost:5173`)
+- **Class used:** Grade 6A Mathematics (id 2, 5 learners — chosen for real data)
+- **Evidence:**
+  - ✓ `GET /api/classes/:id/detail` response fields match exactly what
+    `ClassDetail.jsx` reads: `classHealth`,
+    `curriculumCoverage.dataAvailable/percentage/remainingTopics`,
+    `recentAssessments`, `interventions.summary.evaluatedLearners/
+    insufficientData`, `interventions.priorityLearners.high/medium`
+  - ✓ `GET /api/classes/:id/snapshot` response: `analytics` and
+    `interventions` sections both return `status: "ok"` with real data
+  - ✓ `qms` section returns `status: "unavailable"` — confirmed by code
+    (`ClassSnapshotSection.jsx` comment: "Per ADR-014 §3.4, this section
+    always reports 'unavailable' today") that this is an intentional,
+    handled state, not an error — renders "Not available at the class
+    level yet."
+  - ✓ `metadata.partial: true` on the snapshot response is expected given
+    the QMS non-availability, not a bug
+- **Resolves:** the ADR-014 vs `VERIFIED.md` discrepancy flagged in
+  `PROJECT_DECISIONS.md` — ADR-014's claim was accurate; `VERIFIED.md` was
+  just being appropriately conservative until independently re-checked
+  here.
+- **Verified by:** manual browser test + live API response review, this
+  session
 
 ## Rule going forward
 

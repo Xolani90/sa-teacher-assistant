@@ -9,24 +9,27 @@ two files are both numbered "005" — `assessment-blueprint` and
 `intermediate-phase-assessment-intelligence` — worth resolving the numbering
 collision at some point, low priority).
 
-## ⚠️ Discrepancy found during this audit
+## ✅ Resolved: ADR-014 vs VERIFIED.md discrepancy
 
 `ADR-014-dashboard-snapshot-service.md` states its own status as "Accepted —
 Implemented" and claims: **"Verified against real seeded data in the
 dashboard UI. Analytics and Intervention sections render live values
 correctly."**
 
-This conflicts with `VERIFIED.md`, which currently marks Class Snapshot as
-⏳ (not yet browser-verified), based on the release-checklist standard of
-"personally proven end-to-end in a browser."
+This previously conflicted with `VERIFIED.md`, which marked Class Snapshot
+as ⏳ (not yet browser-verified).
 
-Two possibilities: (a) it was genuinely verified at the time ADR-014 was
-written and `VERIFIED.md` is being conservative because that session isn't
-independently confirmed here, or (b) "seeded data" verification is being
-counted more loosely than the checklist standard intends. Recommend
-resolving this explicitly next session rather than picking one silently —
-either downgrade the ADR-014 claim or upgrade `VERIFIED.md` with a dated
-note of what was actually checked.
+**Resolution (2026-08-06):** re-verified live — Grade 6A Mathematics (id 2),
+`GET /api/classes/:id/detail` and `GET /api/classes/:id/snapshot` checked
+against `ClassDetail.jsx` and `ClassSnapshotSection.jsx` field-by-field.
+Outcome: (a) was correct — ADR-014's claim held up. `analytics` and
+`interventions` return `status: "ok"` with real data; `qms` returns
+`status: "unavailable"`, which is a deliberate, fully-handled state (per
+ADR-014 §3.4 and the corresponding code comment), not a bug — it renders
+"Not available at the class level yet." `VERIFIED.md` was simply being
+appropriately conservative until independently re-checked. Both Class
+Detail and Class Snapshot are now ✅ Browser in `VERIFIED.md` and
+`RELEASE_CHECKLIST.md`.
 
 ## Authentication
 

@@ -12,8 +12,8 @@ Legend: ✅ done · 🚧 partial · ⚪ not started · ❓ unverified
 |---|---|---|---|---|---|
 | Auth (OTP + JWT) | ✅ `routes/auth.js` | ✅ `Login.jsx` | ✅ | ❓ | ✅ (login → dashboard confirmed live) |
 | Classes list | ✅ `getTeacherClasses` | ✅ `Classes.jsx` (130 lines) | ✅ `GET /api/classes` | ✅ `api-classes.test.js`, `pr18-api-classes-wiring.test.js` | ❓ |
-| Class detail | ✅ `classDetailService.js` | ✅ `ClassDetail.jsx` (333 lines) | ✅ `GET /api/classes/:id/detail` | ✅ `classDetailService.test.js`, `api-class-detail.test.js` | ❓ |
-| Class snapshot (ADR-014) | ✅ `classSnapshotService.js` | ✅ same file, second fetch | ✅ `GET /api/classes/:id/snapshot` | ✅ `classSnapshotService.test.js`, `api-class-snapshot.test.js` | ❓ |
+| Class detail | ✅ `classDetailService.js` | ✅ `ClassDetail.jsx` (333 lines) | ✅ `GET /api/classes/:id/detail` | ✅ `classDetailService.test.js`, `api-class-detail.test.js` | ✅ |
+| Class snapshot (ADR-014) | ✅ `classSnapshotService.js` | ✅ same file, second fetch | ✅ `GET /api/classes/:id/snapshot` | ✅ `classSnapshotService.test.js`, `api-class-snapshot.test.js` | ✅ |
 | Class analytics (ADR-015) | ✅ `classAnalyticsService.js` | ❓ not yet located in dashboard pages | ❓ | ✅ `classAnalyticsService.test.js` | ❓ |
 | Class intervention | ✅ `classInterventionService.js` | ❓ | ❓ | ✅ `classInterventionService.test.js`, `class-intervention-pdf.test.js` | ❓ |
 | Learners list | ✅ `getTeacherLearners` | ❓ (list page not yet located) | ✅ `GET /api/learners` | ✅ `api-learners.test.js`, `pr20-api-learners-wiring.test.js`, `getTeacherLearners.test.js` | ❓ |
@@ -68,7 +68,7 @@ Verified: No
 ### Class Detail
 
 ```
-Status: ✓ Backend  ✓ API  ✓ Tests  ⏳ Browser
+Status: ✓ Backend  ✓ API  ✓ Tests  ✓ Browser
 
 Frontend:
   dashboard/src/pages/ClassDetail.jsx (333 lines)
@@ -88,9 +88,13 @@ Tests:
   tests/classSnapshotService.test.js
   tests/api-class-snapshot.test.js
 
-Verified: No — ⚠️ ADR-014 itself claims "verified against real seeded data
-in the dashboard UI," which conflicts with this row. See
-PROJECT_DECISIONS.md for the open discrepancy; don't resolve it silently.
+Verified: Yes — 2026-08-06, live browser + Network tab, Grade 6A
+Mathematics (id 2). detail and snapshot responses match component
+expectations field-for-field; analytics/interventions return status "ok"
+with real data; qms returns status "unavailable" (confirmed intentional
+per ADR-014 §3.4 code comment, renders "Not available at the class level
+yet."). Resolves the ADR-014 vs VERIFIED.md discrepancy — see
+PROJECT_DECISIONS.md.
 ```
 
 ### Learner Detail
