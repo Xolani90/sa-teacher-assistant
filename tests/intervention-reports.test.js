@@ -131,7 +131,68 @@ try {
   assert(adminSummary.includes('Assessments Analyzed: 2'));
   console.log('✅ Test 11 passed: generateAdministratorSummary handles a mix of populated and empty assessments');
 
-  console.log('\n🎉 All 11 tests passed.');
+  // ── Test 12: RC1-H-003 regression — interventionPlanService must expose
+  // problemAreas (plural array), not just problemArea (singular string),
+  // or generateTeacherSummary/generateHodSummary silently fall back to
+  // 'none identified' / 'general revision' even when problem areas were
+  // correctly identified. See services/interventionPlanService.js.
+  //
+  // Needs its own assessment (not the shared fixture above) because it
+  // requires a question with success_rate < 0.5 to make errorAnalysis
+  // actually populate errorPatterns — the shared fixture's class does too
+  // well on both questions to trigger that path. ──
+  const weakAssessmentId = db.prepare(`
+    INSERT INTO assessments (phone_hash, title, grade, subject, term, assessment_type, total_marks)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(phoneHash, 'Term 2 Fractions Retest', 7, 'mathematics', 2, 'test', 50).lastInsertRowid;
+
+  const weakLearners = [
+    { name: 'Bongani', mark: 45, q: { 1: { mark: 10, maxMark: 10, topic: 'fractions' }, 2: { mark: 35, maxMark: 40, topic: 'fractions' } } },
+    { name: 'Zanele',  mark: 20, q: { 1: { mark: 4,  maxMark: 10, topic: 'fractions' }, 2: { mark: 16, maxMark: 40, topic: 'fractions' } } },
+    { name: 'Kagiso',  mark: 15, q: { 1: { mark: 3,  maxMark: 10, topic: 'fractions' }, 2: { mark: 12, maxMark: 40, topic: 'fractions' } } },
+    { name: 'Precious',mark: 8,  q: { 1: { mark: 1,  maxMark: 10, topic: 'fractions' }, 2: { mark: 7,  maxMark: 40, topic: 'fractions' } } },
+  ];
+  for (const l of weakLearners) {
+    db.prepare(`
+      INSERT INTO learner_results (assessment_id, learner_name, mark, total_marks, percentage, question_data)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(weakAssessmentId, l.name, l.mark, 50, Math.round((l.mark / 50) * 100), JSON.stringify(l.q));
+  }
+
+  const weakItemAnalysis = itemAnalysisSvc.performItemAnalysis(weakAssessmentId);
+  assert(!weakItemAnalysis.error, `seed item analysis (weak fixture) should not error: ${weakItemAnalysis.error}`);
+  itemAnalysisSvc.saveItemAnalysis(weakAssessmentId, weakItemAnalysis.questions, 'mathematics');
+
+  const weakReport = svc.generateInterventionReport(weakAssessmentId);
+  assert(!weakReport.error, `weak report should not error: ${weakReport.error}`);
+  assert(
+    Array.isArray(weakReport.interventionPlan.problemAreas),
+    'interventionPlan.problemAreas should be an array'
+  );
+  assert(
+    weakReport.interventionPlan.problemAreas.length > 0,
+    'interventionPlan.problemAreas should be non-empty when questions have success_rate < 0.5'
+  );
+  const [firstProblemArea] = weakReport.interventionPlan.problemAreas;
+
+  const weakTeacherSummary = svc.generateTeacherSummary(weakReport);
+  assert(
+    weakTeacherSummary.includes(firstProblemArea),
+    `teacher summary should mention problem area "${firstProblemArea}" instead of falling back to 'general revision'`
+  );
+
+  const weakHodSummary = svc.generateHodSummary(weakReport);
+  assert(
+    !weakHodSummary.includes('Problem areas: none identified'),
+    'HOD summary should not fall back to "none identified" when problem areas exist'
+  );
+  assert(
+    weakHodSummary.includes(firstProblemArea),
+    `HOD summary should mention problem area "${firstProblemArea}"`
+  );
+  console.log('✅ Test 12 passed: problemAreas contract honored end-to-end (RC1-H-003 regression)');
+
+  console.log('\n🎉 All 12 tests passed.');
 } finally {
   testDb.cleanup();
 }
