@@ -317,24 +317,19 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
   // in Commit 3, so this is genuinely NavigationService-owned cleanup —
   // just without borrowing handleCancel()'s confirmation policy.
   if (upper === 'CANCEL') {
-    const def = navigationService.getFlowDefinition('assessmentSession');
-    if (def?.capabilities.cancel && def.hooks.cleanup) {
-      def.hooks.cleanup(phoneHash);
-    } else {
-      // Defensive fallback only — should be unreachable given Commit 3's
-      // registration, but never silently no-op a cancel request.
-      assessmentSessionState.delete(phoneHash);
-    }
+    // ADR-019 Recommendation 2 (Strict registration): mirrors growthPlan's
+    // unguarded access. A missing FlowDefinition here is a programmer
+    // error (wiring gap), not a runtime condition to tolerate silently.
+    navigationService.getFlowDefinition('assessmentSession').hooks.cleanup(phoneHash);
     await safeSendMessage(from, 'Assessment session cancelled. No marks were saved.');
     return true;
   }
 
   if (upper === 'STATUS') {
     const owner = navigationService.resolveStatusOwner('assessmentSession');
-    const def = navigationService.getFlowDefinition('assessmentSession');
-    const message = (owner.owner === 'flow' && def?.hooks?.describeStatus)
-      ? def.hooks.describeStatus(phoneHash)
-      : describeStatus(state); // defensive fallback — same function either way
+    const message = owner.owner === 'flow'
+      ? navigationService.getFlowDefinition('assessmentSession').hooks.describeStatus(phoneHash)
+      : describeStatus(state);
     await safeSendMessage(from, message);
     return true;
   }

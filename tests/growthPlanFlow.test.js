@@ -58,6 +58,49 @@ function createSessionStore() {
   };
 }
 
+// Mirrors the growthPlan FlowDefinition registered in routes/webhook.js
+// (id, capabilities, menus, hooks). Kept byte-for-byte in sync with that
+// registration per ADR-019's "Known technical debt" section — until
+// registration is extracted into shared infrastructure, this duplication
+// is intentional and any change to one side must be mirrored in the other.
+//
+// registerFlow() is idempotent (re-registering an id overwrites the
+// previous definition), so calling this once per test — each with its
+// own fresh growthPlanState — safely rebinds hooks.cleanup/describeStatus
+// to that test's own state instance without leaking between tests.
+function registerGrowthPlanFlow(growthPlanState) {
+  function describeGrowthPlanStatus(phoneHash) {
+    const state = growthPlanState.get(phoneHash);
+    if (!state) return null;
+
+    const stepLabels = {
+      awaitingGoal: 'waiting for the goal',
+      awaitingTopic: 'waiting for the topic',
+      reviewSummary: 'reviewing before save',
+      awaitingCorrectionChoice: 'choosing what to correct',
+    };
+    const stepLabel = stepLabels[state.step] || state.step;
+
+    return (
+      `🎯 *Growth Plan in progress* — ${stepLabel}.\n` +
+      `Reply *CANCEL* to discard, or continue where you left off.`
+    );
+  }
+
+  navigationService.registerFlow({
+    id: 'growthPlan',
+    commands: [],
+    capabilities: { status: true, cancel: true, back: false, menus: true },
+    menus: {
+      correctionChoice: ['Goal', 'Topic', 'Cancel'],
+    },
+    hooks: {
+      cleanup: (phoneHash) => growthPlanState.delete(phoneHash),
+      describeStatus: describeGrowthPlanStatus,
+    },
+  });
+}
+
 function createDeps(overrides = {}) {
   const growthPlanState = createSessionStore();
   const safeSendMessage = createMockFn(() => Promise.resolve(undefined));
@@ -65,6 +108,13 @@ function createDeps(overrides = {}) {
   const hashPhone = createMockFn((from) => `hash:${from}`);
   const createGrowthPlan = createMockFn(() => ({ id: 1 }));
   const getCurrentTerm = createMockFn(() => 2);
+
+  // Registration fix (ADR-019 navigation-test-harness-audit, Recommendation
+  // 1): without this, NavigationService's registry is empty under test and
+  // growthPlanFlow.js's unguarded `getFlowDefinition('growthPlan').hooks.*`
+  // calls throw "Cannot read properties of null (reading 'hooks')" the
+  // moment CANCEL or STATUS is exercised.
+  registerGrowthPlanFlow(growthPlanState);
 
   return {
     growthPlanState,
@@ -167,36 +217,67 @@ async function run() {
     const deps = createDeps();
     const from = '+27000000003';
 
-    // Mirrors routes/webhook.js's growthPlan registerFlow() call
-    // (composition root, lines ~185-200). This test requires
-    // flows/growthPlanFlow.js directly and never executes webhook.js, so
-    // NavigationService's registry has no 'growthPlan' entry unless it's
-    // registered here — otherwise getFlowDefinition('growthPlan') returns
-    // null and the flow's CANCEL branch throws on `.hooks`. registerFlow()
-    // is idempotent (overwrite-by-id), so re-registering every iteration
-    // with hooks bound to *this* iteration's fresh deps.growthPlanState is
-    // safe and keeps each cancelSteps case isolated. Only `hooks.cleanup`
-    // is exercised by this test; `hooks.describeStatus` is included for
-    // shape-parity with the real registration but is a placeholder since
-    // no test here sends STATUS.
-    navigationService.registerFlow({
-      id: 'growthPlan',
-      commands: [],
-      capabilities: { status: true, cancel: true, back: false, menus: true },
-      menus: {
-        correctionChoice: ['Goal', 'Topic', 'Cancel'],
-      },
-      hooks: {
-        cleanup: (phoneHash) => deps.growthPlanState.delete(phoneHash),
-        describeStatus: () => 'not exercised in this test',
-      },
-    });
-
     await drive(deps, from);
     await handleGrowthPlanFlow(from, 'CANCEL', null, deps);
 
     assert(deps.createGrowthPlan.callCount() === 0, `cancels cleanly from ${name} without ever saving`);
     assert(deps.growthPlanState.get('hash:+27000000003') === null, `state is cleared after CANCEL from ${name}`);
+  }
+
+  // ── status ─────────────────────────────────────────────────
+  // Exercises the previously-untested navigationService.getFlowDefinition
+  // ('growthPlan').hooks.describeStatus(...) path (audit finding: same
+  // unguarded shape as CANCEL, but no test exercised it). Now covered for
+  // each mid-flow step, matching the step labels in the mirrored
+  // registerGrowthPlanFlow() hook above.
+  console.log('\n── status ──');
+  const statusSteps = [
+    {
+      name: 'awaitingGoal',
+      drive: async (deps, from) => {
+        await handleGrowthPlanFlow(from, 'GROWTH PLAN', null, deps);
+      },
+      expectedLabel: 'waiting for the goal',
+    },
+    {
+      name: 'awaitingTopic',
+      drive: async (deps, from) => {
+        await handleGrowthPlanFlow(from, 'GROWTH PLAN', null, deps);
+        await handleGrowthPlanFlow(from, 'Goal text', null, deps);
+      },
+      expectedLabel: 'waiting for the topic',
+    },
+    {
+      name: 'reviewSummary',
+      drive: async (deps, from) => {
+        await runHappyPathUpTo(deps, from, 'reviewSummary');
+      },
+      expectedLabel: 'reviewing before save',
+    },
+    {
+      name: 'awaitingCorrectionChoice',
+      drive: async (deps, from) => {
+        await runHappyPathUpTo(deps, from, 'reviewSummary');
+        await handleGrowthPlanFlow(from, 'NO', null, deps);
+      },
+      expectedLabel: 'choosing what to correct',
+    },
+  ];
+
+  for (const { name, drive, expectedLabel } of statusSteps) {
+    const deps = createDeps();
+    const from = '+27000000005';
+
+    await drive(deps, from);
+    const callsBeforeStatus = deps.safeSendMessage.callCount();
+    const handled = await handleGrowthPlanFlow(from, 'STATUS', null, deps);
+
+    assert(handled === true, `STATUS is handled (does not fall through) from ${name}`);
+    assert(deps.safeSendMessage.callCount() === callsBeforeStatus + 1, `STATUS sends exactly one new message from ${name}`);
+    const [, message] = deps.safeSendMessage.calls[deps.safeSendMessage.calls.length - 1];
+    assertMatch(message, new RegExp(expectedLabel), `STATUS message reflects the ${name} step label`);
+    assert(deps.createGrowthPlan.callCount() === 0, `STATUS never saves from ${name}`);
+    assert(deps.growthPlanState.get('hash:+27000000005') !== null, `STATUS does not clear state from ${name}`);
   }
 
   // ── timeout ────────────────────────────────────────────────

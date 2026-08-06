@@ -26,6 +26,41 @@
 // ── Shared real-migrations test DB helper (see docs/TSE_SCHOOL_CALENDAR_TEST_GAP.md) ──
 const { createTestDb } = require('./helpers/createTestDb');
 
+// Required lazily inside run(), after createTestDb() installs the
+// better-sqlite3 shim — navigationService.js doesn't itself touch the
+// DB, but requiring it up top would risk a future transitive require
+// resolving the real (unbuilt) native module before the shim is live.
+let navigationService;
+
+// Mirrors the assessmentSession FlowDefinition registered in
+// routes/webhook.js (id, capabilities, menus, hooks). Kept byte-for-byte
+// in sync with that registration per ADR-019's "Known technical debt"
+// section — until registration is extracted into shared infrastructure,
+// this duplication is intentional and any change to one side must be
+// mirrored in the other.
+//
+// registerFlow() is idempotent (re-registering an id overwrites the
+// previous definition), so calling this once per run — with this run's
+// own fresh assessmentSessionState — safely rebinds hooks.cleanup/
+// describeStatus to that state instance without leaking between runs.
+function registerAssessmentSessionFlow(assessmentSessionState, describeAssessmentSessionStatus) {
+  navigationService.registerFlow({
+    id: 'assessmentSession',
+    commands: ['NEW TEST', 'PRINT', 'RESUME'],
+    capabilities: { status: true, cancel: true, back: false, menus: true },
+    menus: {
+      complete: ['Start a new assessment', 'Print a blueprint question paper'],
+    },
+    hooks: {
+      cleanup: (phoneHash) => assessmentSessionState.delete(phoneHash),
+      describeStatus: (phoneHash) => {
+        const state = assessmentSessionState.get(phoneHash);
+        return state ? describeAssessmentSessionStatus(state) : null;
+      },
+    },
+  });
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────
 let passed = 0;
 let failed = 0;
@@ -44,9 +79,18 @@ async function run() {
   const testDb = createTestDb(__filename);
 
   const { SessionStore } = require('../utils/sessionStore');
-  const { handleAssessmentSessionFlow } = require('../flows/assessmentSessionFlow');
+  const { handleAssessmentSessionFlow, describeStatus: describeAssessmentSessionStatus } = require('../flows/assessmentSessionFlow');
+  navigationService = require('../services/navigationService');
 
   const assessmentSessionState = new SessionStore('assessmentSession', 24 * 60 * 60 * 1000);
+
+  // Registration fix (ADR-019 Recommendation 2, Strict registration):
+  // without this, NavigationService's registry is empty under test and
+  // assessmentSessionFlow.js's now-unguarded
+  // `getFlowDefinition('assessmentSession').hooks.*` calls throw the
+  // same "Cannot read properties of null (reading 'hooks')" error that
+  // growthPlan hit before Recommendation 1's fix.
+  registerAssessmentSessionFlow(assessmentSessionState, describeAssessmentSessionStatus);
 
   const PHONE = '+27831234567';
   const hashPhone = (p) => `hash_${p}`;
