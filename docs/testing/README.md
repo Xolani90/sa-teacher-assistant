@@ -21,10 +21,10 @@ what state/prerequisites it hands to the next.
 1. [`WORKFLOW_01_AUTHENTICATION.md`](./WORKFLOW_01_AUTHENTICATION.md) — Login, OTP, session, logout
 2. [`WORKFLOW_02_CLASSES.md`](./WORKFLOW_02_CLASSES.md) — Class list, detail, snapshot
 3. [`WORKFLOW_03_LEARNERS.md`](./WORKFLOW_03_LEARNERS.md) — Learner list, detail, intervention plan
-4. `WORKFLOW_04_ASSESSMENTS.md` — Assessment detail, PDF trigger (not yet instantiated)
-5. `WORKFLOW_05_REPORTS_PDF.md` — Reports & PDF (not yet instantiated)
-6. `WORKFLOW_06_QMS.md` — QMS / reflections / TSE status (not yet instantiated)
-7. `WORKFLOW_07_OBSERVATIONS.md` — Observation list, detail (not yet instantiated)
+4. [`WORKFLOW_04_ASSESSMENTS.md`](./WORKFLOW_04_ASSESSMENTS.md) — Assessment detail, PDF trigger, item-analysis value checks
+5. [`WORKFLOW_05_REPORTS_PDF.md`](./WORKFLOW_05_REPORTS_PDF.md) — Reports & PDF artifact correctness (current scope: assessment PDF)
+6. [`WORKFLOW_06_QMS.md`](./WORKFLOW_06_QMS.md) — QMS / reflections / TSE status
+7. [`WORKFLOW_07_OBSERVATIONS.md`](./WORKFLOW_07_OBSERVATIONS.md) — Observation list, detail, correction lineage
 
 ## Pass Criteria
 A workflow is **PASS** only when:
