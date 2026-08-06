@@ -54,7 +54,7 @@ the result here — don't edit this table standalone.
 |---|---|---|---|---|---|
 | Auth (OTP + JWT) | ✅ | ✅ | ❓ (not isolated) | ✅ | ⏳ (blocked on confirming test file) |
 | Home Dashboard | ❓ (backing service not confirmed) | ✅ | ❓ | ✅ | ⏳ |
-| Classes (list) | ✅ | ✅ | ✅ | ⏳ | ⏳ |
+| Classes (list) | ✅ | ✅ | ✅ | ✅ | ⏳ (all four boxes green — candidate for Release Ready, do one more pass to confirm before flipping) |
 | Class Detail | ✅ | ✅ | ✅ | ⏳ | ⏳ (also blocked on ADR-014 discrepancy) |
 | Class Snapshot | ✅ | ✅ | ✅ | ⏳ | ⏳ |
 | Learner Detail | ✅ | ✅ | ✅ | ⏳ | ⏳ |

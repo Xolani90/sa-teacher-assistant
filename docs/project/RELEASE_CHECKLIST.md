@@ -21,7 +21,7 @@ Classes (list)
   [x] API wired
   [x] Backend
   [x] Tests         (api-classes.test.js, pr18-api-classes-wiring.test.js)
-  [ ] Browser
+  [x] Browser        — verified 2026-08-06, see VERIFIED.md
 
 Class Detail
   [x] API wired
@@ -57,11 +57,11 @@ Learner Detail
   [ ] Browser
 
 Learners (list)
-  [ ] Frontend page located
-  [x] API wired
+  [x] Frontend page — CONFIRMED does not exist (no /learners route in App.jsx)
+  [x] API wired      (backend endpoint exists, just has no list-page consumer)
   [x] Backend
-  [x] Tests         (api-learners.test.js, pr20-api-learners-wiring.test.js)
-  [ ] Browser
+  [x] Tests          (api-learners.test.js, pr20-api-learners-wiring.test.js)
+  [ ] Browser         — N/A until built; not a verification task, a build task
 
 Observation Workspace
   [x] Backend
