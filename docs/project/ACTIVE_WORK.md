@@ -166,13 +166,43 @@ rather than asking the model to restate it) remains a reasonable approach
 
 Enhancements, not bugs — no defect claim attached to any of these.
 
-- Connect Class Analytics to a frontend consumer (service + tests exist,
-  nothing calls it yet — confirmed via `App.jsx` route table)
-- Connect Class Intervention to a frontend consumer (same situation)
+### Class Analytics / Class Intervention frontend consumers — audited 2026-08-06, already complete
+
+The two "Connect X to a frontend consumer" items below were audited before
+any wiring was attempted, per the "audit before implementing" rule. Both
+turned out to already be fully done — the "nothing calls it yet" claim
+did not match the actual repo state:
+
+- `ClassDetail.jsx` fetches `GET /api/classes/:classId/snapshot`
+  (confirmed: `authedFetch(`/api/classes/${classId}/snapshot`)`)
+- `ClassSnapshotSection.jsx` renders it via `AnalyticsSnapshotCard` and
+  `InterventionSnapshotCard` (defined inline in that file)
+- Schema match confirmed by reading both services directly:
+  `classAnalyticsService.js` returns `classSummary.{averageMastery,
+  averageCoverage, averageProgress}`; `AnalyticsSnapshotCard` reads
+  exactly those three fields. `classInterventionService.js` returns
+  `priorityCounts.{high, medium, low}`; `InterventionSnapshotCard` reads
+  exactly those three fields.
+- Test coverage exists at every layer: `classAnalyticsService.test.js`,
+  `classInterventionService.test.js`, `classSnapshotService.test.js`
+  (composition), `api-class-snapshot.test.js` (route contract)
+- Browser verification already logged for Class Detail in the Phase B
+  checklist above (2026-08-06)
+
+All four parts of the "done rule" are met. No wiring work exists to do —
+removed from the active queue. (The stale claim itself is worth noting:
+this is the third documented item in one day that didn't match reality
+once actually checked, after Item Analysis and the AI group-count claim.
+Worth treating every "Future"/"Engineering work" item with the same
+audit-first skepticism as a defect claim, not just defects.)
+
+### Genuinely open
+
 - Decide whether a standalone Learners list page is actually wanted
   (confirmed absent from `App.jsx` — this is an open product question, not
   an oversight to silently fix)
-- Frontend test coverage (currently 0 files in `dashboard/`)
+- Frontend test coverage (confirmed 2026-08-06: 0 `.test.js`/`.test.jsx`
+  files anywhere under `dashboard/`)
 - PR29–PR32 (analytics, QMS polish, reporting, home analytics)
 - Release checklist completion
 - Production deployment validation
