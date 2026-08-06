@@ -43,6 +43,39 @@ don't trust the body below without re-checking `PROJECT_INVENTORY.md`.
 See `PROJECT_INVENTORY.md` for the full per-feature table and
 `VERIFIED.md` for what's actually been clicked through in a browser.
 
+## Feature Completion Matrix
+
+The release dashboard — one table, answers "what's actually finished?"
+without hunting across files. Source facts pulled from `PROJECT_INVENTORY.md`
+evidence blocks and `VERIFIED.md`; update both of those first, then mirror
+the result here — don't edit this table standalone.
+
+| Feature | Backend | Frontend | Tests | Browser Verified | Release Ready |
+|---|---|---|---|---|---|
+| Auth (OTP + JWT) | ✅ | ✅ | ❓ (not isolated) | ✅ | ⏳ (blocked on confirming test file) |
+| Home Dashboard | ❓ (backing service not confirmed) | ✅ | ❓ | ✅ | ⏳ |
+| Classes (list) | ✅ | ✅ | ✅ | ⏳ | ⏳ |
+| Class Detail | ✅ | ✅ | ✅ | ⏳ | ⏳ (also blocked on ADR-014 discrepancy) |
+| Class Snapshot | ✅ | ✅ | ✅ | ⏳ | ⏳ |
+| Learner Detail | ✅ | ✅ | ✅ | ⏳ | ⏳ |
+| Learners (list) | ✅ | ❌ confirmed absent | ✅ | n/a | ⏳ (product decision needed) |
+| Observation Workspace | ✅ | ✅ | ✅ | ⏳ | ⏳ |
+| Observation Detail | ✅ | ✅ | ✅ | ⏳ (prior claim used seeded data, doesn't count) | ⏳ |
+| Assessment Detail | ✅ (PR28, being curl-tested) | ✅ | ✅ (broad, not isolated to this route) | ⏳ | ⏳ |
+| QMS Workspace | ✅ | ✅ | ✅ | ⏳ | ⏳ |
+| Class Analytics | ✅ | ❌ no consumer wired | ✅ | n/a | ⏳ (product decision needed) |
+| Class Intervention | ✅ | ❌ no consumer wired | ✅ | n/a | ⏳ (product decision needed) |
+| Item Analysis | ✅ (buggy — zeroing values) | ❓ | ❓ | ❌ | ❌ blocked on bug fix |
+| Intervention Plan (AI) | ✅ (buggy — miscounts groups) | n/a | ❓ | ❌ | ❌ blocked on bug fix |
+
+Legend: ✅ confirmed · ⏳ pending/not yet done · ❌ confirmed missing or
+broken · ❓ genuinely unknown, not yet checked · n/a not applicable
+
+Only two rows have every column at ✅: none currently. Auth and Home are
+closest (browser-verified, backend/frontend solid) but both have an
+unconfirmed Tests column — worth a five-minute check to close that out
+before calling either "Release Ready."
+
 ## Snapshot
 
 - **Backend**: extensive — services + routes exist for every major area

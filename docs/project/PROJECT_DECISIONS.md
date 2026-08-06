@@ -54,6 +54,21 @@ note of what was actually checked.
   which one is authoritative. `tse_evidence_links` is the canonical table.
 - **Reference:** ADR-010.
 
+## Open product decisions (not yet made)
+
+These aren't architectural decisions with an ADR — they're unresolved
+product questions surfaced by the evidence audit. Listed here so they don't
+get silently resolved by whoever touches the code next.
+
+- **Class Analytics / Class Intervention**: both have complete backend
+  services and passing tests, but zero frontend consumers exist anywhere in
+  `App.jsx`'s route table. Are these intended to ship in the dashboard, or
+  were they deliberately deferred/superseded? Until answered, don't build a
+  UI for them speculatively and don't delete the backend code either.
+- **Standalone Learners list**: confirmed absent from `App.jsx`. Is a
+  cross-class learner list actually wanted, or is the class-scoped roster
+  (via Class Detail) the intended UX? See `PROJECT_ROADMAP.md`.
+
 ## Remaining decisions to summarize here
 
 ADR-001 (flow boundaries), ADR-002 (generation pipeline), ADR-003/004

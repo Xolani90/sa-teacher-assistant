@@ -15,15 +15,17 @@ PROJECT_STATUS.md wins; go fix the other file.
 
 Read in this order
 -------------------
-1. PROJECT_STATUS.md    — current facts, measured counts
+Strict rule: start with PROJECT_STATUS.md, then ACTIVE_WORK.md. Only open
+PROJECT_INVENTORY.md if those two don't answer the question. If the answer
+still isn't there, consult the ADRs or source code directly — don't guess.
+
+1. PROJECT_STATUS.md    — current facts, measured counts, completion matrix
 2. ACTIVE_WORK.md        — what to work on right now
-3. NEXT_SESSION.md      — where to resume right now
-4. RELEASE_CHECKLIST.md — what's gating a release candidate
-5. VERIFIED.md           — evidence log of what's actually been proven live
-6. PROJECT_DECISIONS.md — architectural decisions, quick reference
-7. PROJECT_ROADMAP.md   — remaining work only
-8. PROJECT_INVENTORY.md — full per-feature detail with file-level evidence
-9. CHANGELOG_PROJECT.md — milestone history
+3. PROJECT_INVENTORY.md — full per-feature detail with file-level evidence (only if needed)
+
+Reference only, not part of the standard read path:
+- NEXT_SESSION.md, RELEASE_CHECKLIST.md, VERIFIED.md, PROJECT_DECISIONS.md,
+  PROJECT_ROADMAP.md, CHANGELOG_PROJECT.md
 
 Architecture
 ------------
