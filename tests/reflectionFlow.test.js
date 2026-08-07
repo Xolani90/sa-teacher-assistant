@@ -305,17 +305,34 @@ async function run() {
     const from = '+27000000009';
     const phoneHash = 'hash:+27000000009';
 
-    deps.reflectionState.set(phoneHash, {
-      step: 'awaitingLesson',
-      lastActivity: Date.now() - 30 * 60 * 1000,
-    });
+    // Deterministic clock: the production check does
+    // `Date.now() - state.lastActivity > 30 * 60 * 1000`, and real
+    // execution time separates the two Date.now() reads (setup here vs.
+    // the check inside handleReflectionFlow). Left unmocked, "exactly 30
+    // minutes ago" at setup is always *more* than 30 minutes by the time
+    // the check runs, making this test flake depending on machine/I-O
+    // speed (fails on slower/DB-backed environments, passes on fast
+    // in-memory ones). Freeze Date.now() for the setup + call so the
+    // elapsed delta is deterministically exactly 30 * 60 * 1000, not
+    // 30 * 60 * 1000 + jitter.
+    const FIXED_NOW = Date.now();
+    const realDateNow = Date.now;
+    Date.now = () => FIXED_NOW;
+    try {
+      deps.reflectionState.set(phoneHash, {
+        step: 'awaitingLesson',
+        lastActivity: FIXED_NOW - 30 * 60 * 1000,
+      });
 
-    const handled = await handleReflectionFlow(from, 'Fractions Grade 6', null, deps);
+      const handled = await handleReflectionFlow(from, 'Fractions Grade 6', null, deps);
 
-    assert(handled === true, 'treats a session exactly at the 30-minute boundary as still active');
-    const state = deps.reflectionState.get(phoneHash);
-    assert(state !== null, 'state at the exact boundary is not dropped');
-    assertEqual(state && state.step, 'awaitingWentWell', 'session at the boundary continues to advance normally');
+      assert(handled === true, 'treats a session exactly at the 30-minute boundary as still active');
+      const state = deps.reflectionState.get(phoneHash);
+      assert(state !== null, 'state at the exact boundary is not dropped');
+      assertEqual(state && state.step, 'awaitingWentWell', 'session at the boundary continues to advance normally');
+    } finally {
+      Date.now = realDateNow;
+    }
   }
 
   console.log('\n── fresh session after timeout ──');
