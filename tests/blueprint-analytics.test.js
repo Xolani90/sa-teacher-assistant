@@ -48,6 +48,15 @@ const stubTargets = {
   },
   [path.resolve(__dirname, '../services/curriculumCoverageService.js')]: {
     updateCoverageFromAssessment: () => {},
+    // Was missing until now — diagnosticWorkflowService (via coverageService.js)
+    // calls curriculumCoverageService.getExpectedTopics() when persisting a
+    // learner's intervention plan. Without this, that call silently threw
+    // "getExpectedTopics is not a function", was caught, and logged — Section
+    // 3's assertions still passed because they never checked persistence
+    // itself, only that processAssessmentData completed. Returning [] here
+    // matches the same "no expected topics" shape used by the other stubs
+    // in this file (blueprint-pdf-report.test.js, migration-030 test).
+    getExpectedTopics: () => [],
   },
 };
 

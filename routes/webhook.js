@@ -140,6 +140,44 @@ const { handleReflectionFlow } = require('../flows/reflectionFlow');
 const { createReflection } = require('../services/reflectionService');
 const { getCurrentTerm } = require('../services/schoolCalendarRepository');
 
+// NavigationService migration, mirroring growthPlanFlow's registration
+// above: STATUS is new (reflectionFlow had no local STATUS handling
+// before — it previously always fell through to account/quota even with
+// an active session), gated behind capabilities.status so it's a pure
+// addition, not a behaviour change to anything that already worked.
+function describeReflectionStatus(phoneHash) {
+  const state = reflectionState.get(phoneHash);
+  if (!state) return null;
+
+  const stepLabels = {
+    awaitingLesson: 'waiting for the lesson',
+    awaitingWentWell: 'waiting for what went well',
+    awaitingImprovement: 'waiting for what you would improve',
+    awaitingTopic: 'waiting for the topic',
+    reviewSummary: 'reviewing before save',
+    awaitingCorrectionChoice: 'choosing what to correct',
+  };
+  const stepLabel = stepLabels[state.step] || state.step;
+
+  return (
+    `📝 *Reflection in progress* — ${stepLabel}.\n` +
+    `Reply *CANCEL* to discard, or continue where you left off.`
+  );
+}
+
+require('../services/navigationService').registerFlow({
+  id: 'reflection',
+  commands: [],
+  capabilities: { status: true, cancel: true, back: false, menus: true },
+  menus: {
+    correctionChoice: ['Lesson', 'What went well', 'What I would improve', 'Topic', 'Cancel'],
+  },
+  hooks: {
+    cleanup: (phoneHash) => reflectionState.delete(phoneHash),
+    describeStatus: describeReflectionStatus,
+  },
+});
+
 function buildReflectionDeps() {
   return Object.freeze({
     reflectionState,

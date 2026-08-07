@@ -1,6 +1,7 @@
 'use strict';
 
 const { handleReflectionFlow } = require('../flows/reflectionFlow');
+const navigationService = require('../services/navigationService');
 
 let passed = 0;
 let failed = 0;
@@ -57,6 +58,51 @@ function createSessionStore() {
   };
 }
 
+// Mirrors the reflection FlowDefinition registered in routes/webhook.js
+// (id, capabilities, menus, hooks). Kept byte-for-byte in sync with that
+// registration per ADR-019's "Known technical debt" section — until
+// registration is extracted into shared infrastructure, this duplication
+// is intentional and any change to one side must be mirrored in the other.
+//
+// registerFlow() is idempotent (re-registering an id overwrites the
+// previous definition), so calling this once per test — each with its
+// own fresh reflectionState — safely rebinds hooks.cleanup/describeStatus
+// to that test's own state instance without leaking between tests.
+function registerReflectionFlow(reflectionState) {
+  function describeReflectionStatus(phoneHash) {
+    const state = reflectionState.get(phoneHash);
+    if (!state) return null;
+
+    const stepLabels = {
+      awaitingLesson: 'waiting for the lesson',
+      awaitingWentWell: 'waiting for what went well',
+      awaitingImprovement: 'waiting for what you would improve',
+      awaitingTopic: 'waiting for the topic',
+      reviewSummary: 'reviewing before save',
+      awaitingCorrectionChoice: 'choosing what to correct',
+    };
+    const stepLabel = stepLabels[state.step] || state.step;
+
+    return (
+      `📝 *Reflection in progress* — ${stepLabel}.\n` +
+      `Reply *CANCEL* to discard, or continue where you left off.`
+    );
+  }
+
+  navigationService.registerFlow({
+    id: 'reflection',
+    commands: [],
+    capabilities: { status: true, cancel: true, back: false, menus: true },
+    menus: {
+      correctionChoice: ['Lesson', 'What went well', 'What I would improve', 'Topic', 'Cancel'],
+    },
+    hooks: {
+      cleanup: (phoneHash) => reflectionState.delete(phoneHash),
+      describeStatus: describeReflectionStatus,
+    },
+  });
+}
+
 function createDeps(overrides = {}) {
   const reflectionState = createSessionStore();
   const safeSendMessage = createMockFn(() => Promise.resolve(undefined));
@@ -64,6 +110,12 @@ function createDeps(overrides = {}) {
   const hashPhone = createMockFn((from) => `hash:${from}`);
   const createReflection = createMockFn(() => ({ id: 1 }));
   const getCurrentTerm = createMockFn(() => 2);
+
+  // Without this, NavigationService's registry is empty under test and
+  // reflectionFlow.js's unguarded `getFlowDefinition('reflection').hooks.*`
+  // calls throw "Cannot read properties of null (reading 'hooks')" the
+  // moment CANCEL or STATUS is exercised (same fix as growthPlanFlow.test.js).
+  registerReflectionFlow(reflectionState);
 
   return {
     reflectionState,

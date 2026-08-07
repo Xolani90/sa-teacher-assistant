@@ -49,8 +49,45 @@
 
 const { renderTopicListMessage, resolveTopicSelection, labelForTopicId } = require('../utils/qmsTopicSelection');
 
+// NavigationService migration (Navigation Platform §9 steps 2/4/5,
+// mirroring growthPlanFlow.js's own migration and ADR-019 Step 3 for
+// Assessment): STATUS and CANCEL delegate to NavigationService's
+// registered hooks (routes/webhook.js's reflection registerFlow() call)
+// as the single authoritative execution path. Deliberately NOT using
+// navigationService.handleCancel() — it always attaches a YES-confirmation
+// prompt, and reflection's CANCEL is immediate; adopting that prompt here
+// would be a UX change, not an ownership migration.
+const navigationService = require('../services/navigationService');
+
 const YES_RE = /^y(es)?$/i;
 const NO_RE = /^n(o)?$/i;
+
+// The awaitingCorrectionChoice 1-5 prompt resolves its digit via
+// NavigationService.consumeNumericReply() instead of local `trimmed === 'N'`
+// checks, matching growthPlanFlow.js's CORRECTION_MENU_ID convention.
+// openMenu() only stores state — it does not render or send anything — so
+// the existing prompt text/safeSendMessage call sites are unchanged. State
+// mutation (step transitions, `correcting: true`, deletion) stays owned by
+// this flow; NavigationService only answers "which option was picked."
+const CORRECTION_MENU_ID = 'reflection.correctionChoice';
+const CORRECTION_MENU_OPTIONS = {
+  '1': 'LESSON',
+  '2': 'WENT_WELL',
+  '3': 'IMPROVEMENT',
+  '4': 'TOPIC',
+  '5': 'CANCEL',
+};
+
+function formatCorrectionChoiceMenu() {
+  return (
+    `Which part would you like to change?\n\n` +
+    `1. Lesson\n` +
+    `2. What went well\n` +
+    `3. What I would improve\n` +
+    `4. Topic\n` +
+    `5. Cancel`
+  );
+}
 
 /**
  * Builds the review summary message for the current collected fields.
@@ -120,9 +157,19 @@ async function handleReflectionFlow(from, text, preClassifiedIntent, deps) {
   }
 
   const trimmed = text.trim();
-  if (trimmed.toUpperCase() === 'CANCEL') {
-    reflectionState.delete(phoneHash);
+  const upper = trimmed.toUpperCase();
+
+  if (upper === 'CANCEL') {
+    navigationService.getFlowDefinition('reflection').hooks.cleanup(phoneHash);
     await safeSendMessage(from, `No problem — cancelled.`);
+    return true;
+  }
+
+  if (upper === 'STATUS') {
+    const message = navigationService
+      .getFlowDefinition('reflection')
+      .hooks.describeStatus(phoneHash);
+    await safeSendMessage(from, message);
     return true;
   }
 
@@ -308,14 +355,8 @@ async function handleReflectionFlow(from, text, preClassifiedIntent, deps) {
         step: 'awaitingCorrectionChoice',
         lastActivity: Date.now(),
       });
-      await safeSendMessage(from,
-        `Which part would you like to change?\n\n` +
-        `1. Lesson\n` +
-        `2. What went well\n` +
-        `3. What I would improve\n` +
-        `4. Topic\n` +
-        `5. Cancel`
-      );
+      navigationService.openMenu(phoneHash, { id: CORRECTION_MENU_ID, options: CORRECTION_MENU_OPTIONS });
+      await safeSendMessage(from, formatCorrectionChoiceMenu());
       return true;
     }
 
@@ -327,57 +368,62 @@ async function handleReflectionFlow(from, text, preClassifiedIntent, deps) {
   }
 
   if (state.step === 'awaitingCorrectionChoice') {
-    if (trimmed === '5') {
-      reflectionState.delete(phoneHash);
-      await safeSendMessage(from, `No problem — cancelled.`);
-      return true;
+    const consumed = navigationService.consumeNumericReply(phoneHash, trimmed);
+
+    if (consumed.matched) {
+      switch (consumed.value) {
+        case 'CANCEL':
+          reflectionState.delete(phoneHash);
+          await safeSendMessage(from, `No problem — cancelled.`);
+          return true;
+
+        case 'LESSON':
+          reflectionState.set(phoneHash, {
+            ...state,
+            step: 'awaitingLesson',
+            correcting: true,
+            lastActivity: Date.now(),
+          });
+          await safeSendMessage(from, `What lesson is this reflection about?`);
+          return true;
+
+        case 'WENT_WELL':
+          reflectionState.set(phoneHash, {
+            ...state,
+            step: 'awaitingWentWell',
+            correcting: true,
+            lastActivity: Date.now(),
+          });
+          await safeSendMessage(from, `What went well in this lesson?`);
+          return true;
+
+        case 'IMPROVEMENT':
+          reflectionState.set(phoneHash, {
+            ...state,
+            step: 'awaitingImprovement',
+            correcting: true,
+            lastActivity: Date.now(),
+          });
+          await safeSendMessage(from, `What would you improve next time?`);
+          return true;
+
+        case 'TOPIC':
+          reflectionState.set(phoneHash, {
+            ...state,
+            step: 'awaitingTopic',
+            correcting: true,
+            lastActivity: Date.now(),
+          });
+          await safeSendMessage(from, renderTopicListMessage());
+          return true;
+      }
     }
 
-    if (trimmed === '1') {
-      reflectionState.set(phoneHash, {
-        ...state,
-        step: 'awaitingLesson',
-        correcting: true,
-        lastActivity: Date.now(),
-      });
-      await safeSendMessage(from, `What lesson is this reflection about?`);
-      return true;
-    }
-
-    if (trimmed === '2') {
-      reflectionState.set(phoneHash, {
-        ...state,
-        step: 'awaitingWentWell',
-        correcting: true,
-        lastActivity: Date.now(),
-      });
-      await safeSendMessage(from, `What went well in this lesson?`);
-      return true;
-    }
-
-    if (trimmed === '3') {
-      reflectionState.set(phoneHash, {
-        ...state,
-        step: 'awaitingImprovement',
-        correcting: true,
-        lastActivity: Date.now(),
-      });
-      await safeSendMessage(from, `What would you improve next time?`);
-      return true;
-    }
-
-    if (trimmed === '4') {
-      reflectionState.set(phoneHash, {
-        ...state,
-        step: 'awaitingTopic',
-        correcting: true,
-        lastActivity: Date.now(),
-      });
-      await safeSendMessage(from, renderTopicListMessage());
-      return true;
-    }
-
+    // Invalid/expired reply (unknown option, or no menu open at all —
+    // e.g. after a process restart) — re-open the menu so the teacher
+    // isn't stranded, then re-render the same fallback prompt as before.
     reflectionState.set(phoneHash, { ...state, lastActivity: Date.now() });
+    navigationService.openMenu(phoneHash, { id: CORRECTION_MENU_ID, options: CORRECTION_MENU_OPTIONS });
     await safeSendMessage(from,
       `Please reply with a number:\n\n` +
       `1. Lesson\n` +
