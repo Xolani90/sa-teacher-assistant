@@ -1,0 +1,2175 @@
+
+> whatsapp-teacher-assistant@2.0.0 test
+> node tests/run-all.js
+
+
+=== adr003-learners-migration.test.js ===
+
+Section 1: migration application
+[DB] Connected to SQLite at C:\Users\xolan\Downloads\sa-teacher-assistant\adr003-migration-test.db
+[DB] Migrations complete
+  ✅ learners table created
+  ✅ index idx_learners_phone created
+  ✅ index idx_learners_class created
+  ✅ index idx_learners_lookup created
+  ✅ index idx_learner_results_learner created
+  ✅ index idx_observation_records_learner created
+  ✅ learner_results gains a learner_id column
+  ✅ learner_results.learner_id is nullable
+  ✅ observation_records gains a learner_id column
+  ✅ observation_records.learner_id is nullable
+[DB] Migrations complete
+  ✅ running migrations twice does not throw
+
+Section 2: backward compatibility with pre-existing rows
+  ✅ pre-existing learner_name is preserved unchanged
+  ✅ pre-existing mark is preserved unchanged
+  ✅ pre-existing row has no learner_id (left NULL, not guessed at)
+  ✅ pre-existing observation learner_name is preserved unchanged
+  ✅ pre-existing observation row has no learner_id
+
+Section 3: learner_id nullability
+  ✅ inserting learner_results without learner_id succeeds
+  ✅ inserting a learner without a class_id succeeds
+  ✅ a learner_results row can be linked via learner_id after the fact
+
+Section 4: existing query patterns remain valid without learner_id
+  ✅ plain SELECT * over learner_results does not require learner_id
+  ✅ existing name-based lookups (pre-ADR-003 pattern) still return rows
+  ✅ INNER JOIN against learners silently drops unmatched legacy rows (LEFT JOIN required until backfill exists)
+
+───────────────────────────────────────────────────────
+ADR-003 PR1 Migration Results: 22 passed, 0 failed
+(node:9492) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== adr004-class-aware-flows.test.js ===
+── ADR-004: Class-Aware Learner Identity — Flow Integration Tests ──
+
+── Section 1: assessmentFlow.js ──
+
+Test ADR004-A1: assessmentFlow — 0 classes stays unclassed, no prompt
+  ✅ no class-selection prompt sent for 0 classes
+  ✅ flow proceeded straight to marks format help
+  ✅ classId passed to processAssessmentData is null (got null)
+
+Test ADR004-A2: assessmentFlow — 1 class auto-assigns, no prompt
+  ✅ no class-selection prompt sent for 1 class
+  ✅ flow proceeded straight to marks format help
+  ✅ classId passed to processAssessmentData is the sole class's id (got 42)
+
+Test ADR004-A3: assessmentFlow — 2+ classes prompts, invalid reply re-prompts, valid reply resolves
+  ✅ class-selection prompt lists both classes
+  ✅ invalid selection re-prompts instead of guessing
+  ✅ valid selection proceeds to marks format help
+  ✅ classId passed to processAssessmentData matches the selected class (got 11)
+
+── Section 2: observationFlow.js ──
+
+Test ADR004-O1: observationFlow — 0 classes stays unclassed, no prompt
+  ✅ no class-selection prompt sent for 0 classes
+  ✅ flow proceeded straight to observation text prompt
+  ✅ classId passed to saveObservationSubmission is null (got null)
+
+Test ADR004-O2: observationFlow — 1 class auto-assigns, no prompt
+  ✅ no class-selection prompt sent for 1 class
+  ✅ flow proceeded straight to observation text prompt
+  ✅ classId passed to saveObservationSubmission is the sole class's id (got 77)
+
+Test ADR004-O3: observationFlow — 2+ classes prompts, invalid reply re-prompts, valid reply resolves
+  ✅ class-selection prompt lists both classes
+  ✅ invalid selection re-prompts instead of guessing
+  ✅ valid selection proceeds to observation text prompt
+  ✅ classId passed to saveObservationSubmission matches the selected class (got 21)
+
+───────────────────────────────────────────────────────
+ADR-004 Results: 20 passed, 0 failed
+
+=== api-class-detail.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+
+── 200 success ────────────────────────────────────────────
+  ✅ returns the service payload verbatim with status 200
+
+── 404 not found / not owned ────────────────────────────────
+  ✅ returns 404 when getClassDetail returns null
+
+── 400 invalid classId ──────────────────────────────────────
+  ✅ rejects a non-numeric classId
+  ✅ rejects zero
+  ✅ rejects a negative classId
+  ✅ rejects a non-integer classId
+
+── 500 passthrough ───────────────────────────────────────────
+[API] getClassDetail failed: boom
+  ✅ returns 500 if getClassDetail throws
+
+===========================================================================
+7 passed, 0 failed
+
+=== api-class-snapshot.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+
+── 200 success ────────────────────────────────────────────
+  ✅ resolves classInfo via getClass, then returns getClassSnapshot payload verbatim
+  ✅ forwards a non-blank ?subject= query param into options.subject
+  ✅ ignores a blank ?subject= query param
+
+── 404 not found / not owned ────────────────────────────────
+  ✅ returns 404 when getClass returns null
+
+── 400 invalid classId ──────────────────────────────────────
+  ✅ rejects a non-numeric classId
+  ✅ rejects zero
+  ✅ rejects a negative classId
+  ✅ rejects a non-integer classId
+
+── 500 passthrough ───────────────────────────────────────────
+[API] getClass failed: boom
+  ✅ returns 500 if getClass throws
+
+===========================================================================
+9 passed, 0 failed
+
+=== api-classes.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+
+── Section 1: success path ──────────────────────────────
+  ✅ responds 200
+  ✅ returns both classes
+  ✅ maps id correctly
+  ✅ maps name correctly
+  ✅ maps grade correctly
+  ✅ maps subject correctly
+  ✅ learnerCount comes from the live roster map
+  ✅ maps created_at -> createdAt
+  ✅ maps updated_at -> updatedAt
+  ✅ second class maps correctly too
+
+── Section 2: teacher scoping — phoneHash is passed through unchanged ──
+  ✅ req.teacher.phoneHash is passed through to getTeacherClasses unchanged
+  ✅ req.teacher.phoneHash is passed through to getActiveRosterCounts unchanged
+
+── Section 3: teacher with zero classes ──────────────────
+  ✅ responds 200 (not an error) for a teacher with no classes
+  ✅ classes is an empty array, not an error object
+
+── Section 4: dependency failure degrades to 500 ─────────
+[API] getTeacherClasses failed: db unavailable
+  ✅ getTeacherClasses throwing degrades to 500, not a crash
+  ✅ includes an error message
+[API] getTeacherClasses failed: db unavailable
+  ✅ getActiveRosterCounts throwing also degrades to 500, not a crash
+
+── Section 5: response shape — no phone_hash leaked ──────
+  ✅ mapped class objects never include phone_hash
+  ✅ mapped class objects expose exactly the documented fields
+
+── Section 6: stored learner_count disagrees with the live roster ──
+  ✅ stored learner_count (28) is NOT what is returned
+  ✅ the live roster count (5) is what is returned instead
+
+── Section 7: class with zero active learners reports 0, not stale/undefined ──
+  ✅ class missing from the roster-counts map reports learnerCount 0
+  ✅ does NOT fall back to the stale stored learner_count (34)
+
+23 passed, 0 failed
+
+=== api-intervention-plan.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+
+── Section 1: success path ──────────────────────────────
+  ✅ responds 200
+  ✅ echoes learnerId as a number
+  ✅ returns the plans array unchanged (same reference contents)
+  ✅ does not add, rename, or drop any fields on the plan
+
+── Section 2: unknown learner ───────────────────────────
+  ✅ responds 404
+  ✅ includes an error message
+
+── Section 3: resolved learner, zero InterventionPlans ──
+  ✅ responds 200 (not an error) for a learner with no data yet
+  ✅ plans is an empty array, not an error object
+
+── Section 4: invalid learnerId ─────────────────────────
+  ✅ responds 400 for learnerId="abc"
+  ✅ responds 400 for learnerId="-1"
+  ✅ responds 400 for learnerId="0"
+  ✅ responds 400 for learnerId="3.5"
+  ✅ responds 400 for learnerId=""
+
+── Section 5: dependency failures degrade to 500 ────────
+[API] getLearnerById failed: db unavailable
+  ✅ getLearnerById throwing degrades to 500, not a crash
+[API] getLearnerInterventionPlan failed: intervention service exploded
+  ✅ getLearnerInterventionPlan throwing degrades to 500, not a crash
+
+── Section 6: ownership (ADR-008 §8, PR17) ──────────────
+  ✅ cross-teacher access responds 404 (not 403 — no existence oracle)
+  ✅ cross-teacher 404 body is identical in shape to the unknown-learner 404
+  ✅ owning teacher (matching phoneHash) still gets 200
+  ✅ owning teacher still gets the plans
+
+19 passed, 0 failed
+
+=== api-learners.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+
+── Section 1: success path ──────────────────────────────
+  ✅ responds 200
+  ✅ returns both learners
+  ✅ returns learner rows verbatim (id)
+  ✅ returns learner rows verbatim (classId)
+  ✅ returns learner rows verbatim (canonicalName)
+  ✅ returns learner rows verbatim (normalizedName)
+  ✅ returns learner rows verbatim (createdAt)
+  ✅ returns learner rows verbatim (updatedAt)
+  ✅ second learner maps correctly too
+
+── Section 2: teacher scoping — phoneHash is passed through unchanged ──
+  ✅ req.teacher.phoneHash is passed through to getTeacherLearners unchanged
+
+── Section 3: teacher with zero learners ─────────────────
+  ✅ responds 200 (not an error) for a teacher with no learners
+  ✅ learners is an empty array, not an error object
+
+── Section 4: dependency failure degrades to 500 ─────────
+[API] getTeacherLearners failed: db unavailable
+  ✅ getTeacherLearners throwing degrades to 500, not a crash
+  ✅ includes an error message
+
+── Section 5: response shape — no phoneHash/removedAt leaked ─
+  ✅ mapped learner objects never include phoneHash or phone_hash
+  ✅ mapped learner objects never include removedAt or removed_at
+  ✅ mapped learner objects expose exactly the documented fields
+
+17 passed, 0 failed
+
+=== api-observations.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+
+── Section 1: success path ──────────────────────────────
+  ✅ responds 200
+  ✅ returns both observations
+  ✅ passes through repository row shape unchanged
+
+── Section 2: teacher with zero observations ─────────────
+  ✅ responds 200 (not an error) for a teacher with no observations
+  ✅ observations is an empty array, not an error object
+
+── Section 3: teacher scoping — phoneHash passed through unchanged ──
+  ✅ req.teacher.phoneHash is passed through to getObservationHistory unchanged
+
+── Section 4: query params mapped into filters correctly ─
+  ✅ grade passed through as-is (string, matching getObservationHistory's own param type)
+  ✅ subject passed through unchanged
+  ✅ learnerName passed through unchanged
+  ✅ includeSuperseded coerced from string "true" to boolean true
+  ✅ limit coerced from string "25" to number 25
+
+── Section 5: absent query params become undefined, not empty strings ──
+  ✅ grade is undefined, not empty string, when absent
+  ✅ subject is undefined when absent
+  ✅ learnerName is undefined when absent
+  ✅ includeSuperseded defaults to false (not undefined) when absent
+  ✅ limit is undefined when absent, so getObservationHistory's own default applies
+
+── Section 6: dependency failure degrades to 500 ─────────
+[API] getObservationHistory failed: db unavailable
+  ✅ getObservationHistory throwing degrades to 500, not a crash
+  ✅ includes an error message
+
+18 passed, 0 failed
+
+=== api-reflections-write.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+
+── POST /reflections: success path ───────────────────────
+  ✅ responds 201
+  ✅ returns the created reflection
+
+── POST /reflections: phoneHash passed through unchanged ──
+  ✅ req.teacher.phoneHash is passed through to createReflection unchanged
+
+── POST /reflections: service validation error maps to 400 ─
+  ✅ responds 400 for a createReflection validation error
+  ✅ surfaces the service error message
+
+── POST /reflections: unexpected failure degrades to 500 ──
+[API] createReflection failed: db unavailable
+  ✅ non-validation errors degrade to 500, not a crash
+  ✅ includes a generic error message, not the raw db error
+
+── PATCH /reflections/:id: success path ──────────────────
+  ✅ responds 200
+  ✅ returns the updated reflection
+
+── PATCH /reflections/:id: invalid id rejected ────────────
+  ✅ rejects id="abc" with 400
+  ✅ rejects id="-1" with 400
+  ✅ rejects id="0" with 400
+  ✅ rejects id="3.5" with 400
+  ✅ rejects id="" with 400
+
+── PATCH /reflections/:id: not found / not owned -> 404 ───
+  ✅ responds 404 when updateReflection returns null
+
+── PATCH /reflections/:id: service validation error maps to 400 ──
+  ✅ responds 400 for an updateReflection validation error
+
+── PATCH /reflections/:id: unexpected failure degrades to 500 ─
+[API] updateReflection failed: db unavailable
+  ✅ non-validation errors degrade to 500, not a crash
+
+── DELETE /reflections/:id: success path ──────────────────
+  ✅ responds 204
+  ✅ sends no body
+
+── DELETE /reflections/:id: invalid id rejected ───────────
+  ✅ rejects id="abc" with 400
+  ✅ rejects id="-1" with 400
+  ✅ rejects id="0" with 400
+
+── DELETE /reflections/:id: not found / not owned / already deleted -> 404 ──
+  ✅ responds 404 when deleteReflection returns false
+
+── DELETE /reflections/:id: dependency failure degrades to 500 ──
+[API] deleteReflection failed: db unavailable
+  ✅ deleteReflection throwing degrades to 500, not a crash
+
+── phoneHash scoping — PATCH and DELETE both pass it through unchanged ──
+  ✅ PATCH passes req.teacher.phoneHash through unchanged
+  ✅ DELETE passes req.teacher.phoneHash through unchanged
+
+26 passed, 0 failed
+
+=== assessment-bulk-capture.test.js ===
+
+── Section 1: Exact-count paste completes the session ──────────────
+  ✅ bulk reply accepted
+  ✅ session is complete after exact-count paste
+  ✅ appliedCount is 2
+  ✅ nothing skipped
+  ✅ learner 1 marks recorded correctly
+  ✅ learner 2 marks recorded correctly
+
+── Section 2: Partial paste fills some slots, leaves rest for turn-by-turn ──
+  ✅ bulk reply accepted
+  ✅ session not complete — 2 slots remain
+  ✅ learnerIndex advanced by 1
+  ✅ falls back to asking for learner 2's name
+  ✅ appliedCount is 1
+  ✅ single-turn submitReply still works after a partial bulk paste
+  ✅ moved to marks for learner 2
+
+── Section 3: Overflow paste (more learners than remaining slots) ──
+  ✅ bulk reply still accepted (first 2 applied)
+  ✅ session complete — the 2 slots were filled
+  ✅ appliedCount capped at learnerCount (2)
+  ✅ the 3rd learner is reported as skipped, not silently dropped
+  ✅ skipped entry names the overflow learner
+  ✅ skip reason explains the slot mismatch
+
+── Section 4: Per-learner validation failures are surfaced, not dropped silently ──
+  ✅ bulk reply accepted (1 of 2 valid)
+  ✅ session not complete — invalid learner was skipped, not applied
+  ✅ only the valid learner advanced the index
+  ✅ one learner reported as skipped
+  ✅ skipped entry names the invalid learner
+
+── Section 5: Parser-level fatal error leaves state untouched ──────
+  ✅ bulk reply rejected on parser-level error
+  ✅ state reference unchanged on failure
+  ✅ error message surfaced from the parser
+  ✅ result.errors carries the parser error
+
+── Section 6: Every learner invalid → no learners captured ─────────
+  ✅ bulk reply rejected — nothing valid to apply
+  ✅ state reference unchanged on failure
+  ✅ the invalid learner is still reported in result.skipped
+
+── Section 7: Warnings pass through untouched (e.g. duplicate names) ──
+  ✅ bulk reply accepted
+  ✅ parser warning passed through to result.warnings
+
+── Section 8: Bulk reply on an already-complete session is rejected ──
+  ✅ sanity check — session is complete
+  ✅ bulk reply rejected on a completed session
+  ✅ completion error message matches submitReply()'s
+
+── Section 9: Default (uninjected) parseMarks resolves the real module ──
+  ✅ default parseMarks wiring resolves without throwing
+
+============================================================
+Results: 37 passed, 0 failed
+============================================================
+
+=== assessment-capture-service.test.js ===
+
+── Section 1: First learner, first question ──────────────────────
+  ✅ starts on NAME step
+  ✅ starts at learner 0 / question 0
+  ✅ prompt shows Learner 1/2
+  ✅ prompt asks for a name
+
+── Section 2: Valid mark advances ─────────────────────────────────
+  ✅ name accepted
+  ✅ moved to marks, question 0
+  ✅ valid mark (4/5) accepted
+  ✅ advanced to question 1
+  ✅ mark stored under question 1
+
+── Section 3: Invalid mark rejected ───────────────────────────────
+  ✅ non-numeric mark rejected
+  ✅ state unchanged on rejection
+  ✅ error explains numeric requirement
+
+── Section 4: Max-mark enforcement ─────────────────────────────────
+  ✅ mark above max_marks rejected
+  ✅ error names the max_marks value
+  ✅ negative mark rejected (fails whole-number pattern)
+
+── Section 5: Learner rollover after final question ───────────────
+  ✅ rolled over to learner index 1
+  ✅ question index reset to 0
+  ✅ back to NAME step for next learner
+  ✅ progress reflects 1 learner completed
+
+── Section 6: Assessment completion after final learner ───────────
+  ✅ capture is complete after last learner/question
+  ✅ both learners counted as completed
+  ✅ capture prompt is empty once complete
+
+── Section 7: toLearnerResults() shape ─────────────────────────────
+  ✅ single-learner capture completes
+  ✅ one learner result produced
+  ✅ learner name carried through
+  ✅ per-question marks keyed by question number
+
+── Section 8: STATUS reporting ─────────────────────────────────────
+  ✅ status reports correct learner position
+  ✅ status reports correct question position
+  ✅ status reports raw progress count (1 of 2 learners × 2 questions)
+
+── Section 9: Invalid name rejected, no state advance ─────────────
+  ✅ single-character name rejected
+  ✅ state unchanged on invalid name
+  ✅ still on NAME step after rejection
+
+── Section 10: No duplicate writes on repeated valid replies ──────
+  ✅ second reply is processed against the NEW question, not rejected outright
+  ✅ question 1 mark was written exactly once
+  ✅ second reply landed on question 2, not overwriting question 1
+
+── Section 11: State survives reload (plain JSON round-trip) ──────
+  ✅ capture resumes correctly from a JSON round-tripped state
+  ✅ sanity: not complete yet (learner 2 remains)
+
+── Section 12: Cancel is out of this module's scope (flow-level) ──
+  ✅ a bare CANCEL is never recorded as a learner name
+
+── Section 13: Roster prefill (ADR-006 PR2.5) ──────────────────────
+  ✅ NAME step is skipped when roster covers learner 1
+  ✅ learner 1 name prefilled from roster
+  ✅ capture prompt shows the prefilled name immediately
+  ✅ rolled over to learner 2 after learner 1 finishes
+  ✅ learner 2 also skips NAME — prefilled from roster
+  ✅ learner 2 name prefilled from roster
+  ✅ capture completes normally with a full roster
+  ✅ last mark recorded correctly
+
+── Section 14: Partial roster falls back to asking for a name ─────
+  ✅ learner 1 still prefilled and skips NAME
+  ✅ learner 2 (past the end of the roster) is asked for a name
+  ✅ prompt asks for a name for learner 2
+  ✅ learner 2 name recorded from the reply, not the roster
+
+── Section 15: No roster (default) behaves exactly like PR2 ───────
+  ✅ omitting roster entirely preserves PR2 ask-every-name behaviour
+  ✅ learners array is empty, exactly as before PR2.5
+
+============================================================
+Results: 52 passed, 0 failed
+============================================================
+
+=== assessment-capture-undo.test.js ===
+
+── Section 1: UNDO after a single mark reverts that one mark ──────
+  ✅ mark 4 was recorded for Q1 before undo
+  ✅ advanced to Q2 after the mistaken entry
+  ✅ undo succeeds
+  ✅ back on Q1
+  ✅ the mistaken Q1 mark is gone
+  ✅ name entry itself is untouched by this single undo
+  ✅ corrected mark recorded after undo + re-entry
+
+── Section 2: UNDO after a name entry reverts to asking for the name ─
+  ✅ advanced to marks after the name reply
+  ✅ undo succeeds
+  ✅ back to asking for learner 1's name
+  ✅ prompt reflects the reverted step
+  ✅ the wrong name was discarded
+
+── Section 3: consecutive UNDOs walk back one turn at a time ──────
+  ✅ rolled over to learner 2
+  ✅ learner 2 asked for a name
+  ✅ undo #1 succeeds
+  ✅ undo #1 reverts the Q2=7 turn, back on learner 1 Q2
+  ✅ undo #2 succeeds
+  ✅ undo #2 reverts the Q1=3 turn, back on learner 1 Q1
+  ✅ undo #3 succeeds
+  ✅ undo #3 reverts the name turn, back to asking for a name
+  ✅ undo #4 has nothing left to revert
+  ✅ correct error message once history is exhausted
+
+── Section 4: UNDO with empty history is refused, state untouched ─
+  ✅ fresh session has nothing to undo
+  ✅ correct error message
+  ✅ same state reference returned on failure (no-op, per submitReply()/submitBulkReply() convention)
+
+── Section 5: UNDO on an already-complete session is refused ──────
+  ✅ session is complete after the last mark
+  ✅ undo refused on a completed session
+  ✅ matches submitReply()/submitBulkReply()'s completion error
+
+── Section 6: UNDO after a bulk paste reverts the whole paste ─────
+  ✅ bulk paste applied
+  ✅ both learners from the paste were applied
+  ✅ undo succeeds after a bulk paste
+  ✅ undo reverts the ENTIRE paste at once (back to learner 1), not one learner at a time
+  ✅ both pasted learners are gone after a single undo
+  ✅ history is empty again — the whole paste was exactly one entry
+
+── Section 7: history is capped — walking back further runs out ───
+  ✅ session still open (one learner short of completion)
+  ✅ history cap held — could not undo more than MAX_HISTORY turns (undid 20 of 49 real turns)
+  ✅ at least some undos succeeded before the cap was hit
+
+============================================================
+Results: 37 passed, 0 failed
+============================================================
+
+=== assessment-completion-menu.test.js ===
+
+── Section 1: completion opens the menu, folded into the completion message ─
+(node:2792) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✅ session moves to COMPLETE_MENU on capture completion, not deleted
+  ✅ the assessmentSession.complete menu is open in NavigationService
+  ✅ completion message sent
+  ✅ menu prompt is folded into the same completion message, not a separate send
+  ✅ menu option 1 (new assessment) is listed
+  ✅ menu option 2 (print) is listed
+
+── Section 2: digit 1 (NEW_ASSESSMENT) starts a fresh session ─
+  ✅ digit 1 restarts NEW TEST — state advances to SELECT_BLUEPRINT
+  ✅ the completion menu is closed once consumed
+  ✅ blueprint list is (re)prompted, same as a literal NEW TEST
+
+── Section 3: digit 2 (PRINT) starts the print sub-flow ─────────
+  ✅ digit 2 starts PRINT — state advances to SELECT_PRINT_BLUEPRINT
+  ✅ the completion menu is closed once consumed
+  ✅ print blueprint list is prompted, same as a literal PRINT
+
+── Section 4: invalid digit re-renders the menu, stays open ─────
+  ✅ an out-of-range digit is still handled here (not passed through)
+  ✅ state stays at COMPLETE_MENU after an invalid digit
+  ✅ the menu is still (re-)open after an invalid digit
+  ✅ the menu is re-rendered for an invalid digit
+
+── Section 5: non-numeric free text re-renders the menu, stays open ─
+  ✅ free text at COMPLETE_MENU is still handled here (not passed through)
+  ✅ state stays at COMPLETE_MENU after free text
+  ✅ the menu is re-rendered for free text
+
+── Section 6: typing NEW TEST/PRINT directly works exactly like the matching digit ─
+  ✅ typing NEW TEST directly at COMPLETE_MENU is NOT blocked as "already in progress" — it restarts, like digit 1
+  ✅ typing PRINT directly at COMPLETE_MENU starts the print sub-flow, like digit 2
+
+── Section 7: CANCEL and STATUS still work at COMPLETE_MENU ─────
+  ✅ STATUS at COMPLETE_MENU reports the completion state
+  ✅ CANCEL clears a COMPLETE_MENU session like any other step
+  ✅ CANCEL confirms cancellation
+
+── Section 8: RESUME re-renders the completion menu without consuming it ─
+  ✅ RESUME does not alter state
+  ✅ RESUME does not consume/close the open menu
+  ✅ RESUME re-renders the completion menu
+
+──────────────────────────────────────────────────────────────
+Assessment Completion Menu Results: 27 passed, 0 failed
+
+=== assessment-session-bulk-dispatch.test.js ===
+
+── Section 1: single-line replies still use submitReply() (no regression) ─
+(node:12740) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✅ session is active with 2 learners
+  ✅ name captured via interactive submitReply path
+  ✅ advanced to marks capture for learner 1
+  ✅ no bulk notice leaks into the interactive prompt
+
+── Section 2: multi-line reply routes to submitBulkReply(), clean paste is silent ─
+  ✅ multi-line paste is handled by the ACTIVE dispatch
+  ✅ clean bulk paste (nothing skipped) produces no extra notice
+
+── Section 3: bulk paste that completes the session ─────────────────
+  ✅ ADR-019: session moves to the completion menu (not deleted) after bulk paste completes capture
+  ✅ completion message sent after bulk paste finishes the session
+  ✅ ADR-019: the completion menu is included in the same completion message
+  ✅ processAssessmentData() was called on bulk completion
+  ✅ learnerResults built via toLearnerResults() reach processAssessmentData() same as the interactive path
+  ✅ ADR-005A: generateBlueprintAssessmentPdf() called once with the completed assessmentId
+  ✅ ADR-005A: the analytics PDF is sent to the teacher via sendDocument()
+  ✅ ADR-005A: sendDocument() receives a URL built via buildPdfUrl(fileId)
+
+── Section 3b: PDF generation failure does not lose the marks or crash the flow ─
+[ASSESSMENT_SESSION_FLOW] Blueprint PDF generation failed: disk full
+  ✅ ADR-005A: a PDF generation failure does not throw out of the flow
+  ✅ ADR-005A/ADR-019: marks capture still completed and session moved to the completion menu despite the PDF failure
+  ✅ ADR-005A: marks were still committed via processAssessmentData() despite the PDF failure
+  ✅ ADR-005A: teacher is told the PDF failed, as a follow-up, not silently dropped
+
+── Section 4: bulk paste with a skipped/overflow learner surfaces a notice ─
+  ✅ overflow learner triggers a visible skip notice
+  ✅ skip notice names the skipped learner
+  ✅ skip notice states how many were actually applied
+
+── Section 5: bulk paste rejected outright (parser fatal error) ─────
+  ✅ parser fatal error is surfaced to the teacher
+  ✅ state does not advance on a rejected bulk paste
+
+────────────────────────────────────────────────────────────
+Assessment Session Bulk Dispatch Results: 23 passed, 0 failed
+
+=== assessment-session-flow.test.js ===
+
+── Section 1: NEW TEST with no published blueprints ─────────────────
+(node:8932) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✅ NEW TEST is handled even with no blueprints
+  ✅ guidance message mentions publishing a blueprint first
+  ✅ no session was created
+
+── Section 2: NEW TEST with blueprints but no classes ────────────────
+  ✅ guidance message when no classes exist
+  ✅ session cleaned up after no-classes dead end
+
+── Section 3: Happy path — blueprint -> class -> ACTIVE_SESSION ─────
+  ✅ NEW TEST starts a session
+  ✅ state advances to selectBlueprint
+  ✅ prompt asks to choose a blueprint
+  ✅ non-numeric reply rejected at blueprint step
+  ✅ out-of-range reply rejected at blueprint step
+  ✅ state unchanged after invalid blueprint replies
+  ✅ state advances to selectClass after valid blueprint pick
+  ✅ blueprintId recorded on state
+  ✅ prompt asks to choose a class
+  ✅ out-of-range (0) reply rejected at class step
+  ✅ state unchanged after invalid class reply
+  ✅ state advances to ACTIVE after valid class pick
+  ✅ classId recorded on state
+  ✅ learnerCount pulled from the class record
+  ✅ confirmation message sent
+  ✅ confirmation includes blueprint title
+  ✅ confirmation includes class name
+  ✅ confirmation includes learner count
+
+── Section 4: STATUS / CANCEL / re-NEW-TEST while active ────────────
+  ✅ STATUS reports Assessment Progress (ADR-006 PR2 capture status)
+  ✅ STATUS reports learner count
+  ✅ NEW TEST does not clobber an active session
+  ✅ state still active after blocked NEW TEST
+  ✅ RESUME re-renders capture status for an active session
+  ✅ RESUME does not alter state
+  ✅ CANCEL confirms cancellation
+  ✅ session removed after CANCEL
+
+── Section 5: RESUME / STATUS with no session ────────────────────────
+  ✅ RESUME with no session gives clear guidance
+  ✅ STATUS with no session gives clear guidance
+
+── Section 6: STOP is not handled here (reserved for global opt-out) ─
+  ✅ STOP falls through unhandled — no collision with the global opt-out command
+
+────────────────────────────────────────────────────────────
+Assessment Session Flow Results: 34 passed, 0 failed
+
+=== assessment-session-print.test.js ===
+
+── Section 1: PRINT with no published blueprints ─────────────────
+(node:8076) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✅ PRINT is handled even with no blueprints
+  ✅ guidance message mentions publishing a blueprint first
+  ✅ no session was created
+
+── Section 2: PRINT lists blueprints; invalid replies re-prompt ──
+  ✅ PRINT starts a print sub-session
+  ✅ state advances to selectPrintBlueprint
+  ✅ prompt asks to choose a blueprint
+  ✅ both blueprints listed
+  ✅ non-numeric reply rejected
+  ✅ out-of-range reply rejected
+  ✅ state unchanged after invalid replies
+  ✅ STATUS reports the print sub-session
+
+── Section 3: valid selection generates and sends the paper, then clears session ──
+  ✅ numeric selection handled
+  ✅ generateBlueprintPaperPdf called once with the chosen blueprint id
+  ✅ sendDocument called once
+  ✅ document URL built via buildPdfUrl(fileId)
+  ✅ filename passed through
+  ✅ session cleared after a single-turn print action
+
+── Section 4: generation failure is reported, not thrown ─────────
+  ✅ no document sent on a generation error
+  ✅ error message surfaced to the teacher
+  ✅ underlying error detail included
+  ✅ session still cleared even on failure
+
+── Section 4b: a thrown error is caught, not propagated ──────────
+[ASSESSMENT_SESSION_FLOW] Blueprint paper PDF generation failed: disk full
+  ✅ a thrown generation error does not propagate out of the flow
+  ✅ generic failure message sent to the teacher
+
+── Section 5: CANCEL works mid-PRINT ──────────────────────────────
+  ✅ CANCEL handled during PRINT selection
+  ✅ cancellation confirmed
+  ✅ session removed after CANCEL
+
+── Section 6: PRINT does not collide with an active NEW TEST session ──
+  ✅ active capture session is not clobbered by PRINT
+
+────────────────────────────────────────────────────────────
+ADR-005B PRINT Flow Results: 27 passed, 0 failed
+
+=== assessment-session-undo-dispatch.test.js ===
+
+── Section 1: UNDO reverts the last interactive reply ──────────────
+(node:6780) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✅ mistaken mark recorded before undo
+  ✅ UNDO is handled by the ACTIVE dispatch
+  ✅ reply confirms the undo
+  ✅ reply re-renders the prompt for the reverted step (back on Q1)
+  ✅ the mistaken mark is gone from persisted session state
+  ✅ corrected mark saved and capture continues normally after undo
+
+── Section 2: BACK is a working alias for UNDO ─────────────────────
+  ✅ BACK is handled by the ACTIVE dispatch
+  ✅ BACK produces the same undo confirmation as UNDO
+  ✅ BACK reverted the mistaken mark exactly like UNDO
+
+── Section 3: UNDO reverts an entire bulk paste as one unit ───────
+  ✅ bulk paste applied to 2 of 3 learner slots, session still open
+  ✅ UNDO handled after a bulk paste
+  ✅ UNDO reverted the whole paste at once — back to learner 1, not learner 2
+  ✅ both pasted learners are gone after a single undo
+
+── Section 4: UNDO with nothing to undo reports the error ─────────
+  ✅ UNDO is still handled even when there is nothing to revert
+  ✅ correct "nothing to undo" message on a fresh session
+  ✅ session state is completely untouched by a no-op UNDO
+
+── Section 5: UNDO is not a global command outside ACTIVE ─────────
+  ✅ session is in SELECT_BLUEPRINT, not yet ACTIVE
+  ✅ UNDO on a non-ACTIVE step still returns true (falls through to list-selection parsing)
+  ✅ UNDO is treated as an invalid blueprint selection, not a global undo, outside ACTIVE
+
+── Section 6: UNDO/BACK are never misrouted as a name or mark ─────
+  ✅ UNDO handled during the NAME step
+  ✅ UNDO during NAME step is treated as the undo command, not a name
+  ✅ "UNDO" was never recorded as a literal learner name
+
+────────────────────────────────────────────────────────────
+Assessment Session Undo Dispatch Results: 22 passed, 0 failed
+
+=== assessmentCaptureService.edit.test.js ===
+
+── submitEdit(): jump to an already-captured learner, return to original cursor ──
+  ✅ EDIT accepted
+  ✅ cursor jumps to learner index 0 (Sipho)
+  ✅ cursor jumps to question index 0
+  ✅ capture step is marks
+  ✅ editing metadata recorded correctly
+  ✅ still mid-edit after first re-answered question
+  ✅ editing cleared once both questions re-answered
+  ✅ cursor returns to learner index 2 (Thabo)
+  ✅ cursor returns to question index 0
+  ✅ capture step returns to marks
+  ✅ Sipho marks updated correctly
+  ✅ progress not double-counted (4 questions answered)
+  ✅ progress not double-counted (2 learners completed)
+
+── submitEdit(): a single UNDO right after EDIT cancels the jump ──
+  ✅ EDIT accepted
+  ✅ UNDO accepted
+  ✅ learnerIndex restored
+  ✅ questionIndex restored
+  ✅ captureStep restored
+  ✅ editing cleared after undo
+
+── submitEdit(): rejects a second EDIT while one is already in progress ──
+  ✅ second EDIT rejected
+  ✅ error mentions already editing
+  ✅ state unchanged on failure (same reference)
+
+── submitEdit(): rejects EDIT once the whole capture is complete ──
+  ✅ EDIT rejected once complete
+  ✅ error mentions already complete
+
+── submitEdit(): rejects a query matching no captured learner ──
+  ✅ EDIT rejected for unmatched name
+  ✅ error mentions no captured learner matches
+
+── submitEdit(): rejects an ambiguous query matching more than one learner ──
+  ✅ EDIT rejected for ambiguous match
+  ✅ error mentions more than one learner matches
+  ✅ error names Sipho Dlamini
+  ✅ error names Sipho Nkosi
+
+── submitEdit(): rejects EDIT with no query text ──
+  ✅ EDIT rejected for empty query
+  ✅ error asks which learner
+
+── submitEdit(): cannot target a learner who has not been named yet ──
+  ✅ EDIT rejected for unnamed learner target
+  ✅ error mentions no captured learner matches
+
+──────────────────────────────────────────────────
+Assessment Capture EDIT Results: 34 passed, 0 failed
+──────────────────────────────────────────────────
+
+=== assessmentFlow-deps-contract.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+[DB] Connected to SQLite at C:\Users\xolan\Downloads\sa-teacher-assistant\data\teacher_assistant.db
+PASS - buildAssessmentDeps returns an object
+PASS - buildAssessmentDeps provides 'hashPhone'
+PASS - buildAssessmentDeps provides 'safeSendMessage'
+PASS - buildAssessmentDeps provides 'gradeLabel'
+PASS - buildAssessmentDeps provides 'isProActive'
+PASS - buildAssessmentDeps provides 'getTeacherByPhone'
+PASS - buildAssessmentDeps provides 'dataAssessmentState'
+PASS - buildAssessmentDeps provides 'parseIntent'
+PASS - buildAssessmentDeps provides 'parseMarks'
+PASS - buildAssessmentDeps provides 'extractMarksFromImage'
+PASS - buildAssessmentDeps provides 'getFormatHelpText'
+PASS - buildAssessmentDeps provides 'processAssessmentData'
+PASS - buildAssessmentDeps provides 'getTeacherClasses'
+PASS - buildAssessmentDeps provides 'formatClassSelectionPrompt'
+PASS - buildAssessmentDeps provides 'matchClassSelection'
+PASS - buildAssessmentDeps provides 'downloadMedia'
+PASS - buildAssessmentDeps provides 'updateTeacherProfile'
+PASS - buildAssessmentDeps provides 'checkAndIncrementUsage'
+PASS - buildAssessmentDeps provides 'rollbackUsage'
+PASS - buildAssessmentDeps provides 'buildFullInterventionPlanPrompt'
+PASS - buildAssessmentDeps provides 'generateContent'
+PASS - buildAssessmentDeps provides 'saveReport'
+PASS - buildAssessmentDeps provides 'parseInterventionSections'
+
+23 passed
+
+=== authCodeRepository.test.js ===
+
+── Section 1: Migration 032 verification ───────────────────────────
+
+Test M32-01: auth_codes row defaults attempts=0, consumed_at NULL
+  ✅ attempts defaults to 0
+  ✅ consumed_at defaults to NULL
+  ✅ created_at auto-populated
+
+Test M32-02: phone_hash and code_hash are required (NOT NULL enforced)
+  ✅ insert without phone_hash throws (NOT NULL constraint)
+
+── Section 2: createAuthCode() ──────────────────────────────────────
+
+Test AC-01: createAuthCode requires phoneHash
+  ✅ throws without phoneHash
+
+Test AC-02: createAuthCode requires codeHash
+  ✅ throws without codeHash
+
+Test AC-03: createAuthCode requires expiresAt
+  ✅ throws without expiresAt
+
+Test AC-04: createAuthCode inserts and returns an id
+  ✅ returns a positive integer id
+
+── Section 3: getActiveAuthCode() ───────────────────────────────────
+
+Test GA-01: returns null when no rows exist for phone_hash
+  ✅ null for unknown phone_hash
+
+Test GA-02: returns an active (unexpired, unconsumed) code
+  ✅ active code found
+  ✅ returns the correct row id
+  ✅ codeHash round-trips correctly
+  ✅ attempts starts at 0
+  ✅ consumedAt is null
+
+Test GA-03: expired codes are not returned
+  ✅ expired code excluded
+
+Test GA-04: consumed codes are not returned
+  ✅ consumed code excluded even though unexpired
+
+Test GA-05: when multiple active codes exist, returns the most recent
+  ✅ returns the newer row, not the older one
+  ✅ sanity: two distinct rows were created
+
+Test GA-06: does not leak another phone_hash's active code
+  ✅ no cross-phone leakage
+
+── Section 4: incrementAttempts() ───────────────────────────────────
+
+Test IA-01: increments from 0 to 1
+  ✅ attempts is 1 after first increment
+
+Test IA-02: increments cumulatively across calls
+  ✅ attempts is 3 after three total increments
+
+Test IA-03: returns -1 for a non-existent row
+  ✅ unknown id returns -1
+
+── Section 5: consumeAuthCode() ─────────────────────────────────────
+
+Test CA-01: consuming an active code succeeds and sets consumed_at
+  ✅ consumeAuthCode returns true on success
+  ✅ consumed_at is populated
+
+Test CA-02: consuming an already-consumed code is a no-op (replay protection)
+  ✅ second consumeAuthCode call returns false
+
+Test CA-03: consuming a non-existent id returns false
+  ✅ unknown id returns false, does not throw
+
+── Section 6: deleteExpiredCodes() ──────────────────────────────────
+
+Test DE-01: deletes expired rows for the given phone_hash
+  ✅ deletes both expired rows
+  ✅ no active codes remain
+
+Test DE-02: does not delete still-active rows
+  ✅ active row not deleted
+  ✅ active row still retrievable
+
+Test DE-03: also deletes consumed rows (even if not expired)
+  ✅ consumed row is swept up too
+
+Test DE-04: scoped to one phone_hash — does not touch another phone's rows
+  ✅ only deletes the target phone_hash's row
+  ✅ other phone_hash's expired row is untouched
+
+───────────────────────────────────────────────────────
+Migration 032 / authCodeRepository Results: 33 passed, 0 failed
+(node:12488) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== backfillTseEvidence.test.js ===
+
+── Backfill: dry run ─────────────────────────────────────────────────
+
+Test BF-01: --dry-run does not write any rows
+  saved_resources          →     1 tagged,     1 already present/skipped
+  ✅ no rows written during --dry-run
+
+── Backfill: real run ────────────────────────────────────────────────
+
+Test BF-02: backfilling each table tags exactly one row (one pre-existing row per table)
+  saved_resources          →     1 tagged,     1 already present/skipped
+  assessments              →     1 tagged,     0 already present/skipped
+  reports                  →     1 tagged,     0 already present/skipped
+  intervention_plans       →     1 tagged,     0 already present/skipped
+  curriculum_coverage      →     1 tagged,     0 already present/skipped
+  observation_assessments  →     1 tagged,     0 already present/skipped
+  ✅ exactly 6 evidence rows tagged (one per table, empty-phone row skipped)
+
+Test BF-03: falsy phone_hash row was skipped, not errored on
+  ✅ only the valid saved_resources row was tagged
+
+Test BF-04: re-running backfill is idempotent (no duplicate rows)
+  saved_resources          →     0 tagged,     2 already present/skipped
+  assessments              →     0 tagged,     1 already present/skipped
+  reports                  →     0 tagged,     1 already present/skipped
+  intervention_plans       →     0 tagged,     1 already present/skipped
+  curriculum_coverage      →     0 tagged,     1 already present/skipped
+  observation_assessments  →     0 tagged,     1 already present/skipped
+  ✅ second backfill run tags zero new rows
+  ✅ total evidence row count unchanged after re-running backfill
+
+────────────────────────────────────────────────────────────
+backfillTseEvidence.test.js: 5 passed, 0 failed
+(node:12628) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== blueprint-analytics.test.js ===
+
+── Section 1: Error paths ────────────────────────────────────────────
+  ✅ unknown assessment id returns an error, not a throw
+  ✅ assessment with no blueprint_id returns an error, not a crash
+
+── Section 2: Blueprint setup ────────────────────────────────────────
+[2026-08-07T05:00:52.065Z] [INFO] Blueprint created {"module":"blueprintRepository","phoneHash":"bp_analytics_test_hash_001","blueprintId":1,"questionCount":3}
+[2026-08-07T05:00:52.097Z] [INFO] Blueprint published {"module":"blueprintRepository","phoneHash":"bp_analytics_test_hash_001","blueprintId":1}
+  ✅ blueprint assessment with zero stored (valid) learners returns an error
+
+── Section 3: Topic aggregation, class averages, ranking ────────────
+[diagnosticWorkflow] Failed to persist learner intervention plan: curriculumCoverageService.getExpectedTopics is not a function
+[diagnosticWorkflow] Failed to persist learner intervention plan: curriculumCoverageService.getExpectedTopics is not a function
+[diagnosticWorkflow] Failed to persist learner intervention plan: curriculumCoverageService.getExpectedTopics is not a function
+  ✅ processAssessmentData completes for the 3-learner class
+  ✅ all three learners pass blueprint validation, none skipped
+  ✅ analytics computed without error for the real class
+  ✅ analytics reports the correct blueprintId
+  ✅ learnerCount is 3
+  ✅ fractions topic maxMarks sums Q1(10)+Q2(5) = 15
+  ✅ algebra topic maxMarks is Q3 alone = 15
+  ✅ fractions class average mark is (13+15+4)/3
+  ✅ algebra class average mark is (6+15+0)/3
+  ✅ overall class average mark is (19+30+4)/3
+  ✅ fractions ranks as the strongest topic
+  ✅ algebra ranks as the weakest topic
+
+── Section 4: Per-learner topic breakdown ────────────────────────────
+  ✅ Sipho's fractions marks: only Q1 answered, Q2 counts as 0
+  ✅ Sipho's fractions maxMarks is still the full blueprint total (15), not reduced to what he attempted
+  ✅ Sipho's fractions percentage is 4/15, not 4/10 (Q1 alone)
+  ✅ Sipho's algebra marks: Q3 omitted entirely, counts as 0
+  ✅ Naledi's fractions marks: Q1(10)+Q2(5) = 15 (full marks)
+  ✅ Naledi's fractions percentage is 100%
+
+───────────────────────────────────────────────────────
+Blueprint Analytics Results: 21 passed, 0 failed
+(node:3004) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== blueprint-pdf-report.test.js ===
+
+── Section 1: Build a published blueprint (3 topics) ────────────────
+[2026-08-07T05:01:07.746Z] [INFO] Blueprint created {"module":"blueprintRepository","phoneHash":"bp_pdf_test_hash_001","blueprintId":1,"questionCount":4}
+[2026-08-07T05:01:07.820Z] [INFO] Blueprint published {"module":"blueprintRepository","phoneHash":"bp_pdf_test_hash_001","blueprintId":1}
+  ✅ blueprint published successfully
+
+── Section 2: Import learner marks via processAssessmentData ────────
+(node:12112) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✅ processAssessmentData succeeded (no error)
+  ✅ assessment row created and id returned
+
+── Section 3: Generate the Blueprint Assessment PDF ──────────────────
+  ✅ generateBlueprintAssessmentPdf succeeded (no error)
+  ✅ PDF file was written to disk
+  ✅ PDF file has substantial content (4777 bytes)
+  ✅ filename ends in .pdf
+
+── Section 4: Error passthrough for non-blueprint assessments ───────
+  ✅ non-blueprint assessment returns analytics error, not a PDF
+
+── Section 5: Unknown assessmentId ───────────────────────────────────
+  ✅ unknown assessmentId returns an error, not a PDF
+  ✅ unknown assessmentId error matches getBlueprintAssessmentAnalytics()'s exact !assessment message
+
+── Section 6: Published blueprint, zero learner results ──────────────
+[2026-08-07T05:01:10.056Z] [INFO] Blueprint created {"module":"blueprintRepository","phoneHash":"bp_pdf_test_hash_001","blueprintId":2,"questionCount":1}
+[2026-08-07T05:01:10.074Z] [INFO] Blueprint published {"module":"blueprintRepository","phoneHash":"bp_pdf_test_hash_001","blueprintId":2}
+  ✅ blueprint-backed assessment with zero learner results returns an error, not a PDF
+  ✅ zero-learner-results error matches getBlueprintAssessmentAnalytics()'s exact message
+
+────────────────────────────────────────────────────────────
+Results: 12 passed, 0 failed
+
+=== cancel-pending-save.test.js ===
+
+── CANCEL dismisses a pending SAVE prompt ──
+  ✅ setup: pending save state exists before CANCEL
+(node:6360) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✅ C-01: CANCEL is recognized and handled by handleCommand
+  ✅ C-02: lastGeneratedState is cleared after CANCEL
+  ✅ C-03: CANCEL sends exactly one confirmation reply
+  ✅ C-04: confirmation reply says the resource was not saved
+
+── No resource was actually saved to the database ──
+  ✅ D-01: zero rows in saved_resources — CANCEL never touched the DB
+
+── A subsequent SAVE does not act on the cancelled prompt ──
+  ✅ F-01: SAVE is still handled (as a safe no-op)
+  ✅ F-02: SAVE reports nothing to save — it does not resurrect the cancelled generation
+  ✅ F-03: still zero rows in saved_resources after the follow-up SAVE
+
+── CANCEL with no pending save prompt falls through (not swallowed) ──
+  ✅ setup: no pending save state for this phone
+  ✅ N-01: CANCEL with nothing pending is NOT swallowed by this branch — falls through to other handlers (e.g. flow-specific CANCEL logic)
+
+── CANCEL does not fire on a RECOVERABLE (mid-retry) save state ──
+  ✅ RC-01: CANCEL does not intercept a RECOVERABLE state — only GENERATED (unsaved) prompts are cancellable
+  ✅ RC-02: RECOVERABLE state is left untouched, so the retry path can still confirm the already-saved resource
+
+─────────────────────────────────
+✅ Passed: 13
+❌ Failed: 0
+📊 Total:  13
+─────────────────────────────────
+
+
+=== class-intervention-pdf.test.js ===
+
+── Section 1: real, non-trivial PDF from ClassInterventionPlan ──────
+(node:12440) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+  ✅ generateClassInterventionPdf succeeded (no error)
+  ✅ PDF file was written to disk
+  ✅ PDF file has substantial content (2357 bytes)
+  ✅ filename ends in .pdf
+  ✅ filename is derived from the class name
+
+── Section 2: unknown class returns an error, not a PDF ──────────────
+  ✅ unknown classId returns an error
+
+── Section 3: a resolved class with an empty roster errors ───────────
+  ✅ a class with zero learners returns an error, not a crash
+
+── Section 4: insufficient-data-only class still renders a valid PDF ─
+  ✅ insufficient-data-only class still produces a PDF (no error)
+  ✅ PDF for the insufficient-data-only class was written to disk
+
+── Section 5: high/medium/low sections and common topics all render ──
+  ✅ class with all three priority tiers and common topics produces a PDF (no error)
+  ✅ PDF file was written to disk
+  ✅ PDF file has substantial content (2489 bytes)
+
+────────────────────────────────────────────────────────────
+Results: 12 passed, 0 failed
+
+=== classAnalyticsService.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+Class Analytics Snapshot tests (ADR-015)
+===========================================================================
+
+All learners have full data across all three metrics — averages and distributions computed correctly
+  ✅ learnerCount is 2
+  ✅ averageProgress correct
+  ✅ averageCoverage correct
+  ✅ averageMastery correct (developing=50)
+  ✅ mastery distribution: 2 developing
+  ✅ progress distribution: 2 rising
+
+Some learners have insufficient-data mastery — excluded from averageMastery and attentionRequired populated correctly
+  ✅ averageMastery excludes insufficient-data learner (only learner 1 counted)
+  ✅ attentionRequired correctly populated
+
+One learner throws for one service call; remaining learners and remaining services for that learner still processed; errors[] populated
+  ✅ errors[] records the failing learner
+  ✅ remaining learner (2) still contributes to averageProgress
+  ✅ errored learner excluded entirely from byLearner
+
+Multiple learners throw across different services
+  ✅ errors[] records both failing learners
+  ✅ only learner 3 fully processed
+
+subject option scopes classSummary and breakdowns.bySubject to one subject only; byLearner reflects only that subject's reports
+  ✅ result.subject echoes the filter
+  ✅ averageProgress scoped to Mathematics only
+  ✅ averageMastery scoped to Mathematics only (advanced=100)
+  ✅ bySubject contains only Mathematics
+  ✅ byLearner progress reflects only Mathematics
+
+highlights.strongestArea/weakestArea correctly exclude subjects with zero evaluated learners rather than treating them as zero
+  ✅ strongestArea is Mathematics
+  ✅ weakestArea is also Mathematics (English excluded, not zeroed)
+
+REGRESSION: a single-data-point ProgressReport (trend=insufficient-data, non-null averagePercentage) is excluded from averageProgress, not silently averaged in
+  ✅ averageProgress is null, not 80, when the only report is insufficient-data trend
+  ✅ distributions.progress still counts the insufficient-data report
+  ✅ bySubject has no entry for a subject with zero evaluated reports of any kind
+
+Empty class roster (learnerCount === 0) returns a well-formed ClassAnalyticsSnapshot with all averages null and counts at zero
+  ✅ classSummary all null/zero
+  ✅ attentionRequired empty
+  ✅ no strongest/weakest area when roster is empty
+  ✅ byLearner empty
+  ✅ bySubject empty
+  ✅ errors empty
+  ✅ no service calls made for an empty roster
+
+===========================================================================
+Passed: 30, Failed: 0
+
+=== classDetailService-integration.test.js ===
+[DB] Connected to SQLite at C:\Users\xolan\Downloads\sa-teacher-assistant\classdetail-service-integration-test.db
+[DB] Migrations complete
+
+── Section 1: unknown / foreign class returns null ─────────────────
+  ✅ unknown classId returns null
+  ✅ another teacher's phoneHash returns null (ownership enforced)
+
+── Section 2: class summary ─────────────────────────────────────────
+  ✅ class.id matches
+  ✅ class.name matches
+  ✅ class.grade matches
+  ✅ class.subject matches
+  ✅ class.learnerCount reflects the roster (kept in sync by setRoster)
+
+── Section 3: learners + class health ───────────────────────────────
+  ✅ all three roster members present
+  ✅ Ayanda's average is (80+90)/2 = 85
+  ✅ Ayanda is passing
+  ✅ Bongani's average is 30 (one result)
+  ✅ Bongani is not passing
+  ✅ Charlize (no results) has a null average, not zero
+  ✅ classHealth only counts the two learners with data
+  ✅ classHealth.average is the mean of the two learners with data ((85+30)/2)
+  ✅ classHealth.passRate is 1-of-2 passing = 50%
+  ✅ classHealth.atRisk counts Bongani only
+
+── Section 4: recent assessments ────────────────────────────────────
+  ✅ both assessments appear, one row each (de-duplicated)
+  ✅ newest assessment (Decimals Quiz) is first
+  ✅ Decimals Quiz average is 90 (only Ayanda sat it)
+  ✅ Fractions Test average is (80+30)/2 = 55
+  ✅ Fractions Test learnerCount is 2
+
+── Section 5: curriculum coverage ───────────────────────────────────
+  ✅ CAPS reference data exists for Grade 7 Mathematics
+  ✅ coverage percentage is above zero after marking one topic covered
+  ✅ 'Integers' (marked covered) is not in the outstanding list
+
+── Section 6: interventions ─────────────────────────────────────────
+  ✅ intervention summary.totalLearners matches the roster size
+  ✅ priorityCounts.high is present
+  ✅ priorityLearners.high is an array
+
+── Section 7: observations ──────────────────────────────────────────
+  ✅ one observation session recorded
+  ✅ session title surfaced
+  ✅ session covered two learners
+
+── Section 8: stale classes.learner_count vs live roster ─────────────
+  ✅ class.learnerCount reflects the live (empty) roster, not the stale stored 34
+  ✅ learners array is empty — matches the live roster, agreeing with class.learnerCount
+  ✅ getActiveRosterCounts also reports 0 for the class with no real roster (used by GET /api/classes)
+  ✅ getActiveRosterCounts reports the correct live count (3) for the earlier class with a real roster
+
+===========================================================================
+35 passed, 0 failed
+(node:7604) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== classDetailService.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+
+── computeLearnerAverages ────────────────────────────────
+  ✅ learner with two results gets their mean, rounded to 1dp
+  ✅ learner below PASS_THRESHOLD is marked not passing
+  ✅ learner with zero results gets null average/passing, not zero
+  ✅ PASS_THRESHOLD is exported and is 50 (matches pdfService convention)
+
+── computeClassHealth ────────────────────────────────────
+  ✅ average/passRate/atRisk only consider learners with data
+  ✅ all-null roster returns null average/passRate, zero atRisk
+  ✅ activeInterventions sums high + medium priority counts, excludes low
+  ✅ missing/undefined interventionPlan does not throw
+
+── summarizeRecentAssessments ────────────────────────────
+  ✅ de-duplicates one row per assessment and averages its percentages
+  ✅ sorts newest first by createdAt
+  ✅ respects the limit argument
+
+── summarizeCurriculumCoverage ───────────────────────────
+  ✅ flattens and de-duplicates outstanding topics across terms
+  ✅ dataAvailable false passes through unchanged (no CAPS reference data)
+
+── summarizeRecentObservations ───────────────────────────
+  ✅ groups by assessment session and counts distinct learners
+  ✅ sorts newest session first
+
+===========================================================================
+15 passed, 0 failed
+
+=== classInterventionService.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+Class Intervention Service tests (ADR-009, PR11)
+===========================================================================
+
+All learners evaluated, no insufficient-data or errors
+  ✅ summary counts correct
+  ✅ priorityCounts correct
+  ✅ learner 1 in high bucket
+  ✅ learner 2 in low bucket
+  ✅ no errors
+
+Learner with every subject plan insufficient-data
+  ✅ insufficientData count is 1
+  ✅ evaluatedLearners is 0
+  ✅ priorityCounts all zero
+  ✅ no learner placed in any priority bucket
+
+One learner throws; remaining learners still processed and aggregated
+  ✅ erroredLearners is 1
+  ✅ errors[] populated correctly
+  ✅ remaining learner still evaluated
+  ✅ learner 2 still in low bucket
+
+Multiple learners throw
+  ✅ erroredLearners is 2
+  ✅ errors[] contains both failures in order
+  ✅ remaining learner still evaluated
+
+Mixed subjects: Maths high, English insufficient-data -> overall high, not double-counted
+  ✅ evaluatedLearners is 1
+  ✅ not double-counted as insufficientData
+  ✅ priorityCounts reflects overall high
+  ✅ overallPriority is high
+  ✅ both subject plans retained on the learner entry
+
+commonFocusTopics excludes insufficient-data subject plans from numerator and denominator
+  ✅ evaluatedLearners excludes the insufficient-data learner
+  ✅ commonFocusTopics computed only from evaluated learners
+
+Priority bucket ordering: High -> Medium -> Low, alphabetical by learnerName within each bucket
+  ✅ high bucket sorted alphabetically by learnerName
+
+Empty class roster returns a well-formed ClassInterventionPlan with all counts at zero
+  ✅ all summary counts zero
+  ✅ priorityCounts all zero
+  ✅ all priority buckets empty
+  ✅ commonFocusTopics empty
+  ✅ errors empty
+  ✅ getLearnerInterventionPlan never called for an empty roster
+
+===========================================================================
+Passed: 30, Failed: 0
+
+=== classSnapshotService.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+Dashboard Snapshot Service tests (ADR-014)
+===========================================================================
+
+All three services succeed — all sections "ok", metadata.partial is false
+  ✅ analytics section is "ok"
+  ✅ intervention section is "ok"
+  ✅ qms section is "unavailable" (§3.4)
+  ✅ metadata.partial is true (qms unavailable counts)
+  ✅ class info passed through
+
+One service throws — its section is "error" with caught message, others unaffected
+  ✅ analytics section is "error"
+  ✅ analytics error message captured
+  ✅ analytics data is null on error
+  ✅ intervention section unaffected
+  ✅ metadata.partial is true
+  ✅ metadata.errors contains the analytics failure
+
+All three throw — snapshot itself is well-formed, not an exception
+  ✅ getClassSnapshot does not throw even when all sections fail
+  ✅ analytics is "error"
+  ✅ intervention is "error"
+  ✅ qms is "unavailable"
+  ✅ metadata.errors contains both failures
+
+subject option passes through to classAnalyticsService only
+  ✅ classAnalyticsService received subject option
+  ✅ classInterventionService received no subject argument
+
+Empty class roster — snapshot still well-formed, delegates to child services
+  ✅ analytics still "ok" for empty class
+  ✅ analytics reflects zero learners
+  ✅ intervention still "ok" for empty class
+
+===========================================================================
+Passed: 21, Failed: 0
+
+=== coachingEngineService.test.js ===
+
+Section 1: Insufficient-data guard (§6.6)
+
+Test G-01: zero reflections, zero growth plans → insufficient
+  ✅ guard reports insufficient with no data
+
+Test G-02: exactly at thresholds → sufficient
+  ✅ exactly-at-threshold counts are sufficient (boundary is inclusive)
+
+Test G-03: one below reflection threshold → insufficient
+  ✅ one below reflection threshold is insufficient
+
+Test G-04: enough reflections but zero active growth plans → insufficient
+  ✅ no active growth plans is insufficient regardless of reflection count
+
+Test G-05: growth plans exist but none are status=active → insufficient
+  ✅ non-active statuses do not count toward activeGrowthPlanCount
+  ✅ only status=active counts, not in_progress/completed/abandoned
+
+Test G-06: getCoachingInsights() surfaces insufficient_data status end-to-end
+  ✅ public API returns insufficient_data status
+  ✅ recommendations is empty array on insufficient_data
+  ✅ generatedAt is populated
+
+Test G-07: getCoachingInsights() returns ok status once thresholds are met
+  ✅ public API returns ok status once guard passes
+  ✅ recommendations now populated once the guard passes (increment 4: rules wired in) — full behavior covered in Section 7
+
+Section 2: Evidence retrieval (§6.2)
+
+Test E-01: untagged (null topic_id) rows are excluded from evidence
+  ✅ only the tagged reflection is returned
+  ✅ untagged growth plan is excluded
+
+Test E-02: gatherEvidenceByTopic() groups {type,id} refs correctly, not string ids
+  ✅ TOPIC_A evidence is structured refs, reflections before growth plans
+  ✅ TOPIC_B has its own separate evidence list
+  ✅ topics with zero evidence are simply absent from the map
+
+Test E-03: growth plan evidence is not restricted to status=active
+  ✅ a completed growth plan is still valid supporting evidence, distinct from the guard's active-only count
+
+Section 3: Unknown persisted topic_id regression (§6.1)
+
+Test U-01: hasUsableTopic() rejects a topicId not in the active taxonomy
+  ✅ unknown topicId is not usable
+  ✅ null topicId is not usable
+  ✅ a real taxonomy id is usable
+
+Test U-02: a reflection with a stale/unknown topic_id loads without throwing and is excluded
+  ✅ reading a row with an unknown topic_id does not throw
+  ✅ the stale-topic row is excluded, same as a null topic_id would be
+
+Test U-03: a stale-topic row does not affect confidence/evidence for other, validly-tagged topics
+  ✅ TOPIC_A evidence is unaffected by the unrelated stale-topic row
+  ✅ the stale topicId itself never appears as a key
+
+Section 4: Ownership isolation
+
+Test OI-01: guard and evidence retrieval are scoped per phone_hash
+  ✅ OTHER_PHONE's own (sparse) data does not borrow from PHONE's
+  ✅ OTHER_PHONE only sees its own evidence, not PHONE's
+
+Section 5: Confidence calculation (§6.3)
+
+Test C-01: evidenceScore — proportional below the required count
+  ✅ 0/5 evidence → 0
+  ✅ 1/5 evidence → 0.2
+  ✅ exactly 5/5 evidence → 1.0 (cap boundary)
+
+Test C-02: evidenceScore caps at 1.0 beyond the required count
+  ✅ 6/5 evidence still caps at 1.0
+  ✅ 100/5 evidence still caps at 1.0
+
+Test C-03: evidenceScore respects a custom required-evidence override
+  ✅ custom denominator is honored
+
+Test C-04: recencyScore bucket boundaries — no interpolation, newest item only
+  ✅ 0 days → 1.00
+  ✅ 30 days (inclusive upper bound) → 1.00
+  ✅ 31 days (first day of next bucket) → 0.75
+  ✅ 90 days (inclusive upper bound) → 0.75
+  ✅ 91 days (first day of next bucket) → 0.50
+  ✅ 180 days (inclusive upper bound) → 0.50
+  ✅ 181 days (first day of next bucket) → 0.25
+  ✅ far beyond 180 days is still just 0.25, not lower
+
+Test C-05: recencyScore clamps a negative age to the ≤30-day bucket
+  ✅ negative age (e.g. clock skew) is clamped, not thrown on
+
+Test C-06: consistencyScore — matching/relevant ratios
+  ✅ 0/10 tagged reflections match → 0
+  ✅ 5/10 tagged reflections match → 0.5
+  ✅ 10/10 tagged reflections match → 1.0
+  ✅ 7/10 tagged reflections match → 0.7 (ADR worked-example input)
+
+Test C-07: consistencyScore is 0 (not NaN/throw) when there are no relevant tagged reflections at all
+  ✅ 0/0 → 0, not a divide-by-zero error
+
+Test C-08: calculateConfidence() — the exact ADR worked example
+  ✅ confidence is exactly 0.91 (ADR worked example), got 0.91
+
+Test C-09: calculateConfidence() — zero evidence, zero consistency, oldest recency bucket
+  ✅ expected 0.30*0.25 = 0.075, got 0.075
+
+Test C-10: calculateConfidence() — full marks on every sub-score
+  ✅ expected 1.0, got 1
+
+Test C-11: confidenceLabel() — explicit threshold boundaries
+  ✅ 0.75 (inclusive lower bound) → High
+  ✅ 0.91 (ADR worked example) → High
+  ✅ just under 0.75 → Medium
+  ✅ 0.45 (inclusive lower bound) → Medium
+  ✅ just under 0.45 → Low
+  ✅ 0 → Low
+
+Test C-12: calculateEvidenceScore() rejects a negative count
+  ✅ negative supportingEvidenceCount throws rather than silently producing a negative score
+
+Test C-13: calculateConsistencyScore() rejects matching > relevant
+  ✅ matchingTaggedReflections cannot exceed relevantTaggedReflections
+
+Section 6: Recommendation pipeline (§6.4)
+
+Test P-01: deduplicateRecommendationsByTopic() keeps only the highest confidence per topic
+  ✅ exactly one survivor for TOPIC_A
+  ✅ the higher-confidence candidate (0.83) survives, not 0.61
+
+Test P-02: deduplicateRecommendationsByTopic() leaves distinct topics untouched
+  ✅ both TOPIC_A and TOPIC_B survive — no cross-topic deduplication
+
+Test P-03: sortRecommendations() orders strictly by confidence descending
+  ✅ descending confidence order
+
+Test P-04: sortRecommendations() breaks a confidence tie using topic order ascending
+  ✅ lower topic.order (TOPIC_B) wins the confidence tie
+
+Test P-05: sortRecommendations() — topicId is the documented final tiebreaker (verified against the comparator contract)
+  ✅ a full tie (same topic, same confidence) does not throw
+  ✅ both candidates are preserved (sort is not a dedup step)
+
+Test P-06: processRecommendationCandidates() truncates to DEFAULT_MAX_INSIGHTS
+  ✅ sanity: five distinct-topic candidates generated
+  ✅ only 3 of 5 candidates are returned
+  ✅ the three highest-confidence candidates, in order
+
+Test P-07: processRecommendationCandidates() respects a maxInsights override
+  ✅ override to 2 is honored instead of the default 3
+
+Test P-08: full pipeline — dedup, then sort, then truncate, composed correctly
+  ✅ TOPIC_A deduped from 2 candidates to 1; 3 distinct topics remain
+  ✅ TOPIC_A (order tiebreak winner @0.92) → TOPIC_C (@0.92) → TOPIC_B (@0.30)
+  ✅ the surviving TOPIC_A candidate is the higher-confidence one (0.92, not 0.50)
+
+Test P-09: rule order-independence — identical candidates, different input order, identical output
+  ✅ identical candidate sets in different input orders produce identical pipeline output
+
+Test P-10: sortRecommendations() throws if a candidate references an unknown topicId (rule bug, not stale data)
+  ✅ an invalid candidate topicId is treated as a rule bug and surfaces loudly, unlike stale-persisted-row handling in §6.1
+
+Section 7: getCoachingInsights() end-to-end pipeline
+
+Test E-01: insufficient data → status insufficient_data, empty recommendations
+  ✅ status reflects insufficient guard
+  ✅ no recommendations when insufficient
+  ✅ generatedAt is present
+
+Test E-02: sufficient data, single topic → one recommendation with explanation
+  ✅ status ok once sufficient
+  ✅ exactly one topic has evidence
+  ✅ recommendation is for the topic with evidence
+  ✅ topicLabel resolved from taxonomy
+  ✅ confidence is numeric
+  ✅ confidenceLabel is one of the three labels
+  ✅ evidence includes all 5 reflections + 1 growth plan
+  ✅ explanation is template-generated from the same counts/label as the score
+
+Test E-03: multiple competing topics → ranked by confidence, capped at maxInsights
+  ✅ status ok
+  ✅ truncated to maxInsights=2 despite 3 topics having evidence
+  ✅ recommendations are sorted by descending confidence
+
+Test E-04: duplicate-topic candidates never produce contradictory output (only one entry per topic)
+  ✅ no topicId appears more than once in the output
+
+Test E-05: ownership isolation — OTHER_PHONE never sees PHONE's recommendations
+  ✅ a different phone_hash with no data of its own is unaffected by PHONE's data
+
+Test E-06: deterministic output regardless of rule catalogue execution order
+  ✅ final pipeline output identical regardless of rule catalogue order
+
+Test E-07: unknown persisted topic_id (§6.1) never surfaces as a recommendation
+  ✅ stale/unknown topic_id never produces a recommendation
+  ✅ still resolves normally despite the stale row
+
+Section 8: PR36 recommendation rules
+
+Test R-01: growth_plan_missing fires when reflections exist but no active growth plan does
+  ✅ TOPIC_A recommendation is present
+  ✅ growth_plan_missing message surfaces for a topic with reflections but no active plan
+
+Test R-02: growth_plan_missing does not fire once an active growth plan exists for that topic
+  ✅ a topic with an active growth plan falls through to a different rule
+
+Test R-03: growth_plan_missing does not fire for a completed (non-active) growth plan — still missing
+  ✅ a completed (non-active) growth plan still counts as "missing" for this rule
+
+Test R-04: stale_evidence fires when the newest evidence exceeds the staleness threshold
+  ✅ TOPIC_A recommendation is present
+  ✅ stale_evidence message surfaces once the newest evidence is beyond the threshold
+
+Test R-05: stale_evidence does not fire for recently-recorded evidence
+  ✅ fresh evidence does not trigger the stale_evidence message
+
+Test R-06: low_confidence_recommendation fires when confidence is below threshold, no other rule applies
+  ✅ TOPIC_A recommendation is present
+  ✅ sanity: TOPIC_A confidence is genuinely below threshold
+  ✅ low_confidence_recommendation message surfaces when confidence is below threshold
+
+Test R-07: rules are mutually exclusive per topic — exactly one recommendation, never a duplicate/contradictory pair
+  ✅ exactly one recommendation for TOPIC_A, not one per matching rule
+
+Test R-08: recurring_topic_pattern still fires for a well-supported, current, non-missing-plan topic (no regression)
+  ✅ the baseline recurring_topic_pattern message still surfaces when no PR36 rule applies
+
+Section 9: PR39 trend rules
+
+Test T-01: trend_rising fires when confidence has risen past TREND_FLAT_THRESHOLD since the last snapshot
+  ✅ TOPIC_A recommendation is present
+  ✅ trend_rising message surfaces when confidence has genuinely risen
+
+Test T-02: trend_rising does not fire against a baseline topic (no prior snapshot)
+  ✅ TOPIC_A recommendation is present
+  ✅ trend_rising does not fire without a prior snapshot to compare against
+  ✅ falls through to recurring_topic_pattern instead, as before PR39
+
+Test T-03: trend_falling fires when confidence has dropped past TREND_FLAT_THRESHOLD since the last snapshot
+  ✅ TOPIC_A recommendation is present
+  ✅ trend_falling message surfaces when confidence has genuinely dropped
+
+Test T-04: trend_falling does not fire against a baseline topic (no prior snapshot)
+  ✅ trend_falling does not fire without a prior snapshot to compare against
+
+Test T-05: evidence_gained fires when the last snapshot had no evidence and the topic now does
+  ✅ TOPIC_A recommendation is present
+  ✅ evidence_gained message surfaces when evidence newly exists
+  ✅ evidence_gained (priority 60) wins over trend_rising (priority 40) even though the confidence delta would also read as rising
+
+Test T-06: evidence_gained does not fire against a baseline topic (no prior snapshot)
+  ✅ evidence_gained does not fire without a prior snapshot to compare against
+
+Test T-07: evidence_removed fires when the last snapshot had evidence and the topic no longer does
+  ✅ TOPIC_A recommendation is present even with zero current evidence
+  ✅ evidence_removed message surfaces when previously-present evidence is now gone
+
+Test T-08: evidence_removed does not fire against a baseline topic (no prior snapshot)
+  ✅ a baseline topic with zero current evidence produces no recommendation, not an evidence_removed one
+
+Section 10: cross-catalogue mutual exclusivity — exactly one recommendation per topic
+
+Test X-01: growth_plan_missing (priority 100) wins over a simultaneously-true trend_falling condition
+  ✅ exactly one recommendation for TOPIC_A, not one per matching rule
+  ✅ growth_plan_missing wins the collision, per its higher ADR-017 priority
+  ✅ the trend_falling message is suppressed by the higher-priority rule
+
+Test X-02: stale_evidence (priority 80) wins over a simultaneously-true trend_falling condition
+  ✅ exactly one recommendation for TOPIC_A, not one per matching rule
+  ✅ stale_evidence wins the collision, per its higher ADR-017 priority
+  ✅ the trend_falling message is suppressed by the higher-priority rule
+
+Test X-03: evidence_gained (priority 60) wins over a simultaneously-true trend_rising condition (re-proof of T-05, via the collision framing)
+  ✅ exactly one recommendation for TOPIC_A, not one per matching rule
+  ✅ evidence_gained wins the collision, per its higher ADR-017 priority
+
+Test X-04: no rule collision ever produces more than one recommendation per topic, across the full combined catalogue
+  ✅ exactly one recommendation for TOPIC_CLASSROOM_MANAGEMENT, even with multiple rule conditions simultaneously true
+  ✅ exactly one recommendation for TOPIC_ASSESSMENT, even with multiple rule conditions simultaneously true
+  ✅ exactly one recommendation for TOPIC_LEARNER_ENGAGEMENT, even with multiple rule conditions simultaneously true
+
+Section 11: sortRecommendations() comparator regression
+
+Test CMP-01: priority wins over confidence
+  ✅ the higher-priority, lower-confidence candidate (TOPIC_B) sorts first
+
+Test CMP-02: confidence wins when priorities are equal
+  ✅ with equal priority, the higher-confidence candidate (TOPIC_B) sorts first — the original PR36 contract, unchanged
+
+Test CMP-03: stable topic-order tiebreak still applies when both priority and confidence are equal
+  ✅ lower topic.order (TOPIC_B) still wins the tie once priority and confidence are both equal
+
+Test CMP-04: a candidate missing a priority field sorts as priority 0, not last-place-by-throw
+  ✅ the candidate with an explicit (even low) priority outranks one with no priority field at all
+
+Test CMP-05: every rule in the live catalogue declares a valid numeric priority (validateRecommendationRules re-proof)
+  ✅ the live RECOMMENDATION_RULES catalogue passes its own startup validation
+  ✅ every rule object in the catalogue carries a finite numeric priority
+
+Test CMP-06: validateRecommendationRules() rejects a rule missing a priority
+  ✅ a rule with no priority field fails validation loudly, not silently at sort time
+
+───────────────────────────────────────────────────────
+coachingEngineService Results: 137 passed, 0 failed
+(node:8392) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== coachingMessageRenderer.test.js ===
+
+Section 1: renderRecommendation() — one assertion per registered template
+
+Test R-01: growth_plan_missing renders with the topic label substituted
+  ✅ growth_plan_missing renders the exact PR36 wording, topic label substituted
+
+Test R-02: trend_falling renders with the topic label substituted (extra templateData fields ignored)
+  ✅ trend_falling renders the exact PR39 wording — extra fields in templateData are simply unused, not an error
+
+Test R-03: low_confidence_recommendation renders with no topic substitution at all
+  ✅ low_confidence_recommendation has no per-topic wording, matching its original engine-composed string
+
+Test R-04: every messageId in the live catalogue renders without throwing
+  ✅ all 8 registered messageIds render successfully with minimal templateData
+
+Section 2: renderRecommendation() failure mode
+
+Test F-01: an unknown messageId throws rather than returning a fallback string
+  ✅ error message names the offending messageId
+  ✅ renderRecommendation() throws on an unregistered messageId
+
+Test F-02: a recommendation with no messageId at all throws, not a crash on undefined
+  ✅ missing messageId is treated the same as an unknown one — a thrown, named error
+
+Section 3: validateMessageTemplates()
+
+Test V-01: a matched rule/template set passes validation
+  ✅ a 1:1 matched set does not throw
+
+Test V-02: a rule referencing a messageId with no template fails validation
+  ✅ error names the offending messageId
+  ✅ error names the offending rule id
+  ✅ a rule with no matching template fails loudly
+
+Test V-03: a template with no corresponding rule messageId fails validation
+  ✅ error names the orphaned template
+  ✅ an unreferenced template fails loudly rather than silently accumulating dead code
+
+Test V-04: the real, live RECOMMENDATION_RULES catalogue passes validation against MESSAGE_TEMPLATES
+  ✅ every live rule has a template and every template has a live rule — exact 1:1, per ADR-018 Phase 1
+
+Test V-05: every rule in the live catalogue has a messageId equal to its ruleId (documented 1:1 today, ADR-018 §2)
+  ✅ ruleId and messageId are identical for every rule today — the fields are independent in principle, not yet in practice
+
+───────────────────────────────────────────────────────
+coachingMessageRenderer Results: 15 passed, 0 failed
+(node:4892) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== coachingSnapshotService.test.js ===
+
+Test 1: first snapshot for a topic is always recorded
+  ✅ first write for a topic inserts
+  ✅ exactly one row after first write
+
+Test 2: a write within the noise threshold is skipped
+  ✅ a sub-threshold confidence move is skipped
+  ✅ still exactly one row
+
+Test 2b: a write exactly at the noise threshold is skipped
+  ✅ a move exactly equal to the threshold is skipped ("more than", not "at least")
+  ✅ still exactly one row
+
+Test 3: a write past the noise threshold is recorded
+  ✅ a past-threshold move on the same day updates in place
+  ✅ same-day cap: still one row, updated not inserted
+
+Test 4: same-day cap holds across more than two writes
+  ✅ three meaningfully-different same-day writes still yield one row
+  ✅ the one row reflects the latest written value
+
+Test 5: createReflection triggers a snapshot
+  ✅ saving a reflection produces exactly one snapshot row for its topic
+
+Test 6: a growth plan status change triggers a snapshot
+  ✅ no snapshot row yet immediately before the status-change call
+  ✅ the status change specifically produces exactly one snapshot row
+
+Test 6b: growth plan creation triggers a snapshot (evidence-event philosophy)
+  ✅ creating a growth plan writes a snapshot
+
+Test 6c: a growth plan topicId reassignment (no status change) triggers a snapshot
+  ✅ reassigning topicId alone still writes a snapshot
+
+Test 7: updating a growth plan WITHOUT a status or topicId change does not snapshot
+  ✅ editing goalText alone writes no snapshot
+
+Test 7b: reflection topicId reassignment triggers a snapshot; content-only edit does not
+  ✅ editing content alone writes no snapshot
+  ✅ reassigning topicId writes a snapshot
+
+Test 7c: deleting a reflection triggers a snapshot, capturing the drop to zero evidence
+  ✅ sanity: topic has a positive-confidence snapshot before deletion
+  ✅ still one row (same-day update, not a new insert)
+  ✅ confidence drops to 0 once the only evidence is deleted
+
+Test 7d: a topic the teacher never touches gets no snapshot row at all
+  ✅ a never-touched topic writes no zero-confidence noise row
+
+Test 8: read paths never write (§9 invariant 1)
+  ✅ calling getCoachingInsights (a read) does not create additional snapshot rows
+
+Test 9: recordSnapshotsForTeacher covers every topic with evidence, not just one
+  ✅ topic A actually has a stored snapshot row
+  ✅ topic B actually has a stored snapshot row
+
+───────────────────────────────────────────────────────
+coachingSnapshotService Results: 25 passed, 0 failed
+(node:3764) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== coachingTrendService.test.js ===
+
+Test 1: a topic with a prior snapshot reports status "trend"
+  ✅ status is "trend" once a prior snapshot exists
+
+Test 1b: rising trend — confidence increased past TREND_FLAT_THRESHOLD
+  ✅ delta exceeds TREND_FLAT_THRESHOLD
+  ✅ trendDirection is "rising"
+
+Test 2: falling trend — confidence decreased past TREND_FLAT_THRESHOLD
+  ✅ delta is below -TREND_FLAT_THRESHOLD
+  ✅ trendDirection is "falling"
+
+Test 3: flat trend — confidence moved, but not past TREND_FLAT_THRESHOLD
+  ✅ status is "trend" in the flat-zone case
+  ✅ delta is positive (0.52 - 0.50)
+  ✅ delta is inside the flat zone (< TREND_FLAT_THRESHOLD)
+  ✅ trendDirection is "flat" for a delta inside the threshold band
+
+Test 4: evidence added — evidenceTransition is "gained"
+  ✅ evidenceTransition is "gained" when evidence newly exists
+
+Test 5: evidence removed — evidenceTransition is "lost"
+  ✅ evidenceTransition is "lost" when evidence no longer exists
+
+Test 6: a topic with literally no prior snapshot row reports "baseline"
+  ✅ status is "baseline" with zero snapshot history
+  ✅ baseline result has no delta field
+  ✅ baseline result has no trendDirection field
+
+Test 7: SNAPSHOT_WRITE_THRESHOLD does not exceed TREND_FLAT_THRESHOLD
+  ✅ write threshold is not greater than the trend-flat threshold
+
+Test 8: getLatestTrend compares against the single most recent snapshot row
+  ✅ compares against the most recent row (0.80), not the older one (0.10)
+  ✅ sinceDate reflects the most recent row
+
+Test 9: zero-evidence transition — no evidence then vs. now yields "unchanged"
+  ✅ evidenceTransition is "unchanged" when neither side has evidence
+
+Test 10: getLatestTrend never writes to coaching_snapshots (§9 invariant 4)
+  ✅ calling getLatestTrend repeatedly writes no additional snapshot rows
+
+───────────────────────────────────────────────────────
+coachingTrendService Results: 19 passed, 0 failed
+(node:2508) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== coverageService.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+
+--- filterCoverageEvents ---
+  ✅ drops observation events and non-blueprint assessments
+  ✅ keeps the one blueprint-backed assessment
+
+--- groupBySubjectGradeTerm ---
+  ✅ distinct (subject,grade,term) combos never merge, even with the same subject
+
+--- resolveEventTopics ---
+  ✅ resolves topics from the blueprint
+  ✅ a deleted/missing blueprint resolves to [], not a throw
+
+--- buildReport ---
+  ✅ no CAPS reference data -> dataAvailable false
+  ✅ no CAPS reference data -> coveragePercentage 0, not NaN
+  ✅ CAPS reference data present -> dataAvailable true
+  ✅ two of three expected topics completed
+  ✅ the uncovered expected topic is reported as missing
+  ✅ coveragePercentage rounds 2/3 to 67
+  ✅ a blueprint topic not matching the CAPS registry contributes no coverage
+  ✅ the real expected topic (Fractions) is still reported as missing
+  ✅ topics accumulate across multiple blueprint-backed events in the same group
+  ✅ 100% once every expected topic is covered
+
+--- getLearnerCoverage (mocked seams) ---
+  ✅ one report per (subject,grade,term) with at least one blueprint-backed event
+  ✅ reports sorted alphabetically by subject (english first)
+  ✅ reports sorted alphabetically by subject (mathematics second)
+  ✅ the non-blueprint mathematics event is excluded from eventCount
+  ✅ mathematics coverage reflects only the blueprint-backed event (1/2 topics)
+  ✅ no events -> empty report array, not an error
+  ✅ term 2 and term 3 mathematics produce two separate reports
+  ✅ term 2 coverage computed against term 2 expectations only
+  ✅ term 3 coverage computed against term 3 expectations only
+
+24 passed, 0 failed
+
+=== dashboardSnapshotService.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+✅ PASS dashboardSnapshotService.test.js (21 assertions)
+
+=== flows.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+=== Flows Test Suite ===
+
+Testing intent parsing...
+PASS: 4/4 intent parsing tests passed
+Testing profile update function existence...
+PASS: updateTeacherProfile function exists
+Testing ambiguous topic detection...
+PASS: 5/5 ambiguous topic tests passed
+
+=== Results: 3/3 tests passed ===
+All tests passed!
+
+=== generation-pipeline-last-intent.test.js ===
+
+── Section 1: a single generation call persists last_intent exactly once ──
+(node:7208) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[WEBHOOK] Intent: {
+  type: 'worksheet',
+  grade: 7,
+  subject: 'mathematics',
+  topic: 'Fractions',
+  marks: 20
+}
+[WEBHOOK] Response delivered to ...0001
+  ✅ G-01: updateTeacherProfile called exactly once with last_intent
+  ✅ G-02: persisted last_intent matches the exact intent passed in
+
+── Section 2: two calls simulate two different entry paths (main classification + follow-up) ──
+[WEBHOOK] Intent: {
+  type: 'worksheet',
+  grade: 7,
+  subject: 'mathematics',
+  topic: 'Algebra',
+  marks: 20
+}
+[WEBHOOK] Response delivered to ...0002
+  ✅ G-03: first call (main classification path) persists last_intent exactly once
+  ✅ G-04: last_intent reflects the first call's intent
+[WEBHOOK] Intent: {
+  type: 'test',
+  grade: 7,
+  subject: 'mathematics',
+  topic: 'Quadratic equations',
+  marks: 20
+}
+[WEBHOOK] Response delivered to ...0002
+  ✅ G-05: second call (follow-up path) also persists last_intent exactly once
+  ✅ G-06: last_intent overwritten with the second call's intent, not stale
+
+── Section 3: last_intent is persisted even when generation itself later fails ──
+[WEBHOOK] Intent: {
+  type: 'worksheet',
+  grade: 7,
+  subject: 'mathematics',
+  topic: 'Geometry',
+  marks: 20
+}
+[WEBHOOK] AI generation failed: Simulated AI generation failure
+[WEBHOOK] Rolled back usage increment (row id=4) for free-tier teacher ...0003
+  ✅ G-07: last_intent still persisted once even though AI generation failed
+  ✅ G-08: persisted last_intent matches the intent, ready for a RETRY
+
+── Section 4: rate-limited requests never reach the persistence line ──
+[WEBHOOK] Intent: {
+  type: 'worksheet',
+  grade: 7,
+  subject: 'mathematics',
+  topic: 'Topic 0',
+  marks: 20
+}
+[WEBHOOK] Response delivered to ...0004
+[WEBHOOK] Intent: {
+  type: 'worksheet',
+  grade: 7,
+  subject: 'mathematics',
+  topic: 'Topic 1',
+  marks: 20
+}
+[WEBHOOK] Response delivered to ...0004
+[WEBHOOK] Intent: {
+  type: 'worksheet',
+  grade: 7,
+  subject: 'mathematics',
+  topic: 'Topic 2',
+  marks: 20
+}
+[WEBHOOK] Response delivered to ...0004
+[WEBHOOK] Intent: {
+  type: 'worksheet',
+  grade: 7,
+  subject: 'mathematics',
+  topic: 'Topic 3',
+  marks: 20
+}
+[WEBHOOK] Response delivered to ...0004
+[WEBHOOK] Intent: {
+  type: 'worksheet',
+  grade: 7,
+  subject: 'mathematics',
+  topic: 'Topic 4',
+  marks: 20
+}
+[WEBHOOK] Response delivered to ...0004
+  ✅ G-09: setup — last_intent reflects the 5th (final allowed) call
+  ✅ G-10: rate-limited 6th call never calls updateTeacherProfile with last_intent
+  ✅ G-11: last_intent still reflects the 5th call, unchanged by the rate-limited 6th
+  ✅ G-12: teacher was told to slow down (sanity check this really was the rate-limit path)
+
+─────────────────────────────────
+✅ Passed: 12
+❌ Failed: 0
+📊 Total:  12
+─────────────────────────────────
+
+
+=== getTeacherLearners.test.js ===
+
+── Section 1: returns only the teacher's own learners ──────────────────
+  ✅ three learners returned for teacher A
+  ✅ none of teacher B's learners appear
+
+── Section 2: ordering is alphabetical ──────────────────────────────────
+  ✅ results ordered alphabetically by canonicalName
+
+── Section 3: excludes removed learners ─────────────────────────────────
+  ✅ removed learner excluded
+  ✅ remaining count is 2 after removal
+
+── Section 4: empty array when teacher has no learners ──────────────────
+  ✅ teacher with no learners gets []
+
+── Section 5: input guard ────────────────────────────────────────────────
+  ✅ null phoneHash throws
+  ✅ empty phoneHash throws
+
+── Section 6: response shape ─────────────────────────────────────────────
+  ✅ row has numeric id
+  ✅ row has classId (nullable)
+  ✅ row has canonicalName
+  ✅ row has normalizedName
+  ✅ row has createdAt
+  ✅ row has updatedAt
+  ✅ row does NOT include phoneHash
+  ✅ row does NOT include removedAt
+
+───────────────────────────────────────────────────────
+getTeacherLearners Results: 16 passed, 0 failed
+(node:12364) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+=== growthPlanFlow.test.js ===
+[DB] ⚠️  DB_PATH is not set — database will be stored inside the container.
+[DB] ⚠️  On Render, this means ALL data is wiped on every deploy.
+[DB] ⚠️  Mount a persistent disk and set DB_PATH=/var/data/teacher_assistant.db
+[DB] Connected to SQLite at C:\Users\xolan\Downloads\sa-teacher-assistant\data\teacher_assistant.db
+growthPlanFlow tests
+============================================================
+
+── happy path ──
+  ✅ collects both fields and calls createGrowthPlan exactly once on YES
+  ✅ phoneHash passed to createGrowthPlan is correct
+  ✅ term is carried through from getCurrentTerm
+  ✅ status defaults to active on creation
+  ✅ goalText is the collected goal field
+  ✅ topicId is the resolved topic selection
+  ✅ state is cleared after save
+
+── correction path ──
+  ✅ saves exactly once after a correction
+  ✅ goalText reflects the corrected value
+  ✅ topicId field untouched by the correction
+
+── cancel ──
+  ✅ cancels cleanly from awaitingGoal without ever saving
+  ✅ state is cleared after CANCEL from awaitingGoal
+  ✅ cancels cleanly from awaitingTopic without ever saving
+  ✅ state is cleared after CANCEL from awaitingTopic
+  ✅ cancels cleanly from reviewSummary without ever saving
+  ✅ state is cleared after CANCEL from reviewSummary
+  ✅ cancels cleanly from awaitingCorrectionChoice without ever saving
+  ✅ state is cleared after CANCEL from awaitingCorrectionChoice
+
+── status ──
+  ✅ STATUS is handled (does not fall through) from awaitingGoal
+  ✅ STATUS sends exactly one new message from awaitingGoal
+  ✅ STATUS message reflects the awaitingGoal step label
+  ✅ STATUS never saves from awaitingGoal
+  ✅ STATUS does not clear state from awaitingGoal
+  ✅ STATUS is handled (does not fall through) from awaitingTopic
+  ✅ STATUS sends exactly one new message from awaitingTopic
+  ✅ STATUS message reflects the awaitingTopic step label
+  ✅ STATUS never saves from awaitingTopic
+  ✅ STATUS does not clear state from awaitingTopic
+  ✅ STATUS is handled (does not fall through) from reviewSummary
+  ✅ STATUS sends exactly one new message from reviewSummary
+  ✅ STATUS message reflects the reviewSummary step label
+  ✅ STATUS never saves from reviewSummary
+  ✅ STATUS does not clear state from reviewSummary
+  ✅ STATUS is handled (does not fall through) from awaitingCorrectionChoice
+  ✅ STATUS sends exactly one new message from awaitingCorrectionChoice
+  ✅ STATUS message reflects the awaitingCorrectionChoice step label
+  ✅ STATUS never saves from awaitingCorrectionChoice
+  ✅ STATUS does not clear state from awaitingCorrectionChoice
+
+── timeout ──
+  ✅ drops stale state and does not treat the message as handled
+  ✅ stale state is removed
+  ✅ never persists anything when dropping a stale session
+  ✅ sends nothing back to the teacher when dropping a stale session
+
+── timeout boundary ──
+  ✅ treats a session exactly at the 30-minute boundary as still active
+  ✅ state at the exact boundary is not dropped
+  ✅ session at the boundary continues to advance normally
+
+── fresh session after timeout ──
+  ✅ first call on a stale session only drops it and reports unhandled
+  ✅ a subsequent call starts a brand-new session
+  ✅ new session starts at awaitingGoal, not mid-flow
+  ✅ no leftover fields survive from the stale session
+
+── session isolation ──
+  ✅ teacher A's in-progress goal is correct
+  ✅ teacher B's in-progress goal is correct
+  ✅ keeps two teachers' in-progress growth plans independent
+
+── term unavailable ──
+  ✅ does not save when getCurrentTerm returns null
+  ✅ state is cleared even though the save was blocked
+  ✅ tells the teacher the term could not be determined
+
+── invalid confirmation reply ──
+  ✅ an unrecognised confirmation reply does not save
+  ✅ stays on reviewSummary after an invalid reply
+  ✅ goalText field is preserved
+  ✅ topicId field is preserved
+
+── invalid topic selection reply ──
+  ✅ stays on awaitingTopic after an out-of-range reply
+  ✅ does not save on an invalid topic reply
+  ✅ advances to reviewSummary once a valid topic reply is sent
+  ✅ valid reply resolves to the correct topicId
+
+── save failure ──
+[GrowthPlan] createGrowthPlan failed: db unavailable
+  ✅ state is cleared even though the save failed
+  ✅ tells the teacher the save failed
+
+───────────────────────────────────────────────────────
+growthPlanFlow.test.js Results: 65 passed, 0 failed
