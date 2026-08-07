@@ -10,18 +10,18 @@ with recorded evidence, not to an assumption of pass.
 | Field | Value |
 |---|---|
 | Release Candidate | RC-1 |
-| Git Commit Audited | 92945af4bdd4e6514d2250649d2502aef43c5b8 |
+| Git Commit Audited | be6bfe91a526ec8a5828f0f1bb55f359f9836226 |
 | Git Branch | main |
 | Environment | ☑ Local Dev ☐ Staging ☐ Production |
 | Audit Start Date | 2026-08-06 |
-| Audit Completion Date | (in progress — 1 of 7 workflows done) |
+| Audit Completion Date | (in progress — 2 of 7 workflows done) |
 | Audited By | Xolani Tshabalala |
 
 ## Workflow Results
 | Workflow | Functional | Security | Console | Overall | Workflow Doc |
 |---|---|---|---|---|---|
 | W1 Authentication | PASS | PASS | Clean | PASS | [WORKFLOW_01_AUTHENTICATION.md](./WORKFLOW_01_AUTHENTICATION.md) |
-| W2 Classes | | | | | [WORKFLOW_02_CLASSES.md](./WORKFLOW_02_CLASSES.md) |
+| W2 Classes | PASS | PASS | Clean | PASS | [WORKFLOW_02_CLASSES.md](./WORKFLOW_02_CLASSES.md) |
 | W3 Learners | | | | | [WORKFLOW_03_LEARNERS.md](./WORKFLOW_03_LEARNERS.md) |
 | W4 Assessments | | | | | [WORKFLOW_04_ASSESSMENTS.md](./WORKFLOW_04_ASSESSMENTS.md) |
 | W5 Reports & PDF | | | | | [WORKFLOW_05_REPORTS_PDF.md](./WORKFLOW_05_REPORTS_PDF.md) |
@@ -38,9 +38,9 @@ Aggregate counts, sourced from each workflow's Findings Register.
 |---|---|---|---|
 | Critical | 0 | — | — |
 | Major | 0 | — | — |
-| Minor | 1 | — | 1 (favicon.ico 404, W1) |
+| Minor | 3 | — | 3 (favicon.ico 404 [W1]; duplicate class names [W2]; React Router future-flag warnings [W2]) |
 
-*(Running totals from W1 only — will update as W2–W7 land.)*
+*(Running totals from W1–W2 — will update as W3–W7 land.)*
 
 ### Open Findings Requiring Disposition
 | ID | Workflow | Severity | Description | Disposition |
@@ -59,7 +59,9 @@ only inside individual workflow Findings Registers.
 
 | ID | Workflow | Severity | Description | Reason Accepted |
 |---|---|---|---|---|
-| | | | | |
+| W1-F1 | W1 | Minor | favicon.ico 404 | Cosmetic, no functional impact |
+| W2-F1 | W2 | Minor | Duplicate class names in list UI (stress-test seed artifact) | Test data artifact, not a real defect; revisit if seed data changes |
+| W2-F2 | W2 | Minor | React Router v7 future-flag deprecation warnings in console | Library-level, non-blocking; addressed at next React Router major upgrade |
 
 ## Release Recommendation
 ☐ **RC-1 Approved for Production** — all workflows PASS, zero open
