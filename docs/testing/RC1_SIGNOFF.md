@@ -26,7 +26,7 @@ with recorded evidence, not to an assumption of pass.
 | W4 Assessments | PASS | PASS | Clean | PASS | [WORKFLOW_04_ASSESSMENTS.md](./WORKFLOW_04_ASSESSMENTS.md) |
 | W5 Reports & PDF | PASS | PASS | Clean | PASS | [WORKFLOW_05_REPORTS_PDF.md](./WORKFLOW_05_REPORTS_PDF.md) |
 | W6 QMS | PASS | PASS | Clean | PASS | [WORKFLOW_06_QMS.md](./WORKFLOW_06_QMS.md) |
-| W7 Observations | | | | | [WORKFLOW_07_OBSERVATIONS.md](./WORKFLOW_07_OBSERVATIONS.md) |
+| W7 Observations | PASS | PASS | Clean | PASS | [WORKFLOW_07_OBSERVATIONS.md](./WORKFLOW_07_OBSERVATIONS.md) |
 
 (Fill each cell with PASS / FAIL, sourced directly from that workflow's
 Workflow Result section — do not re-judge results here.)
