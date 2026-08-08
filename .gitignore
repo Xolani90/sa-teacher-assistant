@@ -23,3 +23,8 @@ tests/.tmp-db/
 pr32-checkpoint-*.zip
 *.patch
 test-output.txt
+mintTeacherAToken.js
+mintty.*.png
+seedSecondTeacherForOwnershipTest.js
+seedTeacherBAssessment.js
+test-output*.txt
