@@ -25,7 +25,7 @@ with recorded evidence, not to an assumption of pass.
 | W3 Learners | PASS | PASS | Clean | PASS | [WORKFLOW_03_LEARNERS.md](./WORKFLOW_03_LEARNERS.md) |
 | W4 Assessments | PASS | PASS | Clean | PASS | [WORKFLOW_04_ASSESSMENTS.md](./WORKFLOW_04_ASSESSMENTS.md) |
 | W5 Reports & PDF | PASS | PASS | Clean | PASS | [WORKFLOW_05_REPORTS_PDF.md](./WORKFLOW_05_REPORTS_PDF.md) |
-| W6 QMS | PASS | PASS | Issues found | FAIL | [WORKFLOW_06_QMS.md](./WORKFLOW_06_QMS.md) |
+| W6 QMS | PASS | PASS | Clean | PASS | [WORKFLOW_06_QMS.md](./WORKFLOW_06_QMS.md) |
 | W7 Observations | | | | | [WORKFLOW_07_OBSERVATIONS.md](./WORKFLOW_07_OBSERVATIONS.md) |
 
 (Fill each cell with PASS / FAIL, sourced directly from that workflow's
@@ -37,7 +37,7 @@ Aggregate counts, sourced from each workflow's Findings Register.
 | Severity | Count | Resolved | Open / Accepted |
 |---|---|---|---|
 | Critical | 0 | — | — |
-| Major | 2 | — | 2 (W4-F1: `averageFacilityValue`/`averageDiscrimination`/target-group size never wired into `assessmentDetailService.js` — open, tracked under W4, confirmed consistent in W5's PDF output, not duplicated; W6-F1: dashboard `ReflectionPanel.jsx` create-reflection form never sends `topicId`, every browser-created reflection fails 400 — open, tracked under W6) |
+| Major | 2 | 1 | 1 open (W4-F1: `averageFacilityValue`/`averageDiscrimination`/target-group size never wired into `assessmentDetailService.js` — open, tracked under W4, confirmed consistent in W5's PDF output, not duplicated). 1 resolved (W6-F1: dashboard `ReflectionPanel.jsx` create-reflection form omitted `topicId` — remediated in commit `f4edfa2`, verified via automated tests, HTTP/DB integration, and final browser retest; see W6 Resolved Findings) |
 | Minor | 8 | — | 8 (favicon.ico 404 [W1]; duplicate class names [W2]; React Router future-flag warnings [W2, recurring in W3]; a11y form field missing id/name [W3]; inconsistent learner timestamp formats [W3]; no non-blueprint assessment in seed data blocking 422 PDF path [W4, same gap noted again in W5-05]; PDF signed-URL 2-hour TTL undocumented in checklist [W4]; Chrome native PDF-viewer a11y issue, browser-chrome-level [W5]) |
 
 *(Running totals from W1–W6 — will update as W7 lands.)*
@@ -46,12 +46,19 @@ Aggregate counts, sourced from each workflow's Findings Register.
 | ID | Workflow | Severity | Description | Disposition |
 |---|---|---|---|---|
 | W4-F1 | W4 (confirmed consistent in W5) | Major | `averageFacilityValue`, `averageDiscrimination`, and target-group size are computed in `itemAnalysisService.js`/`interventionPlanService.js` but never wired into `assessmentDetailService.js` — fields are absent from `/detail` entirely, not zeroed. W5-02 confirmed the generated PDF is consistent with this (it doesn't print these values either, for the same underlying reason) — not logged as a separate W5 finding. | Open — single outstanding issue, not yet dispositioned as genuine product gap vs. checklist mismatch. Must be resolved or explicitly accepted before RC-1 approval, per Major-finding policy above. |
-| W6-F1 | W6 | Major | Dashboard `ReflectionPanel.jsx` create-reflection form (`handleSave()`, POST branch) sends `{ content }` only, never `topicId`. Per ADR-013 §4.3/§3.3, every new reflection write must carry a valid `topicId` from the closed taxonomy; API-layer validation in `reflectionService.createReflection()` correctly rejects the request with `400 topicId must be a valid QMS topic id, got "undefined"`. Defect is entirely client-side. Scope limited to create — PATCH (edit) is unaffected since `topicId` is optional there. WhatsApp-logged reflections are unaffected. | Open — not yet fixed. Requires product/UX decision (topic selector design) before implementation. Blocks RC-1 approval until fixed and W6-15 retested, or explicitly accepted as a known issue. |
 
 (List any Critical or Major finding that isn't fully "Fixed / Retest
 Passed" — RC-1 cannot be approved with open Critical findings, and open
 Major findings must be explicitly accepted with a stated reason, not
 silently carried forward.)
+
+### Resolved Findings
+Findings that have been fixed and verified, but were not merely
+"accepted" — do not conflate with Known Accepted Issues below.
+
+| ID | Workflow | Severity | Status | Description | Resolution Evidence |
+|---|---|---|---|---|---|
+| W6-F1 | W6 | Major | Resolved | Dashboard `ReflectionPanel.jsx` create-reflection form (`handleSave()`, POST branch) originally sent `{ content }` only, never `topicId`, causing every browser-created reflection to fail 400 against API-layer validation (working as designed per ADR-013 §4.3/§3.3). | Remediated in commit `f4edfa2` (topic selector added, wired to new `GET /api/qms/topics` route, `topicId` now included in POST body). Repository hygiene follow-up in `542403e` (unrelated scratch files removed, W6-F1 implementation files unaffected). Verified via automated tests (targeted backend + frontend suites, all passing), HTTP/DB integration (curl-level persistence confirmed), and final browser retest (W6-15, all steps PASS, including PATCH leaving `topicId` unchanged). The "Unscoped" list-pill display noticed during retest was traced and classified as a pre-existing, unrelated UI gap (driven by `r.term`, not `topicId`) — not a W6-F1 regression. |
 
 ## Known Accepted Issues
 Issues knowingly shipped in RC-1 (e.g. Minor findings not worth
@@ -78,13 +85,12 @@ above.
 
 **Blocking findings (if not approved):**
 - W4-F1 (Major, open) — remains an outstanding issue across W1–W5. Not yet determined whether it's a genuine product gap or a checklist/expectation mismatch. Does not block continued workflow execution (W7 remains), but must be dispositioned — fixed, retested, or explicitly accepted with reason — before the Release Recommendation section above can be checked.
-- W6-F1 (Major, open) — dashboard reflection-creation form omits required `topicId`, causing every create-reflection attempt from the browser UI to fail. Blocks approval until fixed and W6-15 retested, or explicitly accepted as a known issue.
 
 **Recommendation notes:**
-W1–W6 complete; W6 FAILed due to one Major finding (W6-F1), otherwise
-clean. W7 remains. Two open Major findings (W4-F1, W6-F1) must be
-closed out — fixed, retested, or explicitly accepted with stated
-reason — before final RC-1 approval.
+W1–W6 executed; W6 passed after W6-F1 remediation. W7 remains. One
+open Major finding (W4-F1) must still be closed out — fixed, retested,
+or explicitly accepted with stated reason — before final RC-1
+approval.
 
 ## Sign-off
 - Approved By: __________
