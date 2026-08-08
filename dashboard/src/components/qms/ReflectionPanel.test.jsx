@@ -13,6 +13,11 @@ function mockFetchRoutes(routes) {
   return fetchMock;
 }
 
+const TOPICS_ROUTE = { '/api/qms/topics': { method: 'GET', body: { topics: [
+  { id: 'TOPIC_ASSESSMENT', label: 'Assessment' },
+  { id: 'TOPIC_DIFFERENTIATION', label: 'Differentiation' },
+] } } };
+
 const REFLECTIONS = [
   { id: 'r1', term: 2, createdAt: '2026-05-10 09:00:00', content: 'Group work went well today.' },
   { id: 'r2', term: null, createdAt: '2026-05-08 14:30:00', content: 'Need to slow down on fractions.' },
@@ -34,26 +39,49 @@ describe('ReflectionPanel', () => {
   });
 
   it('adds a new reflection: POSTs the content and refreshes via onChange', async () => {
-    const fetchMock = mockFetchRoutes({ '/api/reflections': { method: 'POST', body: { id: 'r3' } } });
+    const fetchMock = mockFetchRoutes({
+      ...TOPICS_ROUTE,
+      '/api/reflections': { method: 'POST', body: { id: 'r3' } },
+    });
     const onChange = vi.fn();
     const user = userEvent.setup();
     renderWithProviders(<ReflectionPanel reflections={[]} onChange={onChange} />, { authenticated: true });
 
     await user.click(screen.getByRole('button', { name: /add reflection/i }));
     await user.type(screen.getByPlaceholderText(/what went well/i), 'Learners engaged well with the fractions worksheet.');
+    await user.selectOptions(screen.getByRole('combobox'), 'TOPIC_ASSESSMENT');
     await user.click(screen.getByRole('button', { name: /save reflection/i }));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
-    const [, options] = fetchMock.mock.calls[0];
+    // fetchMock.mock.calls[0] is the /api/qms/topics GET fired on mount;
+    // the save action is the POST to /api/reflections that follows it.
+    const postCall = fetchMock.mock.calls.find(([, opts]) => opts?.method === 'POST');
+    const [, options] = postCall;
     expect(options.method).toBe('POST');
-    expect(JSON.parse(options.body)).toEqual({ content: 'Learners engaged well with the fractions worksheet.' });
+    expect(JSON.parse(options.body)).toEqual({
+      content: 'Learners engaged well with the fractions worksheet.',
+      topicId: 'TOPIC_ASSESSMENT',
+    });
 
     // Form closes back to idle after a successful save.
     expect(screen.queryByPlaceholderText(/what went well/i)).not.toBeInTheDocument();
   });
 
+  it('refuses to save a new reflection without a topic selected', async () => {
+    const fetchMock = mockFetchRoutes({ ...TOPICS_ROUTE, '/api/reflections': { method: 'POST', body: {} } });
+    const user = userEvent.setup();
+    renderWithProviders(<ReflectionPanel reflections={[]} onChange={vi.fn()} />, { authenticated: true });
+
+    await user.click(screen.getByRole('button', { name: /add reflection/i }));
+    await user.type(screen.getByPlaceholderText(/what went well/i), 'Content without a topic.');
+    await user.click(screen.getByRole('button', { name: /save reflection/i }));
+
+    expect(await screen.findByText('Please select a coaching area.')).toBeInTheDocument();
+    expect(fetchMock.mock.calls.some(([, opts]) => opts?.method === 'POST')).toBe(false);
+  });
+
   it('refuses to save an empty reflection without calling the network', async () => {
-    const fetchMock = mockFetchRoutes({ '/api/reflections': { method: 'POST', body: {} } });
+    const fetchMock = mockFetchRoutes({ ...TOPICS_ROUTE, '/api/reflections': { method: 'POST', body: {} } });
     const user = userEvent.setup();
     renderWithProviders(<ReflectionPanel reflections={[]} onChange={vi.fn()} />, { authenticated: true });
 
@@ -61,11 +89,15 @@ describe('ReflectionPanel', () => {
     await user.click(screen.getByRole('button', { name: /save reflection/i }));
 
     expect(await screen.findByText('Reflection cannot be empty.')).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([, opts]) => opts?.method === 'POST')).toBe(false);
   });
 
   it('edits an existing reflection: pre-fills the form and PATCHes on save', async () => {
-    const fetchMock = mockFetchRoutes({ '/api/reflections/r1': { method: 'PATCH', body: {} } });
+    // The panel fetches /api/qms/topics unconditionally on mount regardless
+    // of add vs. edit, so it needs mocking here too — but the PATCH body
+    // assertion below is untouched, which is the direct proof the edit
+    // payload shape (no topicId) hasn't changed.
+    const fetchMock = mockFetchRoutes({ ...TOPICS_ROUTE, '/api/reflections/r1': { method: 'PATCH', body: {} } });
     const onChange = vi.fn();
     const user = userEvent.setup();
     renderWithProviders(<ReflectionPanel reflections={REFLECTIONS} onChange={onChange} />, { authenticated: true });
@@ -78,32 +110,36 @@ describe('ReflectionPanel', () => {
     await user.click(screen.getByRole('button', { name: /save changes/i }));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
-    const [url, options] = fetchMock.mock.calls[0];
+    const patchCall = fetchMock.mock.calls.find(([, opts]) => opts?.method === 'PATCH');
+    const [url, options] = patchCall;
     expect(url).toContain('/api/reflections/r1');
     expect(options.method).toBe('PATCH');
     expect(JSON.parse(options.body)).toEqual({ content: 'Group work went very well today.' });
   });
 
   it('deletes a reflection only after the confirm step, then calls onChange', async () => {
-    const fetchMock = mockFetchRoutes({ '/api/reflections/r1': { method: 'DELETE', body: {} } });
+    const fetchMock = mockFetchRoutes({ ...TOPICS_ROUTE, '/api/reflections/r1': { method: 'DELETE', body: {} } });
     const onChange = vi.fn();
     const user = userEvent.setup();
     renderWithProviders(<ReflectionPanel reflections={REFLECTIONS} onChange={onChange} />, { authenticated: true });
 
     await user.click(screen.getAllByRole('button', { name: /^delete$/i })[0]);
     expect(screen.getByText('Delete this reflection?')).toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled(); // not deleted yet, just asking
+    // not deleted yet, just asking — mount already fired the topics GET,
+    // so assert on the DELETE call specifically rather than "not called at all"
+    expect(fetchMock.mock.calls.some(([, opts]) => opts?.method === 'DELETE')).toBe(false);
 
     await user.click(screen.getByRole('button', { name: /confirm/i }));
 
     await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
-    const [url, options] = fetchMock.mock.calls[0];
+    const deleteCall = fetchMock.mock.calls.find(([, opts]) => opts?.method === 'DELETE');
+    const [url, options] = deleteCall;
     expect(url).toContain('/api/reflections/r1');
     expect(options.method).toBe('DELETE');
   });
 
   it('cancelling the delete confirmation makes no network call', async () => {
-    const fetchMock = mockFetchRoutes({ '/api/reflections/r1': { method: 'DELETE', body: {} } });
+    const fetchMock = mockFetchRoutes({ ...TOPICS_ROUTE, '/api/reflections/r1': { method: 'DELETE', body: {} } });
     const user = userEvent.setup();
     renderWithProviders(<ReflectionPanel reflections={REFLECTIONS} onChange={vi.fn()} />, { authenticated: true });
 
@@ -111,11 +147,12 @@ describe('ReflectionPanel', () => {
     await user.click(screen.getByRole('button', { name: /^cancel$/i }));
 
     expect(screen.queryByText('Delete this reflection?')).not.toBeInTheDocument();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.some(([, opts]) => opts?.method === 'DELETE')).toBe(false);
   });
 
   it('shows an error and keeps the form open when saving fails', async () => {
     const fetchMock = mockFetchRoutes({
+      ...TOPICS_ROUTE,
       '/api/reflections': { method: 'POST', body: { error: 'Reflection service unavailable' }, ok: false, status: 503 },
     });
     const user = userEvent.setup();
@@ -123,11 +160,12 @@ describe('ReflectionPanel', () => {
 
     await user.click(screen.getByRole('button', { name: /add reflection/i }));
     await user.type(screen.getByPlaceholderText(/what went well/i), 'A reflection that will fail to save.');
+    await user.selectOptions(screen.getByRole('combobox'), 'TOPIC_ASSESSMENT');
     await user.click(screen.getByRole('button', { name: /save reflection/i }));
 
     expect(await screen.findByText('Reflection service unavailable')).toBeInTheDocument();
     // Form stays open with the content intact so the teacher doesn't lose it.
     expect(screen.getByDisplayValue('A reflection that will fail to save.')).toBeInTheDocument();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls.some(([, opts]) => opts?.method === 'POST')).toBe(true);
   });
 });

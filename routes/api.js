@@ -406,6 +406,27 @@ function createDeleteReflectionHandler({ deleteReflection }) {
 }
 
 /**
+ * @param {Object} deps
+ * @param {() => Array<{id:string,label:string,description:string,order:number}>} deps.listTopicsOrdered
+ * @returns {(req, res) => void}
+ */
+function createGetQmsTopicsHandler({ listTopicsOrdered }) {
+  /**
+   * GET /api/qms/topics
+   * Read-only. Returns the active QMS topic taxonomy (ADR-013 §3/§4.2)
+   * so the dashboard can render a topic selector without maintaining
+   * its own copy of the list — utils/qmsTopics.js remains the sole
+   * source of truth (see that file's header comment).
+   *
+   * @returns 200 { topics: [{ id, label }] } — ordered ascending by `order`
+   */
+  return function handleGetQmsTopics(req, res) {
+    const topics = listTopicsOrdered().map(({ id, label }) => ({ id, label }));
+    return res.status(200).json({ topics });
+  };
+}
+
+/**
  * Builds the GET /classes/:classId/detail handler (dashboard "Class
  * Detail" / command-center view — PROJECT_STATUS.md's post-branding
  * milestone).
@@ -825,6 +846,7 @@ const { getObservationHistory } = require('../services/observationRepository');
 const { getAssessmentDetail } = require('../services/assessmentDetailService');
 const { generateBlueprintAssessmentPdf } = require('../services/pdfService');
 const { buildPdfUrl } = require('../core/generationPipeline');
+const { listTopicsOrdered } = require('../utils/qmsTopics');
 
 router.get(
   '/learners/:learnerId/intervention-plan',
@@ -895,6 +917,11 @@ router.delete(
   createDeleteReflectionHandler({ deleteReflection })
 );
 
+router.get(
+  '/qms/topics',
+  createGetQmsTopicsHandler({ listTopicsOrdered })
+);
+
 module.exports = router;
 module.exports.__testExports = {
   createGetInterventionPlanHandler,
@@ -912,4 +939,5 @@ module.exports.__testExports = {
   createPostReflectionHandler,
   createPatchReflectionHandler,
   createDeleteReflectionHandler,
+  createGetQmsTopicsHandler,
 };

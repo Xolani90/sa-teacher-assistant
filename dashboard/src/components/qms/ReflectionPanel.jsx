@@ -1,5 +1,5 @@
 // dashboard/src/components/qms/ReflectionPanel.jsx
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useTeacher } from '../../auth/TeacherContext';
 import { ApiError } from '../../api/client';
 import { Card, EmptyState, Pill, SectionHeader, Button } from '../ui';
@@ -35,11 +35,24 @@ export default function ReflectionPanel({ reflections, onChange }) {
   const [error, setError] = useState(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [topics, setTopics] = useState([]);
+  const [topicId, setTopicId] = useState('');
+
+  // Fetched once on mount — small, static taxonomy (ADR-013 §3), safe to
+  // load eagerly rather than gating it behind opening the add form.
+  useEffect(() => {
+    let cancelled = false;
+    authedFetch('/api/qms/topics')
+      .then((data) => { if (!cancelled) setTopics(data.topics || []); })
+      .catch(() => { if (!cancelled) setTopics([]); });
+    return () => { cancelled = true; };
+  }, [authedFetch]);
 
   function startAdd() {
     setMode(MODE_ADDING);
     setEditingId(null);
     setContent('');
+    setTopicId('');
     setError(null);
   }
 
@@ -63,6 +76,10 @@ export default function ReflectionPanel({ reflections, onChange }) {
       setError('Reflection cannot be empty.');
       return;
     }
+    if (mode !== MODE_EDITING && !topicId) {
+      setError('Please select a coaching area.');
+      return;
+    }
 
     setSaving(true);
     setError(null);
@@ -77,7 +94,7 @@ export default function ReflectionPanel({ reflections, onChange }) {
         await authedFetch('/api/reflections', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content: trimmed }),
+          body: JSON.stringify({ content: trimmed, topicId }),
         });
       }
       cancelEditing();
@@ -121,6 +138,10 @@ export default function ReflectionPanel({ reflections, onChange }) {
         <ReflectionForm
           content={content}
           setContent={setContent}
+          topics={topics}
+          topicId={topicId}
+          setTopicId={setTopicId}
+          showTopicSelector
           onSave={handleSave}
           onCancel={cancelEditing}
           saving={saving}
@@ -198,9 +219,32 @@ export default function ReflectionPanel({ reflections, onChange }) {
   );
 }
 
-function ReflectionForm({ content, setContent, onSave, onCancel, saving, error, saveLabel }) {
+function ReflectionForm({ content, setContent, topics = [], topicId, setTopicId, showTopicSelector = false, onSave, onCancel, saving, error, saveLabel }) {
   return (
     <div style={{ marginBottom: 'var(--space-4)', padding: 'var(--space-4)', borderRadius: 'var(--radius-md)', background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+      {showTopicSelector && (
+        <select
+          value={topicId}
+          onChange={(e) => setTopicId(e.target.value)}
+          style={{
+            width: '100%',
+            marginBottom: 'var(--space-3)',
+            padding: 'var(--space-3)',
+            fontSize: 'var(--text-sm)',
+            fontFamily: 'inherit',
+            border: '1px solid var(--color-border-strong)',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--color-surface)',
+            color: 'var(--color-text-primary)',
+            boxSizing: 'border-box',
+          }}
+        >
+          <option value="" disabled>Which coaching area does this relate to?</option>
+          {topics.map((t) => (
+            <option key={t.id} value={t.id}>{t.label}</option>
+          ))}
+        </select>
+      )}
       <textarea
         value={content}
         onChange={(e) => setContent(e.target.value)}
