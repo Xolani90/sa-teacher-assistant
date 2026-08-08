@@ -14,7 +14,7 @@ with recorded evidence, not to an assumption of pass.
 | Git Branch | main |
 | Environment | ☑ Local Dev ☐ Staging ☐ Production |
 | Audit Start Date | 2026-08-06 |
-| Audit Completion Date | (in progress — 5 of 7 workflows done) |
+| Audit Completion Date | (in progress — 6 of 7 workflows done) |
 | Audited By | Xolani Tshabalala |
 
 ## Workflow Results
@@ -25,7 +25,7 @@ with recorded evidence, not to an assumption of pass.
 | W3 Learners | PASS | PASS | Clean | PASS | [WORKFLOW_03_LEARNERS.md](./WORKFLOW_03_LEARNERS.md) |
 | W4 Assessments | PASS | PASS | Clean | PASS | [WORKFLOW_04_ASSESSMENTS.md](./WORKFLOW_04_ASSESSMENTS.md) |
 | W5 Reports & PDF | PASS | PASS | Clean | PASS | [WORKFLOW_05_REPORTS_PDF.md](./WORKFLOW_05_REPORTS_PDF.md) |
-| W6 QMS | | | | | [WORKFLOW_06_QMS.md](./WORKFLOW_06_QMS.md) |
+| W6 QMS | PASS | PASS | Issues found | FAIL | [WORKFLOW_06_QMS.md](./WORKFLOW_06_QMS.md) |
 | W7 Observations | | | | | [WORKFLOW_07_OBSERVATIONS.md](./WORKFLOW_07_OBSERVATIONS.md) |
 
 (Fill each cell with PASS / FAIL, sourced directly from that workflow's
@@ -37,15 +37,16 @@ Aggregate counts, sourced from each workflow's Findings Register.
 | Severity | Count | Resolved | Open / Accepted |
 |---|---|---|---|
 | Critical | 0 | — | — |
-| Major | 1 | — | 1 (W4-F1: `averageFacilityValue`/`averageDiscrimination`/target-group size never wired into `assessmentDetailService.js` — open, tracked under W4, confirmed consistent in W5's PDF output, not duplicated) |
+| Major | 2 | — | 2 (W4-F1: `averageFacilityValue`/`averageDiscrimination`/target-group size never wired into `assessmentDetailService.js` — open, tracked under W4, confirmed consistent in W5's PDF output, not duplicated; W6-F1: dashboard `ReflectionPanel.jsx` create-reflection form never sends `topicId`, every browser-created reflection fails 400 — open, tracked under W6) |
 | Minor | 8 | — | 8 (favicon.ico 404 [W1]; duplicate class names [W2]; React Router future-flag warnings [W2, recurring in W3]; a11y form field missing id/name [W3]; inconsistent learner timestamp formats [W3]; no non-blueprint assessment in seed data blocking 422 PDF path [W4, same gap noted again in W5-05]; PDF signed-URL 2-hour TTL undocumented in checklist [W4]; Chrome native PDF-viewer a11y issue, browser-chrome-level [W5]) |
 
-*(Running totals from W1–W5 — will update as W6–W7 land.)*
+*(Running totals from W1–W6 — will update as W7 lands.)*
 
 ### Open Findings Requiring Disposition
 | ID | Workflow | Severity | Description | Disposition |
 |---|---|---|---|---|
 | W4-F1 | W4 (confirmed consistent in W5) | Major | `averageFacilityValue`, `averageDiscrimination`, and target-group size are computed in `itemAnalysisService.js`/`interventionPlanService.js` but never wired into `assessmentDetailService.js` — fields are absent from `/detail` entirely, not zeroed. W5-02 confirmed the generated PDF is consistent with this (it doesn't print these values either, for the same underlying reason) — not logged as a separate W5 finding. | Open — single outstanding issue, not yet dispositioned as genuine product gap vs. checklist mismatch. Must be resolved or explicitly accepted before RC-1 approval, per Major-finding policy above. |
+| W6-F1 | W6 | Major | Dashboard `ReflectionPanel.jsx` create-reflection form (`handleSave()`, POST branch) sends `{ content }` only, never `topicId`. Per ADR-013 §4.3/§3.3, every new reflection write must carry a valid `topicId` from the closed taxonomy; API-layer validation in `reflectionService.createReflection()` correctly rejects the request with `400 topicId must be a valid QMS topic id, got "undefined"`. Defect is entirely client-side. Scope limited to create — PATCH (edit) is unaffected since `topicId` is optional there. WhatsApp-logged reflections are unaffected. | Open — not yet fixed. Requires product/UX decision (topic selector design) before implementation. Blocks RC-1 approval until fixed and W6-15 retested, or explicitly accepted as a known issue. |
 
 (List any Critical or Major finding that isn't fully "Fixed / Retest
 Passed" — RC-1 cannot be approved with open Critical findings, and open
@@ -73,16 +74,17 @@ only inside individual workflow Findings Registers.
 Critical findings, all Major findings resolved or explicitly accepted
 above.
 
-☐ **RC-1 Not Approved** — see blocking findings below.
+☑ **RC-1 Not Approved** — see blocking findings below.
 
 **Blocking findings (if not approved):**
-- W4-F1 (Major, open) — remains the single outstanding issue across W1–W5. Not yet determined whether it's a genuine product gap or a checklist/expectation mismatch. Does not block continued workflow execution (W6, W7), but must be dispositioned — fixed, retested, or explicitly accepted with reason — before the Release Recommendation section above can be checked.
+- W4-F1 (Major, open) — remains an outstanding issue across W1–W5. Not yet determined whether it's a genuine product gap or a checklist/expectation mismatch. Does not block continued workflow execution (W7 remains), but must be dispositioned — fixed, retested, or explicitly accepted with reason — before the Release Recommendation section above can be checked.
+- W6-F1 (Major, open) — dashboard reflection-creation form omits required `topicId`, causing every create-reflection attempt from the browser UI to fail. Blocks approval until fixed and W6-15 retested, or explicitly accepted as a known issue.
 
 **Recommendation notes:**
-W1–W5 complete and passing. W6–W7 remain. W4-F1 is the only open Major
-finding in the audit so far, confirmed consistent (not duplicated) in
-W5's PDF output. It does not block continued workflow execution but
-must be closed out before final RC-1 approval.
+W1–W6 complete; W6 FAILed due to one Major finding (W6-F1), otherwise
+clean. W7 remains. Two open Major findings (W4-F1, W6-F1) must be
+closed out — fixed, retested, or explicitly accepted with stated
+reason — before final RC-1 approval.
 
 ## Sign-off
 - Approved By: __________
