@@ -22,6 +22,8 @@
 
 const { getDb } = require('../utils/database');
 const { getBlueprintAssessmentAnalytics } = require('./blueprintAnalytics');
+const { performItemAnalysis } = require('./itemAnalysisService');
+const { computeInterventionPlan } = require('./interventionPlanService');
 
 /**
  * @param {string} phoneHash
@@ -93,6 +95,64 @@ function getAssessmentDetail(phoneHash, assessmentId) {
       'This assessment was created without a Blueprint, so topic-level analytics are unavailable.';
   }
 
+  // W4-F1 remediation: averageFacilityValue, averageDiscrimination, and
+  // targetGroupSize are NOT recomputed here — they are composed from the
+  // existing authoritative services (itemAnalysisService, interventionPlanService),
+  // the same functions diagnosticWorkflowService.js already calls at
+  // assessment intake. Both are deterministic, DB-only (no AI/network),
+  // read-only calls scoped to this assessmentId — see docs/testing/
+  // WORKFLOW_04_ASSESSMENTS.md's W4-F1 investigation for the trace.
+  //
+  // itemAnalysis: averageFacilityValue/averageDiscrimination already
+  // correctly handle blueprint-backed vs free-form question_data shapes
+  // (performItemAnalysis's own isBlueprintBacked branch) and were already
+  // confirmed non-zero/correct via the closed NR investigation referenced
+  // above. A free-form assessment with only total marks (no per-question
+  // breakdown) is a valid, documented input shape that produces no
+  // analysisResults — performItemAnalysis returns { error } in that case,
+  // which is surfaced here as itemAnalysis.available=false with a reason,
+  // not a misleading zero.
+  //
+  // The <10-learner case is NOT special-cased here: performItemAnalysis
+  // already returns discriminationIndex=0 by design for small classes
+  // (calculateDiscriminationIndex, "not enough data" — confirmed correct
+  // behavior in docs/project/PROJECT_STATUS.md, not a bug to work around).
+  // averageDiscrimination will reflect that as-is. What IS surfaced here
+  // is insufficientDataQuestionCount, derived from the same per-question
+  // itemQuality flag performItemAnalysis already computes, so a consumer
+  // can tell "discrimination reads low because of real class size" apart
+  // from "discrimination reads low because something's broken" — the
+  // exact ambiguity W4-F1's stop condition was written to catch.
+  let itemAnalysis = { available: false, reason: null, averageFacilityValue: null, averageDiscrimination: null, insufficientDataQuestionCount: null };
+  const itemAnalysisResult = performItemAnalysis(assessmentId);
+  if (itemAnalysisResult.error) {
+    itemAnalysis.reason = itemAnalysisResult.error;
+  } else {
+    itemAnalysis = {
+      available: true,
+      reason: null,
+      averageFacilityValue: itemAnalysisResult.averageFacilityValue,
+      averageDiscrimination: itemAnalysisResult.averageDiscrimination,
+      insufficientDataQuestionCount: itemAnalysisResult.questions.filter(
+        (q) => q.itemQuality === 'insufficient_data'
+      ).length,
+    };
+  }
+
+  // targetGroupSize: sum of interventionPlan.targetGroups[].count (Groups
+  // C + D — the intervention target population), NOT total learnerCount.
+  // This is the project's own established definition, settled by the
+  // formally resolved RC1-H-002 defect (docs/releases/RC1-MILESTONE.md)
+  // and independently confirmed in docs/testing/INVESTIGATION_LOG.md —
+  // not an inference made here. computeInterventionPlan() is the
+  // non-persisting read variant (see its own doc comment), so this adds
+  // no new database writes.
+  let targetGroupSize = null;
+  const interventionPlanResult = computeInterventionPlan(phoneHash, assessmentId);
+  if (!interventionPlanResult.error && Array.isArray(interventionPlanResult.targetGroups)) {
+    targetGroupSize = interventionPlanResult.targetGroups.reduce((sum, g) => sum + g.count, 0);
+  }
+
   return {
     assessment: {
       id: assessment.id,
@@ -115,6 +175,10 @@ function getAssessmentDetail(phoneHash, assessmentId) {
     },
     learners,
     analytics,
+    itemAnalysis,
+    interventionSummary: {
+      targetGroupSize,
+    },
   };
 }
 

@@ -37,15 +37,14 @@ Aggregate counts, sourced from each workflow's Findings Register.
 | Severity | Count | Resolved | Open / Accepted |
 |---|---|---|---|
 | Critical | 0 | — | — |
-| Major | 2 | 1 | 1 open (W4-F1: `averageFacilityValue`/`averageDiscrimination`/target-group size never wired into `assessmentDetailService.js` — open, tracked under W4, confirmed consistent in W5's PDF output, not duplicated). 1 resolved (W6-F1: dashboard `ReflectionPanel.jsx` create-reflection form omitted `topicId` — remediated in commit `f4edfa2`, verified via automated tests, HTTP/DB integration, and final browser retest; see W6 Resolved Findings) |
+| Major | 2 | 2 | 0 open — both resolved. W4-F1: `averageFacilityValue`/`averageDiscrimination`/target-group size never wired into `assessmentDetailService.js` — fixed and verified, see W4 Resolved Findings. W6-F1: dashboard `ReflectionPanel.jsx` create-reflection form omitted `topicId` — remediated in commit `f4edfa2`, verified via automated tests, HTTP/DB integration, and final browser retest; see W6 Resolved Findings. |
 | Minor | 8 | — | 8 (favicon.ico 404 [W1]; duplicate class names [W2]; React Router future-flag warnings [W2, recurring in W3]; a11y form field missing id/name [W3]; inconsistent learner timestamp formats [W3]; no non-blueprint assessment in seed data blocking 422 PDF path [W4, same gap noted again in W5-05]; PDF signed-URL 2-hour TTL undocumented in checklist [W4]; Chrome native PDF-viewer a11y issue, browser-chrome-level [W5]) |
 
-*(Running totals from W1–W6 — will update as W7 lands.)*
+*(Running totals from W1–W7, all workflows executed.)*
 
 ### Open Findings Requiring Disposition
-| ID | Workflow | Severity | Description | Disposition |
-|---|---|---|---|---|
-| W4-F1 | W4 (confirmed consistent in W5) | Major | `averageFacilityValue`, `averageDiscrimination`, and target-group size are computed in `itemAnalysisService.js`/`interventionPlanService.js` but never wired into `assessmentDetailService.js` — fields are absent from `/detail` entirely, not zeroed. W5-02 confirmed the generated PDF is consistent with this (it doesn't print these values either, for the same underlying reason) — not logged as a separate W5 finding. | Open — single outstanding issue, not yet dispositioned as genuine product gap vs. checklist mismatch. Must be resolved or explicitly accepted before RC-1 approval, per Major-finding policy above. |
+None currently open — all Critical and Major findings are either
+Resolved (below) or there were none raised.
 
 (List any Critical or Major finding that isn't fully "Fixed / Retest
 Passed" — RC-1 cannot be approved with open Critical findings, and open
@@ -59,6 +58,7 @@ Findings that have been fixed and verified, but were not merely
 | ID | Workflow | Severity | Status | Description | Resolution Evidence |
 |---|---|---|---|---|---|
 | W6-F1 | W6 | Major | Resolved | Dashboard `ReflectionPanel.jsx` create-reflection form (`handleSave()`, POST branch) originally sent `{ content }` only, never `topicId`, causing every browser-created reflection to fail 400 against API-layer validation (working as designed per ADR-013 §4.3/§3.3). | Remediated in commit `f4edfa2` (topic selector added, wired to new `GET /api/qms/topics` route, `topicId` now included in POST body). Repository hygiene follow-up in `542403e` (unrelated scratch files removed, W6-F1 implementation files unaffected). Verified via automated tests (targeted backend + frontend suites, all passing), HTTP/DB integration (curl-level persistence confirmed), and final browser retest (W6-15, all steps PASS, including PATCH leaving `topicId` unchanged). The "Unscoped" list-pill display noticed during retest was traced and classified as a pre-existing, unrelated UI gap (driven by `r.term`, not `topicId`) — not a W6-F1 regression. |
+| W4-F1 | W4 | Major | Resolved | `averageFacilityValue`, `averageDiscrimination`, and target-group size are computed in `itemAnalysisService.js`/`interventionPlanService.js` but were never wired into `assessmentDetailService.js` — fields were absent from `/detail` entirely, not zeroed. | `assessmentDetailService.js` now composes both pre-existing services into `/detail` as `itemAnalysis{...}`/`interventionSummary{targetGroupSize}`, no new computation logic added. Alongside it, `computeInterventionPlan()` now distinguishes a legitimate zero-target-group class (`targetGroupSize:0`) from zero learner_results (`targetGroupSize:null`) — previously indistinguishable. Verified via `tests/w4-f1-assessment-detail-integration.test.js`, real HTTP/DB integration, Scenarios A–E, 36/36 passing; full existing suite (blueprint-analytics, intervention-reports, migration-030, phase-c2-diagnostic-atomicity, tseEvidenceHooks, blueprint-pdf-report) confirmed unaffected. See W4 Resolved Findings for full detail. |
 
 ## Known Accepted Issues
 Issues knowingly shipped in RC-1 (e.g. Minor findings not worth

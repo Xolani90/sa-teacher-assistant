@@ -40,6 +40,10 @@ function computeInterventionPlan(phoneHash, assessmentId, options = {}) {
   // Get learner grouping
   const grouping = groupLearners(assessmentId);
 
+  if (grouping.error) {
+    return { error: grouping.error };
+  }
+
   // Get error analysis
   const errorAnalysis = performErrorAnalysis(assessmentId, assessment.subject);
 

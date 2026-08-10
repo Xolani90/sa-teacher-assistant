@@ -19,7 +19,7 @@ per `docs/testing/RC_TEMPLATE.md`.
 ## Implementation Coverage
 - `GET /api/assessments/:assessmentId/detail` — aggregated Assessment Detail via `assessmentDetailService.getAssessmentDetail`, the evidence view behind a class/learner's overall percentage.
 - `GET /api/assessments/:assessmentId/pdf` — on-demand Blueprint Assessment PDF generation (`pdfService.generateBlueprintAssessmentPdf`), returns a signed download URL via `core/generationPipeline.buildPdfUrl`, not raw file bytes. Ownership is re-checked here (via `getAssessmentDetail`) before generation, independent of any check inside the PDF generator itself.
-- Active bug context: intervention report values (`averageFacilityValue`, `averageDiscrimination`, `Target group size`) were previously suspected zeroed due to a `question_data` field-name mismatch. **Investigated and marked Not Reproducible on build `670c37b`** — see `docs/testing/INVESTIGATION_LOG.md`. During W4 execution, a **distinct** defect was confirmed: these fields are computed in `itemAnalysisService.js`/`interventionPlanService.js` but never wired into `assessmentDetailService.js` — the checklist expects them on `/detail`, and code confirms they are absent there entirely. This is an endpoint-exposure gap, not a value-correctness issue, and is separate from the closed NR investigation. Carried forward to W5.
+- Active bug context: intervention report values (`averageFacilityValue`, `averageDiscrimination`, `Target group size`) were previously suspected zeroed due to a `question_data` field-name mismatch. **Investigated and marked Not Reproducible on build `670c37b`** — see `docs/testing/INVESTIGATION_LOG.md`. During W4 execution, a **distinct** defect was confirmed: these fields are computed in `itemAnalysisService.js`/`interventionPlanService.js` but never wired into `assessmentDetailService.js`. **Remediated** — `assessmentDetailService.js` now composes both fields into `/detail` as `itemAnalysis{...}` and `interventionSummary{targetGroupSize}`; see W4-F1 disposition below.
 
 ## Preconditions
 - Logged-in teacher session (Workflow 1 passed).
@@ -67,9 +67,9 @@ per `docs/testing/RC_TEMPLATE.md`.
 | W4-01 | 4.1 | Click into an assessment → GET /api/assessments/:assessmentId/detail | 200, full aggregated payload | status: 200, full payload returned for assessmentId=6 | ☒ |
 | W4-02 | 4.2 | Invalid assessmentId (0, -1, "abc") → GET .../detail | 400, `assessmentId must be a positive integer.` | status: 400, message matched exactly | ☒ |
 | W4-03 | 4.3 | Nonexistent assessmentId → GET .../detail | 404, `Assessment not found.` | status: 404, message matched exactly | ☒ |
-| W4-04 | 4.4 | Inspect `averageFacilityValue` on detail payload against known captured data | Matches expected non-zero value | expected: present on payload · actual: field absent from `/detail` response entirely — computed elsewhere, never wired in | ☐ |
-| W4-05 | 4.5 | Inspect `averageDiscrimination` on detail payload | Matches expected non-zero value | expected: present on payload · actual: field absent from `/detail` response entirely | ☐ |
-| W4-06 | 4.6 | Inspect `Target group size` on detail payload | Matches actual learner count, not zero | expected: present on payload · actual: field absent from `/detail` response entirely | ☐ |
+| W4-04 | 4.4 | Inspect `averageFacilityValue` on detail payload against known captured data | Matches expected non-zero value | status: present at `itemAnalysis.averageFacilityValue`, verified via `tests/w4-f1-assessment-detail-integration.test.js` Scenario A against an independently-recomputed `performItemAnalysis()` call | ☒ |
+| W4-05 | 4.5 | Inspect `averageDiscrimination` on detail payload | Matches expected non-zero value | status: present at `itemAnalysis.averageDiscrimination`, verified via Scenario A (≥10 learners, real discrimination) and Scenario B (<10 learners, correctly 0 by design, distinguished via `insufficientDataQuestionCount`) | ☒ |
+| W4-06 | 4.6 | Inspect `Target group size` on detail payload | Matches actual learner count, not zero | status: present at `interventionSummary.targetGroupSize`, verified via Scenario A (non-zero, real spread), Scenario D (legitimate `0`, typeof number), and Scenario E (zero-learner case now `null`, distinguishable from D's `0`) | ☒ |
 | W4-07 | 4.7 | Trigger PDF for a blueprint-backed assessment → GET .../pdf | 200, `{ url, filename }` | status: 200 · url present: Y | ☒ |
 | W4-08 | 4.8 | Open the returned `url` | PDF downloads/opens, content matches assessment | Behavior: confirmed — PDF opened with correct topic breakdown, learner summary, and per-topic detail appendix matching assessmentId=6 | ☒ |
 | W4-09 | 4.9 | Trigger PDF for a non-blueprint-backed assessment | 422, "not created from a Blueprint" error | status: Blocked/Not Executable — no non-blueprint assessment present in current seed data (confirmed via query: `SELECT ... WHERE blueprint_id IS NULL` returned empty). Test-data gap, not a defect. Not preemptively seeded per plan — revisit if W5+ surfaces a real need. | N/A |
@@ -96,16 +96,21 @@ per `docs/testing/RC_TEMPLATE.md`.
 ## Findings Register
 | ID | Severity | Step | Description | Evidence | Disposition |
 |---|---|---|---|---|---|
-| W4-F1 | Major | 4.4/4.5/4.6 | `averageFacilityValue`, `averageDiscrimination`, and target-group size are computed in `itemAnalysisService.js`/`interventionPlanService.js` but never wired into `assessmentDetailService.js` — the fields are simply absent from `/detail`, not zeroed. Distinct from the closed NR investigation (that was about value correctness once present; this is endpoint exposure). | assessmentId=6 `/detail` response inspected, fields confirmed absent | Carried forward to W5 |
+| W4-F1 | Major | 4.4/4.5/4.6 | `averageFacilityValue`, `averageDiscrimination`, and target-group size are computed in `itemAnalysisService.js`/`interventionPlanService.js` but never wired into `assessmentDetailService.js` — the fields are simply absent from `/detail`, not zeroed. Distinct from the closed NR investigation (that was about value correctness once present; this is endpoint exposure). | assessmentId=6 `/detail` response inspected, fields confirmed absent | **Resolved** — see Resolved Findings below |
 | W4-F2 | Minor | 4.9 | No non-blueprint assessment exists in current seed data, so the 422 path cannot be executed. Confirms known limitation RC1-H-001 (no production path for teachers to create blueprints in WhatsApp; dev seed script is the only entry point) — this is a consequence of that gap, not a new defect. | `SELECT id, title, phone_hash, blueprint_id FROM assessments WHERE blueprint_id IS NULL` → `[]` | Not seeded preemptively; revisit if W5+ needs it |
 | W4-F3 | Minor | 4.7/4.8 | Checklist doesn't document the PDF signed-URL's 2-hour TTL as expected behavior. A tester who steps away between W4-07 and W4-08 could misread a legitimate expiry (`"PDF not found or expired."`, 404) as a defect. | Confirmed by design: `cleanupOldPdfs()` / `TWO_HOURS` in `core/generationPipeline.js`; reproduced once during this session before being correctly diagnosed as non-defect | One-line addition to checklist's Environment Notes (done above); doesn't block sign-off |
+
+### Resolved Findings
+| ID | Status | Description | Resolution Evidence |
+|---|---|---|---|
+| W4-F1 | Resolved | `averageFacilityValue`, `averageDiscrimination`, and target-group size never wired into `assessmentDetailService.js`. | `assessmentDetailService.js` now composes `performItemAnalysis()`/`computeInterventionPlan()` (both pre-existing, unchanged services — no new computation logic) into `/detail` as `itemAnalysis{available,reason,averageFacilityValue,averageDiscrimination,insufficientDataQuestionCount}` and `interventionSummary{targetGroupSize}`. Fixed alongside it: `computeInterventionPlan()` previously masked the zero-learner-results case as a legitimate empty plan (`targetGroupSize: 0`), indistinguishable from a real class with no Group C/D learners; it now propagates `groupLearners()`'s error, surfacing as `targetGroupSize: null`. Verified via real HTTP/DB integration (`tests/w4-f1-assessment-detail-integration.test.js`, 36/36 passing): Scenario A (12 real learners, non-zero discrimination + target group, cross-checked against independently-invoked `performItemAnalysis()`/`computeInterventionPlan()`), Scenario B (4 learners, `insufficientDataQuestionCount` correctly explains the by-design 0), Scenario C (free-form/no per-question data → `available:false` with a reason, not a misleading 0), Scenario D (real learners, legitimate `targetGroupSize:0`, typeof number), Scenario E (zero learner_results → `targetGroupSize:null`, asserted `!==` Scenario D's `0`). Full existing suite (blueprint-analytics, intervention-reports incl. the zero-learner `generateParentSummary` case, migration-030, phase-c2-diagnostic-atomicity, tseEvidenceHooks, blueprint-pdf-report) confirmed unaffected — 0 regressions. |
 
 ## Workflow Result
 - Functional: ☒ Pass ☐ Fail
 - Security: ☒ Pass ☐ Fail
 - Console: ☒ Clean ☐ Issues found
 - Critical findings: 0
-- Major findings: 1 (W4-F1, carried to W5)
+- Major findings: 1 (W4-F1) — Resolved
 - Minor findings: 2 (W4-F2, W4-F3)
 - Retests required: 0
 - Execution time: ___ minutes
@@ -113,11 +118,10 @@ per `docs/testing/RC_TEMPLATE.md`.
 - Reason (if FAIL): N/A
 
 ## Carry Forward
-WF5 (Reports & PDF) prerequisites: the W4-F1 finding (averageFacilityValue/
-averageDiscrimination/target-group size missing from `/detail`) may also
-affect Workflow 5's report content if those reports draw on the same
-underlying service layer — verify during W5 whether the gap is isolated
-to `assessmentDetailService.js` or also affects report generation paths.
+W4-F1 is resolved as of this update (see Resolved Findings above). No
+further carry-forward action required; W5's earlier confirmation that
+its PDF output was consistent with the pre-fix `/detail` gap (not a
+separate defect) stands as historical context only.
 
 ## Sign-off
 - Workflow Executed By: Xolani
