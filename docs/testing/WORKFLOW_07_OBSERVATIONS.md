@@ -121,9 +121,8 @@ behavior for that input, so there is no criterion for it to violate.
 ## Carry Forward
 This is the last workflow in RC-1's sequence. W7 has passed all required
 functional, security, and console checks. RC-1's overall Release
-Recommendation is not updated by this document — W4-F1 remains OPEN
-(Major) in `RC1_SIGNOFF.md`, and per that document's governance rule,
-RC-1 cannot move to Approved while any Major finding is open.
+Recommendation is tracked in `RC1_SIGNOFF.md`, not this document — see
+that file for the authoritative, current status.
 
 ## Sign-off
 - Workflow Executed By: Xolani Tshabalala (+ Claude, evidence assembly)

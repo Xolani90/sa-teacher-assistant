@@ -1,17 +1,32 @@
 # Project Status
 
-**Last updated:** 2026-08-06
-**Repository:** main @ `1ef2a1a` (docs/project layer, current HEAD as of
-this update — check `git log -1` at the start of every session and correct
-this line before doing anything else if it's stale)
-**Current milestone:** Phase B — Browser Verification (Phase A evidence
-audit complete)
+**Last updated:** 2026-08-10 (post-RC1 reconciliation)
+**Repository:** main @ `784d3e8` (RC-1 approved — see
+`docs/testing/RC1_SIGNOFF.md`, the authoritative release record; check
+`git log -1` at the start of every session and correct this line if stale)
+**Current milestone:** RC-1 COMPLETE. Post-RC1 product phase not yet
+started — see `PROJECT_ROADMAP.md` for the proposed sequence.
 **Active task:** see `ACTIVE_WORK.md`
 **Remaining blockers:** none currently
-**Next action:** see `ACTIVE_WORK.md` → "Remaining — Phase B checklist"
-**Backend tests:** not run this session (counted, not executed — see below)
-**Frontend build:** not run this session
-**Browser verified this session:** none (see `VERIFIED.md`)
+**Next action:** see `ACTIVE_WORK.md`
+**Backend tests:** RC-1 test suites passing as of `784d3e8` (see
+`docs/testing/RC1_SIGNOFF.md` for full evidence)
+**Frontend build:** not tracked here — see `RELEASE_CHECKLIST.md`
+**Browser verified this session:** RC-1's seven workflows were each
+independently browser/HTTP verified — see individual
+`docs/testing/WORKFLOW_0*.md` files, not `VERIFIED.md` (RC-1 uses its own
+evidence format, separate from the pre-RC1 Phase B verification below)
+
+---
+
+**Everything below this line is the pre-RC1 (2026-08-06) snapshot,
+preserved as historical record.** It predates RC-1 and its Feature
+Completion Matrix / known-bugs list have since been superseded:
+Item Analysis and the intervention-plan `targetGroupSize`/`problemAreas`
+issues referenced below were investigated, fixed, and verified during
+RC-1 (see W4-F1 in `docs/testing/RC1_SIGNOFF.md`). Do not treat the
+matrix below as current — it is kept for context, not as a live status
+board.
 
 This file is a snapshot, not history. Update the header block above every
 session. If you open this file and the header is more than a few days old,
@@ -65,8 +80,8 @@ the result here — don't edit this table standalone.
 | QMS Workspace | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Class Analytics | ✅ | ❌ no consumer wired | ✅ | n/a | ⏳ (product decision needed) |
 | Class Intervention | ✅ | ❌ no consumer wired | ✅ | n/a | ⏳ (product decision needed) |
-| Item Analysis | ✅ (facility value confirmed correct 2026-08-06; discrimination=0 is by-design for <10 learners, not a bug) | ❓ | ❓ | ❌ | ❌ pending: separate "Target group size" investigation |
-| Intervention Plan (AI) | ✅ (buggy — miscounts groups) | n/a | ❓ | ❌ | ❌ blocked on bug fix |
+| Item Analysis | ✅ | ❓ (unchanged since this snapshot) | ✅ (RC-1 W4-F1) | ❌ (unchanged since this snapshot — not part of RC-1 scope) | ✅ **RESOLVED in RC-1** — `averageFacilityValue`/`averageDiscrimination`/target-group size wired into `/detail`, 36/36 tests passing, see W4-F1 in `docs/testing/RC1_SIGNOFF.md`. The "Target group size" investigation referenced below is closed. |
+| Intervention Plan (AI) | ❓ (RC-1 did not investigate the AI-generated group-count claim below — status unchanged from this snapshot) | n/a | ❓ | ❌ | ❓ **Not addressed by RC-1** — RC-1's W4-F1 fixed the *deterministic* `computeInterventionPlan()` exposure gap, not the separate AI-prompt group-count claim described below, which remains "not reproduced" per `ACTIVE_WORK.md`'s history. |
 
 Legend: ✅ confirmed · ⏳ pending/not yet done · ❌ confirmed missing or
 broken · ❓ genuinely unknown, not yet checked · n/a not applicable

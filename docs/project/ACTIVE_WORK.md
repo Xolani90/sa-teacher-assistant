@@ -8,7 +8,29 @@ Update this file whenever the active task changes — not just at session end.
 
 ---
 
-## Current Priority
+## Current Priority — POST-RC1 (updated 2026-08-10)
+
+**RC-1 is complete and approved** (`docs/testing/RC1_SIGNOFF.md`, commit
+`784d3e8`). All seven RC-1 workflows (W1–W7) individually passed; both
+Major findings raised during the audit (W4-F1, W6-F1) are Resolved with
+verified evidence. Phase B browser verification (below, 2026-08-06) and
+the "Target group size"/W4-F1 work are now historical — folded into and
+superseded by RC-1, not a separate active track.
+
+**Active priority right now:** documentation/repository reconciliation
+following RC-1 (see `docs/testing/WORKFLOW_07_OBSERVATIONS.md`,
+`.gitignore`, and this file's own refresh). Once that's approved, the
+next phase is a frontend verification pass (Reflection editing, Class
+Analytics, Class Intervention — both confirmed implemented in code but
+not yet logged as browser-verified), followed by Reporting Centre design.
+See `PROJECT_ROADMAP.md` for the full sequence. **Do not treat anything
+below this point as a current task list** — it's preserved history.
+
+---
+
+**Everything below was current as of 2026-08-06, pre-RC1.** Preserved
+verbatim for defect-history continuity; do not re-open or re-litigate
+anything already closed here without new evidence.
 
 **Phase B — Browser Verification: complete** (2026-08-06)
 

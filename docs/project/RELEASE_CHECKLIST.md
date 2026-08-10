@@ -84,20 +84,26 @@ QMS Workspace
   [x] Tests          (qmsFlow, qmsAnalyticsService, qmsTopics*, qmsCoachingWorkflow)
   [x] Browser        — verified 2026-08-06, see VERIFIED.md
 
-Item Analysis
-  [x] Backend         — facility value confirmed correct against real data
-                        2026-08-06 (scripts/debugItemAnalysis.js);
-                        discrimination=0 is by-design for <10 learners.
-                        Original field-mismatch hypothesis disproven —
-                        see PROJECT_DECISIONS.md. "Target group size" is
-                        being tracked as a separate, unverified issue in
-                        the intervention-reporting pipeline.
-  [ ] Tests           — no regression test yet for the confirmed-correct
-                        behavior; add one before calling this fully done
-  [ ] Browser
+Item Analysis (deterministic — averageFacilityValue/averageDiscrimination/
+target group size exposure on Assessment Detail)
+  [x] Backend         — RC-1 W4-F1: exposure gap fixed and verified via
+                        real HTTP/DB integration (36/36 tests passing,
+                        Scenarios A-E). See docs/testing/RC1_SIGNOFF.md.
+  [x] Tests           — tests/w4-f1-assessment-detail-integration.test.js
+  [ ] Browser         — not yet logged in VERIFIED.md as its own
+                        browser-verification entry (Assessment Detail's
+                        overall page was verified 2026-08-06, before this
+                        fix; a fresh pass confirming itemAnalysis/
+                        interventionSummary render correctly would close
+                        this box with real evidence rather than inference)
 
-Intervention Plan (AI-generated)
-  [ ] Backend         — ❌ known bug, do not attempt to verify until fixed
+Intervention Plan (AI-generated — fullInterventionPlan.js prompt group-
+count claim, distinct from the deterministic computeInterventionPlan()
+above)
+  [ ] Backend         — status unchanged: "not reproduced" per
+                        docs/project/ACTIVE_WORK.md history. RC-1 did not
+                        investigate this specific claim; do not mark
+                        resolved without new evidence.
   [ ] Browser
 
 Frontend test coverage

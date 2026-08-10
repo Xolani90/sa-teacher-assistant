@@ -27,4 +27,5 @@ mintTeacherAToken.js
 mintty.*.png
 seedSecondTeacherForOwnershipTest.js
 seedTeacherBAssessment.js
+seedTestObservationCorrectionPair.js
 test-output*.txt
