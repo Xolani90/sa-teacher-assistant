@@ -237,47 +237,6 @@ table.
     — the code path (`authenticatedFetch`) does not silently retry on
     401, so a real 401 on the actual create request would visibly break
     the flow (inline error, forced logout), which did not happen.
-  - Console otherwise consistent with the two already-accepted findings
-    (favicon 404 [W1-F1], React Router v7 future-flag warnings [W2-F2])
-- **Result:** PASS, with one open non-blocking finding (intermittent
-  401 above) logged for follow-up.
-- **Verified by:** manual browser test + Network tab confirmation, this
-  session
-
-### Reflection editing (QMS Workspace — ReflectionPanel create/edit/delete)
-
-- **Verified:** 2026-08-10
-- **Environment:** local development (backend `localhost:3000`, dashboard
-  `localhost:5173`), QMS Readiness page (`/qms`)
-- **Evidence:**
-  - ✓ **Create:** `+ Add Reflection` → filled coaching-area dropdown and
-    content → `POST /api/reflections` → new reflection appeared in the
-    list with correct content and date
-  - ✓ **Edit:** clicked `Edit` on a reflection, changed content, `Save
-    Changes` → `PATCH /api/reflections/:id` response confirmed in
-    Network tab: correct `id`, updated `content`, unchanged `topicId`,
-    `updatedAt` advanced past `createdAt`, `deletedAt: null` — matches
-    `ReflectionPanel.jsx`'s PATCH body field-for-field
-  - ✓ **Empty-content validation:** cleared the textarea while editing
-    and attempted to save — client-side blocked it with "Reflection
-    cannot be empty.", no PATCH request fired
-  - ✓ **Delete:** clicked `Delete` → `Confirm` → reflection removed from
-    the list after refresh; confirmed via before/after list state, not
-    just the confirmation UI
-  - ⚠️ **Open finding (non-blocking):** a `POST /api/reflections 401
-    (Unauthorized)` appeared in the console during two earlier create
-    attempts in this same session (stack traced to
-    `ReflectionPanel.jsx:94` → `TeacherContext.jsx:43` → `client.js:79`),
-    despite the create visibly succeeding with no inline error and no
-    forced logout each time. Re-tested with Network log cleared and a
-    single isolated click: request came back `200`, no 401, 5 requests
-    total, none failed. Same tab/session throughout — token/session
-    expiry ruled out as the cause. Root cause not identified; not
-    reproduced under clean single-click conditions. Logging this as a
-    known intermittent issue for follow-up investigation, not a blocker
-    — the code path (`authenticatedFetch`) does not silently retry on
-    401, so a real 401 on the actual create request would visibly break
-    the flow (inline error, forced logout), which did not happen.
     - **Investigation (same session, static trace, no code changed):**
       - `ReflectionPanel.jsx` create/edit both go through the same
         `authedFetch` → `authenticatedFetch` path used by every other
