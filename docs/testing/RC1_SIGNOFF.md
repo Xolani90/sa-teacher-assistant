@@ -77,20 +77,32 @@ only inside individual workflow Findings Registers.
 | W5-F1 | W5 | Minor | Chrome's native PDF viewer (PDF.js) reports one accessibility issue — "A form field element should have an id or name attribute" — in its own viewer chrome, not in the generated PDF content or app code | Browser-chrome-level, not app-level; same category as W3-F1 |
 
 ## Release Recommendation
-☐ **RC-1 Approved for Production** — all workflows PASS, zero open
+☑ **RC-1 Approved for Production** — all workflows PASS, zero open
 Critical findings, all Major findings resolved or explicitly accepted
 above.
 
-☑ **RC-1 Not Approved** — see blocking findings below.
+☐ **RC-1 Not Approved** — see blocking findings below.
 
-**Blocking findings (if not approved):**
-- W4-F1 (Major, open) — remains an outstanding issue across W1–W5. Not yet determined whether it's a genuine product gap or a checklist/expectation mismatch. Does not block continued workflow execution (W7 remains), but must be dispositioned — fixed, retested, or explicitly accepted with reason — before the Release Recommendation section above can be checked.
+**Blocking findings (if not approved):** None.
 
 **Recommendation notes:**
-W1–W6 executed; W6 passed after W6-F1 remediation. W7 remains. One
-open Major finding (W4-F1) must still be closed out — fixed, retested,
-or explicitly accepted with stated reason — before final RC-1
-approval.
+All seven workflows (W1–W7) executed and independently signed off as
+PASS against the same git commit. Both Major findings raised during
+the audit are Resolved, not merely accepted:
+- W4-F1 (`averageFacilityValue`/`averageDiscrimination`/target-group
+  size never wired into `assessmentDetailService.js`) — fixed and
+  verified via real HTTP/DB integration testing (36/36 passing); see
+  W4 Resolved Findings.
+- W6-F1 (dashboard create-reflection form omitted `topicId`) —
+  remediated and verified via automated, HTTP/DB, and browser
+  evidence; see W6 Resolved Findings.
+
+Zero open Critical or Major findings remain. A final read-only
+integrity audit of the working tree, commit history, and cross-workflow
+documentation consistency found no technical or documentation blockers.
+Approval follows resolution of the identified Major findings and
+successful verification of all seven required workflows, not from
+their mere absence of re-litigation.
 
 ## Sign-off
 - Approved By: __________
