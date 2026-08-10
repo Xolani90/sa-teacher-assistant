@@ -170,6 +170,39 @@ table.
 - **Verified by:** manual browser test + live API response review, this
   session
 
+### Class Analytics / Class Intervention (Class Detail snapshot section)
+
+- **Verified:** 2026-08-10
+- **Environment:** local development (backend `localhost:3000`, dashboard
+  `localhost:5173`)
+- **Class used:** Grade 6B Mathematics, classId=4
+  (`/classes/4`)
+- **Evidence:**
+  - ✓ `GET /api/classes/4/snapshot` returned 200 OK (confirmed in Network
+    tab, not inferred from UI)
+  - ✓ ANALYTICS card rendered real, non-placeholder data: 50% Avg mastery,
+    — Avg coverage (expected null — Grade 6 has no CAPS_TOPICS coverage
+    data, a known pre-existing gap, not a defect), 62% Avg progress
+  - ✓ INTERVENTION card rendered 2 high / 3 medium / 0 low, independently
+    cross-checked against the page's own "Intervention priorities" list
+    further down (Aisha Petersen/Emma Botha = High; Bongani Zulu/Chloe
+    van der Merwe/Dumisani Ngcobo = Medium) — snapshot summary and detail
+    list agree, confirming the card reflects real computed data rather
+    than a static/independent number
+  - ✓ QMS card correctly showed "Not available" rather than fabricated
+    data — honest degradation, consistent with the class-level QMS scope
+    gap already known
+  - Console inspected: only the two already-accepted findings present
+    (favicon.ico 404 [W1-F1], React Router v7 future-flag warnings
+    [W2-F2]). No errors traceable to `ClassSnapshotSection.jsx`,
+    `AnalyticsSnapshotCard`, or `InterventionSnapshotCard`
+- **Result:** PASS. No new findings. This also resolves the
+  `PROJECT_ROADMAP.md` vs `docs/PROJECT-STATUS.md` discrepancy identified
+  during Phase 1 doc reconciliation — the UI consumer was already wired
+  and working, not missing.
+- **Verified by:** manual browser test + Network tab confirmation, this
+  session
+
 ## Rule going forward
 
 A row only moves to browser ✅ after an actual session, with a full entry

@@ -37,16 +37,20 @@ Class Snapshot
                         discrepancy resolved, see PROJECT_DECISIONS.md
 
 Class Analytics
-  [ ] Frontend consumer located
+  [x] Frontend consumer located — ClassSnapshotSection.jsx on Class
+                        Detail (/classes/:classId), confirmed via
+                        browser verification 2026-08-10, see VERIFIED.md
   [x] Backend
   [x] Tests         (classAnalyticsService.test.js)
-  [ ] Browser
+  [x] Browser        — verified 2026-08-10, see VERIFIED.md
 
 Class Intervention
-  [ ] Frontend consumer located
+  [x] Frontend consumer located — ClassSnapshotSection.jsx on Class
+                        Detail (/classes/:classId), confirmed via
+                        browser verification 2026-08-10, see VERIFIED.md
   [x] Backend
   [x] Tests         (classInterventionService.test.js, class-intervention-pdf.test.js)
-  [ ] Browser
+  [x] Browser        — verified 2026-08-10, see VERIFIED.md
 
 Learner Detail
   [x] API wired
