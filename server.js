@@ -393,6 +393,31 @@ app.use('/api/auth', authRouter.authLimiter, authRouter);
 // utils/teacherAuth.js and docs/adr/ADR-008 for the authentication design.
 app.use('/api', apiLimiter, requireTeacherAuth, apiRouter);
 
+// ── Dashboard (React SPA) ───────────────────────────────────────────────────
+// Serves the built dashboard from dashboard/dist, separate from public/ (which
+// exists solely for the WhatsApp-required /privacy page above and must not be
+// touched). The catch-all below hands any remaining GET request to the SPA's
+// index.html so React Router can handle client-side routes like /classes/4 or
+// /qms directly and survive a refresh — but only for paths that aren't already
+// handled by a real route above (api/webhook/pdf/privacy/health), so those
+// keep their existing JSON 404 / dedicated behavior untouched.
+const dashboardDist = path.join(__dirname, 'dashboard', 'dist');
+app.use(express.static(dashboardDist));
+app.get('*', (req, res, next) => {
+  if (
+    req.method !== 'GET' ||
+    req.path.startsWith('/api') ||
+    req.path.startsWith('/webhook') ||
+    req.path.startsWith('/pdf') ||
+    req.path === '/privacy'
+  ) {
+    return next();
+  }
+  res.sendFile(path.join(dashboardDist, 'index.html'), (err) => {
+    if (err) next(err);
+  });
+});
+
 // ── Error handlers ─────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
 app.use((err, _req, res, _next) => {
