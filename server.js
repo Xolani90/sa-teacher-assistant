@@ -163,7 +163,9 @@ app.use(express.json({
 app.use(express.urlencoded({ extended: true, limit: '10kb' }));
 
 // ── Health check ───────────────────────────────────────────────────────────
-app.get('/', (_req, res) => {
+// Moved from / to /healthz so the dashboard SPA can be served at the root.
+// render.yaml's healthCheckPath must match this.
+app.get('/healthz', (_req, res) => {
   res.status(200).json({
     status:    'ok',
     service:   'SA Teacher Assistant',
@@ -409,7 +411,8 @@ app.get('*', (req, res, next) => {
     req.path.startsWith('/api') ||
     req.path.startsWith('/webhook') ||
     req.path.startsWith('/pdf') ||
-    req.path === '/privacy'
+    req.path === '/privacy' ||
+    req.path === '/healthz'
   ) {
     return next();
   }
