@@ -22,7 +22,7 @@ const {
   hashPhone,
 } = require('../utils/usageTracker');
 const { isDuplicate }            = require('../utils/deduplication');
-const { handleOnboarding, needsOnboarding } = require('../services/onboardingService');
+const { handleOnboarding, needsOnboarding, getOnboardingStep, setOnboardingStep, STEPS: ONBOARDING_STEPS } = require('../services/onboardingService');
 const { generatePdf, generateReportSummaryPdf, generateBlueprintAssessmentPdf, generateBlueprintPaperPdf } = require('../services/pdfService');
 const { getWorksheetTotalMarks } = require('../utils/capsPhase');
 const { buildPaymentUrl }        = require('../services/yocoService');
@@ -692,6 +692,12 @@ function buildCommandDeps() {
     blueprintAuthoringState,
     reflectionState,
     growthPlanState,
+    // RC1-H-005: HELP/MENU/HI/HELLO must not short-circuit past onboarding
+    // for a teacher who hasn't completed it — see the guard in
+    // commandHandler.js's HELP/MENU/HI/HELLO branch.
+    getOnboardingStep,
+    setOnboardingStep,
+    ONBOARDING_STEPS,
   });
 }
 
@@ -877,4 +883,9 @@ module.exports.__testExports = {
   dataAssessmentState,
   lastGeneratedState,
   processStatusWebhooks,
+  needsOnboarding,
+  handleOnboarding,
+  getOnboardingStep,
+  setOnboardingStep,
+  ONBOARDING_STEPS,
 };

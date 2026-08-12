@@ -367,4 +367,4 @@ function parseLanguageInput(text) {
   return languageMap[trimmed] || null;
 }
 
-module.exports = { handleOnboarding, needsOnboarding, STEPS, parseGradeInput, parseSubjectInput, parseSchoolInput, parseLanguageInput };
+module.exports = { handleOnboarding, needsOnboarding, getOnboardingStep, setOnboardingStep, STEPS, parseGradeInput, parseSubjectInput, parseSchoolInput, parseLanguageInput };

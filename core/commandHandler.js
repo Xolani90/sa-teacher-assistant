@@ -40,6 +40,13 @@ async function handleCommand(from, text, deps) {
 
   // ── PRO upgrade ──────────────────────────────────────────────
   if (upper === 'PRO' || upper === 'UPGRADE') {
+    // RC1-H-005 (proactive follow-up): same brand-new-teacher guard as
+    // HELP/MENU/HI/HELLO below — a teacher who hasn't started onboarding
+    // yet (step === null) gets no escape via PRO either, per
+    // onboardingService.js's own `commands` list intent.
+    if (deps.getOnboardingStep?.(deps.hashPhone(from)) === null) {
+      return false;
+    }
     try {
       const teacher    = deps.getTeacherByPhone(from);
       const teacherName = teacher?.name || '';
@@ -76,6 +83,11 @@ async function handleCommand(from, text, deps) {
   // the only aliases the global handler recognizes.
   const upperIsStatusAlias = upper === 'STATUS' || upper === 'USAGE' || upper === 'BALANCE';
   if (upperIsStatusAlias) {
+    // RC1-H-005 (proactive follow-up): brand-new teacher guard, same as
+    // the PRO branch above and the HELP/MENU/HI/HELLO branch below.
+    if (deps.getOnboardingStep?.(deps.hashPhone(from)) === null) {
+      return false;
+    }
     const phoneHashForStatus = deps.hashPhone(from);
     const hasActiveFlowStatus =
       deps.assessmentSessionState?.get(phoneHashForStatus) ||
@@ -116,6 +128,32 @@ async function handleCommand(from, text, deps) {
 
   // ── Help menu ─────────────────────────────────────────────────
   if (upper === 'HELP' || upper === 'MENU' || upper === 'HI' || upper === 'HELLO') {
+    // RC1-H-005: this branch used to intercept unconditionally, before
+    // messageProcessor.js ever checks needsOnboarding() — so a brand-new
+    // teacher's first "hi"/"hello" (or HELP/MENU) never reached onboarding.
+    // onboardingService.js already encodes the intended escape-hatch rule
+    // (a narrower one, PRO/STATUS/HELP/PROFILE only, and only mid-onboarding
+    // — see its `commands` list): a new user (step === null) gets no escape
+    // at all, and mid-onboarding only HELP is allowed through, not
+    // MENU/HI/HELLO. Mirror that here so onboarding is reached instead of
+    // shadowed.
+    const onboardingStep = deps.getOnboardingStep?.(deps.hashPhone(from));
+    if (onboardingStep === null) {
+      return false; // brand-new teacher — no escape, let onboarding start
+    }
+    if (onboardingStep !== undefined && onboardingStep !== null && onboardingStep !== deps.ONBOARDING_STEPS?.DONE) {
+      // mid-onboarding: only HELP is a valid escape hatch (per
+      // onboardingService.js's own `commands` list); MENU/HI/HELLO fall
+      // through to the flow's own step handler instead.
+      if (upper !== 'HELP') {
+        return false;
+      }
+      // Mirror onboardingService.js's own escape-hatch behavior: exiting
+      // via HELP marks onboarding DONE, same as if handleOnboarding() had
+      // processed this command itself.
+      deps.setOnboardingStep?.(deps.hashPhone(from), deps.ONBOARDING_STEPS.DONE);
+    }
+
     // MENU/HELP must behave like an implicit CANCEL for any in-progress flow.
     // Previously this branch returned early without touching session state,
     // so an abandoned flow (e.g. mid data-assessment) stayed alive. The next
@@ -186,6 +224,11 @@ async function handleCommand(from, text, deps) {
 
   // ── Profile view ──────────────────────────────────────────────
   if (upper.startsWith('PROFILE')) {
+    // RC1-H-005 (proactive follow-up): brand-new teacher guard, same as
+    // PRO/STATUS above and HELP/MENU/HI/HELLO above that.
+    if (deps.getOnboardingStep?.(deps.hashPhone(from)) === null) {
+      return false;
+    }
     const info    = deps.getUsageInfo(from);
     const teacher = deps.getTeacherByPhone(from);
     await deps.safeSendMessage(from,
