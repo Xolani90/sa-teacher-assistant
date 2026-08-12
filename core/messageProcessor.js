@@ -156,6 +156,7 @@ async function processMessage(message, deps) {
     deps.observationState.get(phoneHash) ||
     deps.observationHistoryState.get(phoneHash) ||
     deps.assessmentSessionState.get(phoneHash) ||
+    deps.blueprintAuthoringState.get(phoneHash) ||
     deps.rosterState.get(phoneHash) ||
     deps.reflectionState.get(phoneHash) ||
     deps.growthPlanState.get(phoneHash)
@@ -171,7 +172,9 @@ async function processMessage(message, deps) {
   // tests/navigation-service.test.js, not exercised here. Commit 3 is the
   // first commit where messageProcessor acts on any part of this result,
   // starting with the assessment-session flow only.
-  const activeFlowId = deps.assessmentSessionState.get(phoneHash) ? 'assessmentSession' : null;
+  const activeFlowId = deps.assessmentSessionState.get(phoneHash)
+    ? 'assessmentSession'
+    : (deps.blueprintAuthoringState.get(phoneHash) ? 'blueprintAuthoring' : null);
   require('../services/navigationService').evaluateMessage(phoneHash, text, { activeFlowId });
 
   if (alreadyMidFlow) {
@@ -183,6 +186,7 @@ async function processMessage(message, deps) {
     if (await deps.handleReflectionFlow(from, text, null, deps.buildReflectionDeps())) return;
     if (await deps.handleGrowthPlanFlow(from, text, null, deps.buildGrowthPlanDeps())) return;
     if (await deps.handleAssessmentSessionFlow(from, text, message, null, deps.buildAssessmentSessionDeps())) return;
+    if (await deps.handleBlueprintAuthoringFlow(from, text, message, null, deps.buildBlueprintAuthoringDeps())) return;
     if (await deps.handleRosterFlow(from, text, message, null, deps.buildRosterDeps())) return;
     if (await deps.handleReportCommentFlow(from, text, null, deps.buildReportCommentDeps())) return;
     if (await deps.handleProfileUpdateFlow(from, text, deps.buildProfileUpdateDeps())) return;
@@ -257,6 +261,15 @@ async function processMessage(message, deps) {
   // classifier guess.
   const assessmentSessionHandled = await deps.handleAssessmentSessionFlow(from, text, message, intent, deps.buildAssessmentSessionDeps());
   if (assessmentSessionHandled) return;
+
+  // ── Blueprint authoring multi-turn flow (RC1-H-001) ─────────────────
+  // Checked immediately after the assessment session flow, for the same
+  // "bare replies must hit the active session, not a classifier guess"
+  // reason — once a teacher is mid-way through NEW BLUEPRINT, a title,
+  // a bare grade number, or a "<topic> | <marks>" line must be treated
+  // as that session's input.
+  const blueprintAuthoringHandled = await deps.handleBlueprintAuthoringFlow(from, text, message, intent, deps.buildBlueprintAuthoringDeps());
+  if (blueprintAuthoringHandled) return;
 
   // ── Roster multi-turn flow (ADR-006 PR3) ────────────────────────────
   // Exact-command entry points (ROSTER/ADD LEARNER/etc.), checked right

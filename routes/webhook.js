@@ -102,6 +102,29 @@ require('../services/navigationService').registerFlow({
     },
   },
 });
+// RC1-H-001: Blueprint Authoring flow — conversational NEW BLUEPRINT
+// creation. Same long-lived-relative-to-a-menu TTL as assessmentSession
+// (30 min): building a multi-question blueprint over WhatsApp is a
+// slower, more deliberate task than a single-turn menu pick, but doesn't
+// need assessmentSession's 24h span since there's no reason a teacher
+// would pause mid-authoring overnight the way marks capture might.
+const blueprintAuthoringState = new SessionStore('blueprintAuthoring',  30 * 60 * 1000);
+
+require('../services/navigationService').registerFlow({
+  id: 'blueprintAuthoring',
+  commands: ['NEW BLUEPRINT'],
+  capabilities: { status: true, cancel: true, back: false, menus: true },
+  menus: {
+    published: ['Start a new assessment', 'Print a blueprint question paper'],
+  },
+  hooks: {
+    cleanup: (phoneHash) => blueprintAuthoringState.delete(phoneHash),
+    describeStatus: (phoneHash) => {
+      const state = blueprintAuthoringState.get(phoneHash);
+      return state ? describeBlueprintAuthoringStatus(state) : null;
+    },
+  },
+});
 const rosterState             = new SessionStore('roster',              30 * 60 * 1000); // ADR-006 PR3 — ROSTER/ADD/REMOVE/CLEAR
 const reflectionState          = new SessionStore('reflection',          30 * 60 * 1000);
 const growthPlanState          = new SessionStore('growthPlan',          30 * 60 * 1000);
@@ -269,8 +292,28 @@ const { handleAssessmentFlow } = require('../flows/assessmentFlow');
 
 // ── Assessment session flow module (ADR-006 — Blueprint Assessment Sessions) ──
 const { handleAssessmentSessionFlow, describeStatus: describeAssessmentSessionStatus } = require('../flows/assessmentSessionFlow');
-const { listBlueprints, getBlueprintById } = require('../services/blueprintRepository');
+const { listBlueprints, getBlueprintById, createBlueprint, updateQuestion, publishBlueprint } = require('../services/blueprintRepository');
 const { getRoster: getClassRoster } = require('../services/learnerRosterService');
+
+// ── Blueprint authoring flow module (RC1-H-001) ─────────────────────────────
+const { handleBlueprintAuthoringFlow, describeStatus: describeBlueprintAuthoringStatus } = require('../flows/blueprintAuthoringFlow');
+
+function buildBlueprintAuthoringDeps() {
+  return Object.freeze({
+    hashPhone,
+    safeSendMessage,
+    blueprintAuthoringState,
+    createBlueprint,
+    getBlueprintById,
+    updateQuestion,
+    publishBlueprint,
+    // Optional: lets the post-publish menu (NEW TEST / PRINT) dispatch
+    // straight into assessmentSessionFlow rather than just telling the
+    // teacher to type the command themselves.
+    handleAssessmentSessionFlow,
+    buildAssessmentSessionDeps,
+  });
+}
 
 function buildAssessmentSessionDeps() {
   return Object.freeze({
@@ -551,6 +594,7 @@ function buildProcessMessageDeps() {
     observationState,
     observationHistoryState,
     assessmentSessionState,
+    blueprintAuthoringState,
     rosterState,
     reflectionState,
     growthPlanState,
@@ -563,6 +607,8 @@ function buildProcessMessageDeps() {
     buildGrowthPlanDeps,
     handleAssessmentSessionFlow,
     buildAssessmentSessionDeps,
+    handleBlueprintAuthoringFlow,
+    buildBlueprintAuthoringDeps,
     handleRosterFlow,
     buildRosterDeps,
     handleReportCommentFlow,
