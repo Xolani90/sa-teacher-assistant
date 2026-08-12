@@ -237,42 +237,6 @@ table.
     — the code path (`authenticatedFetch`) does not silently retry on
     401, so a real 401 on the actual create request would visibly break
     the flow (inline error, forced logout), which did not happen.
-    - **Investigation (same session, static trace, no code changed):**
-      - `ReflectionPanel.jsx` create/edit both go through the same
-        `authedFetch` → `authenticatedFetch` path used by every other
-        endpoint in the dashboard — no reflections-specific request
-        logic.
-      - `TeacherProvider`'s token state is hydrated synchronously
-        (`useState(() => getStoredToken())`) before first render, and
-        `ProtectedRoute` gates off that same in-memory state — no
-        async token-hydration race window before a user can interact
-        with the panel.
-      - Server-side, `requireTeacherAuth` is mounted once, blanket,
-        over the entire `/api` router (`server.js`) — reflections
-        routes have no auth logic of their own; they inherit the exact
-        same middleware as classes/learners/topics/status.
-      - Duplicate GET requests observed throughout this session
-        (`topics`, `reflections` listing, `classes`, `learners` each
-        fetched twice per load) are consistent with React 18
-        `<StrictMode>` (confirmed enabled in `main.jsx`)
-        double-invoking effects in dev — expected/benign, and doesn't
-        explain a duplicated `onClick`-triggered POST, since StrictMode
-        double-invokes effects, not click handlers.
-      - A genuine 401 from `requireTeacherAuth` triggers
-        `TeacherContext`'s auth-failure path: cleared stored token,
-        cleared React auth state, thrown `ApiError` surfaced as an
-        inline form error. None of that occurred alongside the
-        successful creates — indicating the 401 that appeared in the
-        console did not come from the request that actually created
-        the reflection, but from a second, unidentified request.
-      - **Disposition:** insufficient evidence to identify the second
-        request or its cause; not a proven product defect, not
-        dismissed as noise either. If it recurs, `requireTeacherAuth`
-        logs the specific rejection reason server-side
-        (`[TEACHER_AUTH] ...`) on every 401 — checking the backend
-        terminal at the moment of recurrence would disambiguate
-        expired/malformed/unknown-teacher without any code change.
-        No code change is justified until then.
   - Console otherwise consistent with the two already-accepted findings
     (favicon 404 [W1-F1], React Router v7 future-flag warnings [W2-F2])
 - **Result:** PASS, with one open non-blocking finding (intermittent
