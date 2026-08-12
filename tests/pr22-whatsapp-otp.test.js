@@ -201,13 +201,18 @@ async function run() {
 
   require('../services/whatsappService').sendMessage = originalSendMessage;
 
-  console.log('\nTest RC-06: expired codes are deleted before creating new one');
+  console.log('\nTest RC-06: expired code is retired (superseded), not deleted, when a new one is requested');
+  console.log('(RC1-H-003: physical deletion was removed from this hot path because');
+  console.log('whatsapp_delivery_events references auth_codes by FK with no ON DELETE');
+  console.log('clause — deleting a row with delivery history caused a 500. The old');
+  console.log('expired row is now retired via broadened supersession instead, so it');
+  console.log('remains in the table but is no longer active.)');
   resetDb();
   insertTeacher(hashPhone(testPhone), 'Test Teacher');
-  
+
   // Insert an expired code
   const pastExp = _db.prepare(`SELECT datetime('now', '-5 minutes') AS ts`).get().ts;
-  createAuthCode(hashPhone(testPhone), 'old_hash', pastExp);
+  const oldCode = createAuthCode(hashPhone(testPhone), 'old_hash', pastExp);
 
   const expiredCountBefore = _db.prepare(`SELECT COUNT(*) AS c FROM auth_codes WHERE phone_hash = ?`).get(hashPhone(testPhone)).c;
   assert(expiredCountBefore === 1, 'expired code exists before request');
@@ -217,8 +222,82 @@ async function run() {
   const { req: req6, res: res6 } = makeReqRes({ phone: testPhone });
   await handleRequestCode(req6, res6);
 
-  const expiredCountAfter = _db.prepare(`SELECT COUNT(*) AS c FROM auth_codes WHERE phone_hash = ?`).get(hashPhone(testPhone)).c;
-  assert(expiredCountAfter === 1, 'only one code exists after request (expired deleted, new created)');
+  const rowCountAfter = _db.prepare(`SELECT COUNT(*) AS c FROM auth_codes WHERE phone_hash = ?`).get(hashPhone(testPhone)).c;
+  assert(rowCountAfter === 2, 'both the old (retired) and new code now exist — nothing was deleted');
+
+  const oldRowAfter = _db.prepare(`SELECT superseded_at, consumed_at FROM auth_codes WHERE id = ?`).get(oldCode.id);
+  assert(oldRowAfter !== undefined, 'the old expired row still exists (was not physically deleted)');
+  assert(oldRowAfter.superseded_at !== null, 'the old expired row is now superseded/retired');
+  assertEq(oldRowAfter.consumed_at, null, 'the old expired row was never consumed');
+
+  const activeAfterRequest = getActiveAuthCode(hashPhone(testPhone));
+  assert(activeAfterRequest !== null, 'a new active code exists after the request');
+  assert(activeAfterRequest.id !== oldCode.id, 'the active code is the newly-generated one, not the old expired one');
+
+  require('../services/whatsappService').sendMessage = originalSendMessage;
+
+  console.log('\nTest RC1H3-PROD-01: RC1-H-003 production contract — expired OTP with');
+  console.log('delivery-event history → POST /api/auth/request-code → HTTP 200');
+  console.log('{"success":true} → new OTP exists → old delivery event survives.');
+  console.log('This is the externally observable regression the defect report was');
+  console.log('written against: prior to the fix, this exact sequence produced a 500');
+  console.log('(deleteExpiredCodes() colliding with the whatsapp_delivery_events FK).');
+  resetDb();
+  insertTeacher(hashPhone(testPhone), 'Test Teacher');
+
+  const { recordSendResult } = require('../services/deliveryEventRepository');
+
+  // Expired OTP that ALREADY has delivery-event history, exactly as
+  // RC1-H-003 describes: a phone whose most recent OTP expired after a
+  // successful (or attempted) WhatsApp send.
+  const prodPastExp = _db.prepare(`SELECT datetime('now', '-5 minutes') AS ts`).get().ts;
+  const oldProdCode = createAuthCode(hashPhone(testPhone), 'prod_old_hash', prodPastExp);
+  recordSendResult({
+    phoneHash: hashPhone(testPhone),
+    authCodeId: oldProdCode.id,
+    providerMessageId: 'wamid.rc1h003-prod-test-001',
+    eventStatus: 'send_accepted',
+  });
+
+  const deliveryEventsBefore = _db
+    .prepare(`SELECT id FROM whatsapp_delivery_events WHERE auth_code_id = ?`)
+    .all(oldProdCode.id);
+  assert(deliveryEventsBefore.length === 1, 'sanity: old OTP has exactly one delivery event before the request');
+
+  require('../services/whatsappService').sendMessage = async () => {};
+
+  // This is the literal externally observable contract: hit the same
+  // handler routes/auth.js wires to POST /api/auth/request-code.
+  const { req: reqProd, res: resProd } = makeReqRes({ phone: testPhone });
+  let requestThrew = false;
+  try {
+    await handleRequestCode(reqProd, resProd);
+  } catch (err) {
+    requestThrew = true;
+    console.error(`     unexpected throw (this is the pre-fix RC1-H-003 failure mode): ${err.message}`);
+  }
+  assertEq(requestThrew, false, 'request-code handler does not throw for a phone with an expired OTP + delivery history');
+  assertEq(resProd.statusCode, 200, 'POST /api/auth/request-code returns HTTP 200 (not 500)');
+  assertEq(resProd.body && resProd.body.success, true, 'response body has success:true');
+
+  const newActive = getActiveAuthCode(hashPhone(testPhone));
+  assert(newActive !== null, 'a new active OTP exists after the request');
+  assert(newActive.id !== oldProdCode.id, 'the new active OTP is a different row from the old expired one');
+
+  const deliveryEventsAfter = _db
+    .prepare(`SELECT id, event_status FROM whatsapp_delivery_events WHERE auth_code_id = ?`)
+    .all(oldProdCode.id);
+  assertEq(deliveryEventsAfter.length, 1, 'the old OTP\'s delivery event still exists after the request (not deleted/orphaned)');
+  assertEq(
+    deliveryEventsAfter[0] && deliveryEventsAfter[0].event_status,
+    'send_accepted',
+    'the surviving delivery event is unmodified (still send_accepted)'
+  );
+
+  const oldProdRowAfter = _db.prepare(`SELECT superseded_at, consumed_at FROM auth_codes WHERE id = ?`).get(oldProdCode.id);
+  assert(oldProdRowAfter !== undefined, 'the old expired auth_codes row itself still exists');
+  assert(oldProdRowAfter.superseded_at !== null, 'the old expired row is retired (superseded_at populated)');
+  assertEq(oldProdRowAfter.consumed_at, null, 'the old expired row was never consumed');
 
   require('../services/whatsappService').sendMessage = originalSendMessage;
 

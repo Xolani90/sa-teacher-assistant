@@ -1088,17 +1088,29 @@ function runMigrations() {
   // §3.1 is the conjunction of consumed_at IS NULL, expires_at > now, AND
   // superseded_at IS NULL — getActiveAuthCode() (services/authCodeRepository.js)
   // must check all three; none may be substituted for or approximated by
-  // the others.
+  // the others. RC1-H-003: the condition under which superseded_at gets
+  // set was broadened from "the old row is still active" to "the old row
+  // is not consumed and not yet superseded" (i.e. it now also covers an
+  // already-expired row) — see generateAuthCodeTransactionally()'s
+  // supersession UPDATE in services/authCodeRepository.js for the full
+  // rationale. This does NOT change the "active" definition above: an
+  // expired row was already excluded from "active" by expires_at alone,
+  // whether or not superseded_at also gets set on it.
   try {
     db.exec(`ALTER TABLE auth_codes ADD COLUMN superseded_at TEXT`);
   } catch (_) { /* column already exists — additive migration, safe to re-run */ }
 
   // Active-OTP database backstop (§3.1). This partial UNIQUE index
   // enforces AT MOST ONE row per phone_hash among rows that are
-  // "not consumed AND not superseded". It is a backstop against a bug in
-  // application logic leaving two such rows for one phone — it does NOT
-  // enforce expires_at > now, because SQLite partial-index predicates
-  // cannot reference datetime('now') (the predicate is evaluated once,
+  // "not consumed AND not superseded". Originally written as a backstop
+  // against a bug in application logic leaving two such rows for one
+  // phone; as of RC1-H-003 it is also actively relied upon in the normal
+  // request-code path — generateAuthCodeTransactionally() now supersedes
+  // (retires) an old, already-expired row precisely so this index's slot
+  // is vacated before the new row is inserted, rather than relying on a
+  // separate physical-deletion cleanup call. It does NOT enforce
+  // expires_at > now, because SQLite partial-index predicates cannot
+  // reference datetime('now') (the predicate is evaluated once,
   // not re-evaluated per query). Expiry therefore remains, as it does
   // today, an application-level validity condition checked in
   // getActiveAuthCode()'s WHERE clause. This is a deliberate, documented

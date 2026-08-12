@@ -96,7 +96,6 @@ async function handleRequestCode(req, res) {
   try {
     const { getTeacherByPhone, hashPhone } = require('../utils/usageTracker');
     const {
-      deleteExpiredCodes,
       generateAuthCodeTransactionally,
       isLockedOut,
       isInCooldown,
@@ -125,8 +124,15 @@ async function handleRequestCode(req, res) {
       const otp = generateOtp();
       const otpHash = hashOtp(otp);
 
-      deleteExpiredCodes(phoneHash);
-
+      // RC1-H-003: physical deletion of expired auth_codes rows was removed
+      // from this hot path — whatsapp_delivery_events references auth_codes
+      // by FK with no ON DELETE clause, so deleting a row with delivery
+      // history caused a 500 here. generateAuthCodeTransactionally() below
+      // now retires (supersedes) the previous OTP for this phone — whether
+      // still active or already expired — instead of relying on deletion,
+      // which both avoids the FK violation and keeps the active-OTP
+      // backstop index (idx_auth_codes_active_backstop) correctly vacated
+      // for this INSERT. See docs/releases/RC1-MILESTONE.md Defect Log.
       const { getDb } = require('../utils/database');
       const expiresAt = getDb()
         .prepare(`SELECT datetime('now', '+${OTP_EXPIRY_MINUTES} minutes') AS ts`)

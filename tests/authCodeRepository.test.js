@@ -11,7 +11,13 @@
  *   4. incrementAttempts() counter behavior
  *   5. consumeAuthCode() one-time-use / replay-protection semantics
  *   6. deleteExpiredCodes() opportunistic cleanup scope (single phone_hash,
- *      doesn't touch other phones' rows, doesn't touch active rows)
+ *      doesn't touch other phones' rows, doesn't touch active rows) —
+ *      RC1-H-003: this function is no longer called from the production
+ *      request-code path; tested here standalone only.
+ *   7. RC1-H-003: generateAuthCodeTransactionally()'s broadened supersession
+ *      — an expired, not-yet-superseded OTP is retired (not deleted) so a
+ *      new OTP can be generated, its delivery-event history survives, and
+ *      an unexpired OTP is still superseded exactly as before.
  *
  * Run individually:   node tests/authCodeRepository.test.js
  * Run via npm:        npm test
@@ -76,6 +82,7 @@ async function run() {
     incrementAttempts,
     consumeAuthCode,
     deleteExpiredCodes,
+    generateAuthCodeTransactionally,
   } = require('../services/authCodeRepository');
 
   const PHONE = 'authcode_test_hash_001';
@@ -220,9 +227,11 @@ async function run() {
   console.log('active-OTP backstop treats any non-consumed/non-superseded row as');
   console.log('occupying the one-active-row slot regardless of expiry, since');
   console.log('SQLite partial indexes cannot express a time-dependent predicate;');
-  console.log('see Migration 041\'s comment in utils/database.js. In the real');
-  console.log('request-code flow this is a non-issue because deleteExpiredCodes()');
-  console.log('always runs immediately before generation.)');
+  console.log('see Migration 041\'s comment in utils/database.js. RC1-H-003:');
+  console.log('deleteExpiredCodes() is NO LONGER called from the real request-code');
+  console.log('flow — it is retained here as a standalone, directly-tested function');
+  console.log('only. generateAuthCodeTransactionally() now vacates the backstop slot');
+  console.log('itself via broadened supersession; see Section 7 below.)');
   _db.exec(`DELETE FROM auth_codes`);
   createAuthCode(PHONE, 'expired_1', pastExp);
   const firstDeleteCount = deleteExpiredCodes(PHONE);
@@ -254,6 +263,74 @@ async function run() {
   assertEq(deletedScoped, 1, 'only deletes the target phone_hash\'s row');
   const otherRow = _db.prepare(`SELECT COUNT(*) AS c FROM auth_codes WHERE phone_hash = ?`).get(OTHER_PHONE);
   assertEq(otherRow.c, 1, 'other phone_hash\'s expired row is untouched');
+
+  // ═══════════════════════════════════════════════════════════════════════
+  // SECTION 7: RC1-H-003 — expired-OTP retirement via broadened supersession
+  // ═══════════════════════════════════════════════════════════════════════
+  console.log('\n── Section 7: RC1-H-003 broadened supersession ──────────────────────');
+
+  console.log('\nTest RC1H3-01: full lifecycle — A expires, A has delivery-event');
+  console.log('history, request-code succeeds, A is retired (not deleted), A\'s');
+  console.log('delivery events survive, getActiveAuthCode() returns only B.');
+  _db.exec(`DELETE FROM auth_codes`);
+  _db.exec(`DELETE FROM whatsapp_delivery_events`);
+
+  const otpA = createAuthCode(PHONE, 'otp_a_hash', pastExp); // already expired
+  _db.prepare(
+    `INSERT INTO whatsapp_delivery_events (phone_hash, auth_code_id, event_status)
+     VALUES (?, ?, 'send_accepted')`
+  ).run(PHONE, otpA.id);
+
+  // Sanity: A is expired, unconsumed, not yet superseded.
+  const aBefore = _db.prepare(`SELECT consumed_at, superseded_at, expires_at FROM auth_codes WHERE id = ?`).get(otpA.id);
+  assertEq(aBefore.consumed_at, null, 'A: consumed_at is NULL before generation');
+  assertEq(aBefore.superseded_at, null, 'A: superseded_at is NULL before generation');
+
+  // This is the exact call routes/auth.js makes on request-code — must not throw.
+  let otpB;
+  let threw = false;
+  try {
+    otpB = generateAuthCodeTransactionally(PHONE, 'otp_b_hash', futureExp);
+  } catch (err) {
+    threw = true;
+    console.error(`     unexpected throw: ${err.message}`);
+  }
+  assertEq(threw, false, 'generateAuthCodeTransactionally does not throw (no UNIQUE/FK violation)');
+
+  const aAfter = _db.prepare(`SELECT consumed_at, superseded_at, expires_at FROM auth_codes WHERE id = ?`).get(otpA.id);
+  assertEq(aAfter.consumed_at, null, 'A: consumed_at still NULL after generation');
+  assert(aAfter.superseded_at !== null, 'A: superseded_at is now populated (retired)');
+  assert(new Date(aAfter.expires_at) < new Date(), 'A: expires_at remains in the past (unchanged)');
+
+  const bRow = _db.prepare(`SELECT consumed_at, superseded_at, expires_at FROM auth_codes WHERE id = ?`).get(otpB.id);
+  assertEq(bRow.consumed_at, null, 'B: consumed_at is NULL');
+  assertEq(bRow.superseded_at, null, 'B: superseded_at is NULL');
+  assert(new Date(bRow.expires_at) > new Date(), 'B: expires_at is in the future');
+
+  const activeAfter = getActiveAuthCode(PHONE);
+  assert(activeAfter !== null, 'getActiveAuthCode() returns a row');
+  assertEq(activeAfter && activeAfter.id, otpB.id, 'getActiveAuthCode() returns B, not A');
+
+  const survivingEvents = _db
+    .prepare(`SELECT COUNT(*) AS c FROM whatsapp_delivery_events WHERE auth_code_id = ?`)
+    .get(otpA.id);
+  assertEq(survivingEvents.c, 1, 'A\'s delivery-event history still exists (not deleted/orphaned)');
+
+  console.log('\nTest RC1H3-02: an unexpired OTP is still superseded exactly as before');
+  console.log('(guards against accidentally changing the still-active supersession path)');
+  _db.exec(`DELETE FROM whatsapp_delivery_events`);
+  _db.exec(`DELETE FROM auth_codes`);
+
+  const otpC = createAuthCode(PHONE, 'otp_c_hash', futureExp); // still active
+  const cBefore = _db.prepare(`SELECT superseded_at FROM auth_codes WHERE id = ?`).get(otpC.id);
+  assertEq(cBefore.superseded_at, null, 'C: superseded_at is NULL before generation');
+
+  const otpD = generateAuthCodeTransactionally(PHONE, 'otp_d_hash', futureExp);
+  const cAfter = _db.prepare(`SELECT superseded_at FROM auth_codes WHERE id = ?`).get(otpC.id);
+  assert(cAfter.superseded_at !== null, 'C: still-active OTP is superseded by the new generation, as before');
+
+  const activeAfterC = getActiveAuthCode(PHONE);
+  assertEq(activeAfterC && activeAfterC.id, otpD.id, 'getActiveAuthCode() returns D, not C');
 
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);

@@ -37,10 +37,18 @@
  *                         A no-op (returns false) if the row is already
  *                         consumed or does not exist, so callers can't
  *                         double-consume via a race.
- *   deleteExpiredCodes()→ opportunistic cleanup of old rows for one
- *                         phone_hash, mirroring rate_limit_events'
- *                         inline-cleanup-on-write pattern (Migration
- *                         023) rather than a separate cron job.
+ *   deleteExpiredCodes()→ physical-deletion cleanup of old rows for one
+ *                         phone_hash. RC1-H-003: no longer called from
+ *                         the request-code hot path (routes/auth.js) —
+ *                         whatsapp_delivery_events references auth_codes
+ *                         by FK with no ON DELETE clause, so deleting a
+ *                         row with delivery history caused a 500.
+ *                         generateAuthCodeTransactionally()'s supersession
+ *                         step now retires old rows (active or expired)
+ *                         instead. This function is left defined but
+ *                         unused/uncalled in production — retained in
+ *                         case a future, deliberately-scoped retention/
+ *                         archival decision (see RC2 Backlog) needs it.
  *
  * See: utils/database.js Migration 032, routes/auth.js (PR22B).
  */
@@ -118,8 +126,13 @@ function getActiveAuthCode(phoneHash) {
 
 /**
  * Generates a new OTP for a phone as a single atomic transaction
- * (ADR-XXX §3.1): supersedes any previously active OTP for the phone,
- * inserts the new row, and starts the resend cooldown, all-or-nothing.
+ * (ADR-XXX §3.1): retires (supersedes) the phone's previous non-consumed
+ * OTP row — whether still active or already expired (RC1-H-003 broadened
+ * this from "previously active" to also cover already-expired rows, so
+ * that OTP generation itself vacates idx_auth_codes_active_backstop
+ * instead of relying on physical deletion; see the supersession UPDATE
+ * below for the full rationale) — inserts the new row, and starts the
+ * resend cooldown, all-or-nothing.
  *
  * Delivery must NOT be attempted inside this function or its caller's
  * transaction scope — this function only covers generation (§3.1's
@@ -157,16 +170,43 @@ function generateAuthCodeTransactionally(phoneHash, codeHash, expiresAt, cooldow
   try {
     db.prepare('BEGIN').run();
 
-    // Supersede any currently-active OTP for this phone (§3.1: "a new OTP
-    // invalidates the previous active OTP"). Matches getActiveAuthCode()'s
-    // own active definition exactly, so this can never supersede a row
-    // getActiveAuthCode() would already treat as inactive.
+    // Retire (supersede) the previous OTP for this phone, if any (§3.1:
+    // "a new OTP invalidates the previous active OTP"), whether that row
+    // was still active or had already expired.
+    //
+    // RC1-H-003: this WHERE clause was originally `consumed_at IS NULL
+    // AND expires_at > datetime('now') AND superseded_at IS NULL` — i.e.
+    // it only ever superseded a row getActiveAuthCode() would still treat
+    // as active, and deliberately left already-expired rows untouched
+    // (relying on a separate deleteExpiredCodes() call in routes/auth.js
+    // to physically delete them before this INSERT ran). That deletion
+    // was removed because whatsapp_delivery_events references auth_codes
+    // by FK with no ON DELETE clause, so deleting a row with delivery
+    // history caused a 500. Removing the deletion without a replacement
+    // left an expired-but-not-yet-superseded row occupying the one slot
+    // idx_auth_codes_active_backstop allows per phone_hash, so the INSERT
+    // below then failed with a UNIQUE constraint violation instead.
+    //
+    // The fix: broaden this clause to also retire an already-expired,
+    // not-yet-superseded row, not only a still-active one. This makes
+    // OTP generation itself responsible for vacating the backstop slot.
+    // superseded_at's meaning is correspondingly widened from "an active
+    // OTP was replaced by a newer OTP" to "an OTP ceased to be eligible
+    // as the current OTP because a newer OTP generation retired it,
+    // whether or not it had already expired." This is a strict, additive
+    // broadening: every row that was superseded under the old clause is
+    // still superseded for the same reason under this one; the only
+    // change is that expired rows are no longer skipped. Confirmed (2026-
+    // 08-12 read-only analysis) that no other code reads superseded_at to
+    // distinguish these two cases — getActiveAuthCode() independently
+    // requires expires_at > datetime('now'), so an expired row is already
+    // excluded from "active" regardless of superseded_at; consumeAuthCode(),
+    // lockout, and cooldown never read or write this column at all.
     db.prepare(
       `UPDATE auth_codes
        SET superseded_at = datetime('now')
        WHERE phone_hash = ?
          AND consumed_at IS NULL
-         AND expires_at > datetime('now')
          AND superseded_at IS NULL`
     ).run(phoneHash);
 
