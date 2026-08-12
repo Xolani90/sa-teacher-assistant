@@ -65,6 +65,26 @@ async function handleCommand(from, text, deps) {
   }
 
   // ── Usage / status ────────────────────────────────────────────
+  // RC1-H-004: STATUS/USAGE/BALANCE must not short-circuit here while a
+  // teacher is mid-flow in a session that owns its own STATUS reply
+  // (blueprintAuthoringFlow, assessmentSessionFlow) — those flows report
+  // progress within the flow, not subscription usage. Falling through
+  // (returning false, not handled) lets messageProcessor's alreadyMidFlow
+  // dispatch route STATUS to the active flow's own handler instead.
+  // CANCEL already follows this same pattern above for the SAVE prompt —
+  // this mirrors it for STATUS/USAGE/BALANCE specifically, since those are
+  // the only aliases the global handler recognizes.
+  const upperIsStatusAlias = upper === 'STATUS' || upper === 'USAGE' || upper === 'BALANCE';
+  if (upperIsStatusAlias) {
+    const phoneHashForStatus = deps.hashPhone(from);
+    const hasActiveFlowStatus =
+      deps.assessmentSessionState?.get(phoneHashForStatus) ||
+      deps.blueprintAuthoringState?.get(phoneHashForStatus);
+    if (hasActiveFlowStatus) {
+      return false; // let the active flow's own STATUS branch handle it
+    }
+  }
+
   if (upper === 'STATUS' || upper === 'USAGE' || upper === 'BALANCE') {
     const info = deps.getUsageInfo(from);
     const teacher = deps.getTeacherByPhone(from);
