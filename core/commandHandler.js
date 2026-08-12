@@ -79,7 +79,9 @@ async function handleCommand(from, text, deps) {
     const phoneHashForStatus = deps.hashPhone(from);
     const hasActiveFlowStatus =
       deps.assessmentSessionState?.get(phoneHashForStatus) ||
-      deps.blueprintAuthoringState?.get(phoneHashForStatus);
+      deps.blueprintAuthoringState?.get(phoneHashForStatus) ||
+      deps.reflectionState?.get(phoneHashForStatus) ||
+      deps.growthPlanState?.get(phoneHashForStatus);
     if (hasActiveFlowStatus) {
       return false; // let the active flow's own STATUS branch handle it
     }

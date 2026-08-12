@@ -685,10 +685,13 @@ function buildCommandDeps() {
     updateTeacherProfile,
     // RC1-H-004: STATUS must not be answered globally (subscription info)
     // while a teacher is mid-flow in a session that owns its own STATUS
-    // reply (e.g. blueprintAuthoring, assessmentSession) — see the guard
-    // in commandHandler.js's STATUS branch for why these are needed here.
+    // reply — see the guard in commandHandler.js's STATUS branch for why
+    // these are needed here. Every flow with its own STATUS/RESUME
+    // handling is included, not just the two originally caught live.
     assessmentSessionState,
     blueprintAuthoringState,
+    reflectionState,
+    growthPlanState,
   });
 }
 
