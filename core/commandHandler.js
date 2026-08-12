@@ -375,6 +375,22 @@ async function handleCommand(from, text, deps) {
     }
   }
 
+  // RC1-H-006: SAVE must not short-circuit here while a teacher is mid-flow
+  // in rosterFlow's PREVIEW step, which owns its own SAVE meaning ("confirm
+  // this pasted roster") entirely distinct from this branch's meaning
+  // ("persist the just-generated resource"). This is the same collision
+  // shape as RC1-H-004 (STATUS/USAGE/BALANCE vs. flow-owned STATUS) — this
+  // branch had zero awareness of rosterState and always intercepted SAVE
+  // first, silently discarding the pasted roster instead of saving it.
+  // Falling through (returning false, not handled) lets messageProcessor's
+  // alreadyMidFlow dispatch route SAVE to rosterFlow's own handler instead.
+  // Checked broadly (any active roster session, not just PREVIEW) to mirror
+  // the STATUS guard's breadth — rosterFlow itself decides what SAVE means
+  // at whatever step it's actually in.
+  if (upper === 'SAVE' && deps.rosterState?.get(deps.hashPhone(from))) {
+    return false;
+  }
+
   const isWorkspaceCmd =
     upper === 'MY RESOURCES' ||
     upper === 'SAVE';

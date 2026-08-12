@@ -692,6 +692,10 @@ function buildCommandDeps() {
     blueprintAuthoringState,
     reflectionState,
     growthPlanState,
+    // RC1-H-006: SAVE must not be claimed globally (generated-resource save)
+    // while a teacher is mid-flow in rosterFlow's PREVIEW step — see the
+    // guard in commandHandler.js's SAVE branch for why this is needed here.
+    rosterState,
     // RC1-H-005: HELP/MENU/HI/HELLO must not short-circuit past onboarding
     // for a teacher who hasn't completed it — see the guard in
     // commandHandler.js's HELP/MENU/HI/HELLO branch.
@@ -888,4 +892,13 @@ module.exports.__testExports = {
   getOnboardingStep,
   setOnboardingStep,
   ONBOARDING_STEPS,
+  // RC1-H-006 regression coverage (tests/rc1-h-006-save-roster-collision.test.js):
+  // rosterState so tests can seed a PREVIEW session directly, and
+  // processMessage/buildProcessMessageDeps to exercise the real dispatch
+  // chain (webhook -> messageProcessor -> commandHandler -> rosterFlow)
+  // rather than calling handleRosterFlow directly, which would miss this
+  // class of collision entirely (as it did originally).
+  rosterState,
+  processMessage,
+  buildProcessMessageDeps,
 };
