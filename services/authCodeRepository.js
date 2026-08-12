@@ -91,11 +91,12 @@ function getActiveAuthCode(phoneHash) {
   const db = getDb();
   const row = db
     .prepare(
-      `SELECT id, phone_hash, code_hash, expires_at, attempts, consumed_at, created_at
+      `SELECT id, phone_hash, code_hash, expires_at, attempts, consumed_at, superseded_at, created_at
        FROM auth_codes
        WHERE phone_hash = ?
          AND consumed_at IS NULL
          AND expires_at > datetime('now')
+         AND superseded_at IS NULL
        ORDER BY id DESC
        LIMIT 1`
     )
@@ -110,8 +111,237 @@ function getActiveAuthCode(phoneHash) {
     expiresAt: row.expires_at,
     attempts: row.attempts,
     consumedAt: row.consumed_at,
+    supersededAt: row.superseded_at,
     createdAt: row.created_at,
   };
+}
+
+/**
+ * Generates a new OTP for a phone as a single atomic transaction
+ * (ADR-XXX §3.1): supersedes any previously active OTP for the phone,
+ * inserts the new row, and starts the resend cooldown, all-or-nothing.
+ *
+ * Delivery must NOT be attempted inside this function or its caller's
+ * transaction scope — this function only covers generation (§3.1's
+ * "everything up to and including transaction commit"). The caller
+ * attempts delivery only after this function returns successfully.
+ *
+ * Does not itself check lockout/cooldown eligibility — the caller
+ * (routes/auth.js) must call isLockedOut()/isInCooldown() first and only
+ * invoke this function when both checks pass, so that lockout takes
+ * precedence over cooldown per §4.3.
+ *
+ * @param {string} phoneHash
+ * @param {string} codeHash
+ * @param {string} expiresAt - SQLite datetime string
+ * @param {number} cooldownSeconds - length of the resend cooldown to start (§4.3)
+ * @returns {{id: number, cooldownUntil: string}}
+ */
+function generateAuthCodeTransactionally(phoneHash, codeHash, expiresAt, cooldownSeconds = 60) {
+  if (!phoneHash || typeof phoneHash !== 'string') {
+    throw new Error('generateAuthCodeTransactionally: phoneHash is required');
+  }
+  if (!codeHash || typeof codeHash !== 'string') {
+    throw new Error('generateAuthCodeTransactionally: codeHash is required');
+  }
+  if (!expiresAt || typeof expiresAt !== 'string') {
+    throw new Error('generateAuthCodeTransactionally: expiresAt is required');
+  }
+
+  const db = getDb();
+
+  // Manual BEGIN/COMMIT/ROLLBACK, not db.transaction() — compatibility
+  // with both better-sqlite3 (production) and the node:sqlite test shim,
+  // matching the convention already used in observationRepository.js and
+  // blueprintRepository.js.
+  try {
+    db.prepare('BEGIN').run();
+
+    // Supersede any currently-active OTP for this phone (§3.1: "a new OTP
+    // invalidates the previous active OTP"). Matches getActiveAuthCode()'s
+    // own active definition exactly, so this can never supersede a row
+    // getActiveAuthCode() would already treat as inactive.
+    db.prepare(
+      `UPDATE auth_codes
+       SET superseded_at = datetime('now')
+       WHERE phone_hash = ?
+         AND consumed_at IS NULL
+         AND expires_at > datetime('now')
+         AND superseded_at IS NULL`
+    ).run(phoneHash);
+
+    const insertResult = db
+      .prepare(
+        `INSERT INTO auth_codes (phone_hash, code_hash, expires_at, attempts, consumed_at, superseded_at)
+         VALUES (?, ?, ?, 0, NULL, NULL)`
+      )
+      .run(phoneHash, codeHash, expiresAt);
+
+    const cooldownUntil = db
+      .prepare(`SELECT datetime('now', '+${cooldownSeconds} seconds') AS ts`)
+      .get().ts;
+
+    // Cooldown start is defined as the commit timestamp of THIS
+    // transaction (§4.3), independent of delivery outcome — set here,
+    // inside the same transaction as generation, not after a delivery
+    // attempt that hasn't happened yet.
+    upsertPhoneState(db, phoneHash, { cooldownUntil });
+
+    db.prepare('COMMIT').run();
+
+    return { id: Number(insertResult.lastInsertRowid), cooldownUntil };
+  } catch (txErr) {
+    try { db.prepare('ROLLBACK').run(); } catch (_) { /* best-effort */ }
+    throw txErr;
+  }
+}
+
+/**
+ * Internal helper: insert-or-update a phone's auth_phone_state row,
+ * merging only the fields provided. Used inside generateAuthCodeTransactionally()
+ * (must run on the same `db` handle so it participates in the open
+ * transaction) and by the standalone phone-state functions below.
+ *
+ * @param {import('better-sqlite3').Database} db
+ * @param {string} phoneHash
+ * @param {{failedAttempts?: number, lockoutUntil?: string|null, cooldownUntil?: string|null}} fields
+ */
+function upsertPhoneState(db, phoneHash, fields) {
+  const existing = db
+    .prepare(`SELECT id FROM auth_phone_state WHERE phone_hash = ?`)
+    .get(phoneHash);
+
+  if (!existing) {
+    db.prepare(
+      `INSERT INTO auth_phone_state (phone_hash, failed_attempts, lockout_until, cooldown_until, updated_at)
+       VALUES (?, ?, ?, ?, datetime('now'))`
+    ).run(
+      phoneHash,
+      fields.failedAttempts ?? 0,
+      fields.lockoutUntil ?? null,
+      fields.cooldownUntil ?? null
+    );
+    return;
+  }
+
+  const sets = ['updated_at = datetime(\'now\')'];
+  const params = [];
+  if ('failedAttempts' in fields) { sets.push('failed_attempts = ?'); params.push(fields.failedAttempts); }
+  if ('lockoutUntil' in fields) { sets.push('lockout_until = ?'); params.push(fields.lockoutUntil); }
+  if ('cooldownUntil' in fields) { sets.push('cooldown_until = ?'); params.push(fields.cooldownUntil); }
+  params.push(phoneHash);
+
+  db.prepare(`UPDATE auth_phone_state SET ${sets.join(', ')} WHERE phone_hash = ?`).run(...params);
+}
+
+/**
+ * Reads a phone's authentication state. Returns a default (all-clear)
+ * shape if no row exists yet — a phone with no prior auth activity is
+ * neither locked out nor in cooldown.
+ *
+ * @param {string} phoneHash
+ * @returns {{failedAttempts:number, lockoutUntil:string|null, cooldownUntil:string|null}}
+ */
+function getPhoneAuthState(phoneHash) {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT failed_attempts AS failedAttempts, lockout_until AS lockoutUntil, cooldown_until AS cooldownUntil
+       FROM auth_phone_state WHERE phone_hash = ?`
+    )
+    .get(phoneHash);
+
+  return row || { failedAttempts: 0, lockoutUntil: null, cooldownUntil: null };
+}
+
+/**
+ * Whether the phone is currently locked out (§4.1). Lockout expiry is a
+ * full reset (not decay) — if the stored lockout_until has passed, this
+ * ALSO clears lockout_until and resets failed_attempts to 0 as a side
+ * effect, matching §4.1's explicit "lockout expiry resets the
+ * failed-attempt counter to zero" rule, so a caller never observes a
+ * stale non-zero counter after lockout has naturally expired.
+ *
+ * @param {string} phoneHash
+ * @returns {boolean}
+ */
+function isLockedOut(phoneHash) {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT lockout_until AS lockoutUntil FROM auth_phone_state WHERE phone_hash = ?`)
+    .get(phoneHash);
+
+  if (!row || !row.lockoutUntil) return false;
+
+  const check = db
+    .prepare(`SELECT (datetime('now') < ?) AS locked`)
+    .get(row.lockoutUntil);
+
+  if (check.locked) return true;
+
+  // Lockout has expired — full reset per §4.1.
+  upsertPhoneState(db, phoneHash, { failedAttempts: 0, lockoutUntil: null });
+  return false;
+}
+
+/**
+ * Whether the phone is currently within the 60-second resend cooldown
+ * (§4.3). Independent of lockout — callers must check isLockedOut() too;
+ * lockout takes precedence over cooldown (§4.3).
+ *
+ * @param {string} phoneHash
+ * @returns {boolean}
+ */
+function isInCooldown(phoneHash) {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT cooldown_until AS cooldownUntil FROM auth_phone_state WHERE phone_hash = ?`)
+    .get(phoneHash);
+
+  if (!row || !row.cooldownUntil) return false;
+
+  const check = db.prepare(`SELECT (datetime('now') < ?) AS inCooldown`).get(row.cooldownUntil);
+  return !!check.inCooldown;
+}
+
+/**
+ * Records a failed verification attempt for a phone (§4.1/§4.2 — the
+ * SOLE authoritative counter). At the 5th failure, activates a 15-minute
+ * lockout. Not reset by requesting a new OTP (this function is only
+ * called from the verify path, never from generation).
+ *
+ * @param {string} phoneHash
+ * @param {number} [maxAttempts=5]
+ * @param {number} [lockoutMinutes=15]
+ * @returns {{failedAttempts: number, lockedOut: boolean}}
+ */
+function recordFailedAttempt(phoneHash, maxAttempts = 5, lockoutMinutes = 15) {
+  const db = getDb();
+  const current = getPhoneAuthState(phoneHash);
+  const newCount = current.failedAttempts + 1;
+
+  if (newCount >= maxAttempts) {
+    const lockoutUntil = db
+      .prepare(`SELECT datetime('now', '+${lockoutMinutes} minutes') AS ts`)
+      .get().ts;
+    upsertPhoneState(db, phoneHash, { failedAttempts: newCount, lockoutUntil });
+    return { failedAttempts: newCount, lockedOut: true };
+  }
+
+  upsertPhoneState(db, phoneHash, { failedAttempts: newCount });
+  return { failedAttempts: newCount, lockedOut: false };
+}
+
+/**
+ * Resets a phone's failed-attempt counter and clears lockout on
+ * successful verification (§4.1's "successful-verification rule" — the
+ * entire rule, no other state to touch).
+ *
+ * @param {string} phoneHash
+ */
+function resetPhoneAuthState(phoneHash) {
+  const db = getDb();
+  upsertPhoneState(db, phoneHash, { failedAttempts: 0, lockoutUntil: null });
 }
 
 /**
@@ -176,4 +406,10 @@ module.exports = {
   incrementAttempts,
   consumeAuthCode,
   deleteExpiredCodes,
+  generateAuthCodeTransactionally,
+  getPhoneAuthState,
+  isLockedOut,
+  isInCooldown,
+  recordFailedAttempt,
+  resetPhoneAuthState,
 };

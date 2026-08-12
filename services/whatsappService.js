@@ -148,7 +148,14 @@ async function sendSingleMessage(to, text) {
         type: 'text',
         text: { preview_url: false, body: text },
       });
-      return; // Success
+      // Return the Graph API result (contains messages[0].id, the provider
+      // message ID) rather than discarding it — callers that need delivery
+      // observability (ADR-XXX §5, e.g. routes/auth.js's OTP send) use this
+      // to correlate future delivery-status webhooks. Callers that don't
+      // care (the vast majority of sendMessage() call sites) can continue
+      // to ignore the return value exactly as before — this is a
+      // backward-compatible, additive change.
+      return result;
     } catch (err) {
       const isLastAttempt = attempt === maxAttempts;
 
@@ -224,13 +231,20 @@ async function sendDocument(to, documentUrl, filename, caption = '') {
  */
 async function sendMessage(to, text) {
   const chunks = chunkMessage(text);
+  let lastResult;
 
   for (let i = 0; i < chunks.length; i++) {
-    await sendSingleMessage(to, chunks[i]);
+    lastResult = await sendSingleMessage(to, chunks[i]);
     if (i < chunks.length - 1) {
       await new Promise(r => setTimeout(r, 500));
     }
   }
+
+  // Returns the LAST chunk's Graph API result. For the single-chunk case
+  // (the OTP send path, and the overwhelming majority of messages sent by
+  // this app) this is simply "the" result. Existing call sites that
+  // ignore the return value are unaffected.
+  return lastResult;
 }
 
 /**

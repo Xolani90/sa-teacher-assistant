@@ -8,6 +8,7 @@ const { classifyIntent }         = require('../services/intentClassifier');
 const { buildPrompt }            = require('../services/promptService');
 const { generateContent }        = require('../services/aiService');
 const { sendMessage, sendDocument, downloadMedia } = require('../services/whatsappService');
+const { recordStatusWebhook } = require('../services/deliveryEventRepository');
 const { parseMarks, extractMarksFromImage, getFormatHelpText } = require('../utils/marksParser');
 const { processAssessmentData } = require('../services/diagnosticWorkflowService');
 const { generateConversationalResponse, isConversationalIntent } = require('../services/conversationService');
@@ -647,6 +648,63 @@ async function handleCommand(from, text) {
   return handleCommandImpl(from, text, buildCommandDeps());
 }
 
+/**
+ * Persists each entry of a Meta WhatsApp status webhook batch
+ * (`value.statuses[]`) as a structured delivery event (ADR-XXX §5).
+ *
+ * Each entry looks like:
+ *   { id: 'wamid...', status: 'sent'|'delivered'|'read'|'failed',
+ *     timestamp: '<unix seconds>', recipient_id: '<phone, no +>',
+ *     errors: [{ code, title, message, ... }] }
+ *
+ * recipient_id arrives in the same international-format-without-`+` shape
+ * as every other WhatsApp-originated phone value in this codebase
+ * (see hashPhone()'s own doc comment) — hashPhone() normalizes it
+ * identically to how request-code/verify-code hash inbound phone numbers,
+ * so correlation by phone_hash (where used) stays consistent.
+ *
+ * Idempotent and correlation-safe: deliveryEventRepository handles
+ * de-duplication (same message ID + status is a no-op) and the
+ * early-arrival race (a status for a message ID not yet linked to an
+ * auth_code_id is stored and reconciled once that link exists) — this
+ * function does not need its own idempotency logic.
+ *
+ * Never touches auth_codes — delivery telemetry is observational only
+ * (§5.1) and must not affect OTP validity.
+ *
+ * @param {Array<Object>} statuses
+ */
+function processStatusWebhooks(statuses) {
+  if (!Array.isArray(statuses)) return;
+
+  for (const statusEntry of statuses) {
+    if (!statusEntry || !statusEntry.id || !statusEntry.status) continue;
+
+    const providerMessageId = statusEntry.id;
+    const eventStatus = statusEntry.status;
+    const phoneHash = statusEntry.recipient_id ? hashPhone(statusEntry.recipient_id) : null;
+    if (!phoneHash) continue; // can't persist without a phone_hash (NOT NULL column)
+
+    const providerEventAt = statusEntry.timestamp
+      // Meta sends unix seconds as a string; store as SQLite datetime text.
+      ? new Date(Number(statusEntry.timestamp) * 1000).toISOString().replace('T', ' ').replace(/\.\d+Z$/, '')
+      : null;
+
+    const providerError = Array.isArray(statusEntry.errors) && statusEntry.errors.length > 0
+      ? statusEntry.errors.map(e => e.title || e.message || e.code).filter(Boolean).join('; ')
+      : null;
+
+    try {
+      recordStatusWebhook({ providerMessageId, phoneHash, eventStatus, providerError, providerEventAt });
+    } catch (err) {
+      // One malformed entry in a batch must not prevent the rest of the
+      // batch from being processed — matches the per-message try/catch
+      // convention used for incoming messages below.
+      console.error('[WEBHOOK] Failed to persist delivery status event:', err.message);
+    }
+  }
+}
+
 // ── Webhook verification (GET) ─────────────────────────────────────────────
 
 router.get('/', (req, res) => {
@@ -678,8 +736,20 @@ router.post('/', async (req, res) => {
     const changes = entry?.changes?.[0];
     const value   = changes?.value;
 
-    // Ignore status updates (delivered, read receipts) — only process messages
-    if (value?.statuses) return;
+    // Delivery-status webhooks (sent/delivered/read/failed) are persisted
+    // as structured events (ADR-XXX §5), not discarded and not merely
+    // logged. This is diagnostic/observational only (§5.1) — nothing here
+    // touches auth_codes; a `failed` status must never invalidate,
+    // expire, or otherwise affect OTP validity. Handled and returned
+    // before falling through to message processing below.
+    if (value?.statuses) {
+      try {
+        processStatusWebhooks(value.statuses);
+      } catch (err) {
+        console.error('[WEBHOOK] Delivery-status processing error:', err.message);
+      }
+      return;
+    }
 
     const messages = value?.messages;
     if (!messages || messages.length === 0) return;
@@ -747,4 +817,5 @@ module.exports.__testExports = {
   assessmentSessionState,
   dataAssessmentState,
   lastGeneratedState,
+  processStatusWebhooks,
 };

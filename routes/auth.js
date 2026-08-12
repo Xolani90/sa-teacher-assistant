@@ -53,12 +53,13 @@ const authLimiter = rateLimit({
 });
 
 /**
- * Generates a random 6-digit numeric OTP.
+ * Generates a random 6-digit numeric OTP using a CSPRNG (ADR-XXX Decision 7).
+ * Replaces Math.random() — length, charset, and range are unchanged.
  *
  * @returns {string} 6-digit string
  */
 function generateOtp() {
-  return Math.floor(100000 + Math.random() * 900000).toString();
+  return crypto.randomInt(100000, 1000000).toString();
 }
 
 /**
@@ -93,17 +94,36 @@ async function handleRequestCode(req, res) {
   }
 
   try {
-    const { getTeacherByPhone } = require('../utils/usageTracker');
-    const { hashPhone } = require('../utils/usageTracker');
-    const { createAuthCode, deleteExpiredCodes } = require('../services/authCodeRepository');
+    const { getTeacherByPhone, hashPhone } = require('../utils/usageTracker');
+    const {
+      deleteExpiredCodes,
+      generateAuthCodeTransactionally,
+      isLockedOut,
+      isInCooldown,
+    } = require('../services/authCodeRepository');
+    const { recordSendResult } = require('../services/deliveryEventRepository');
     const { sendMessage } = require('../services/whatsappService');
 
     const teacher = getTeacherByPhone(phone);
 
     if (teacher) {
+      const phoneHash = hashPhone(phone);
+
+      // Lockout takes precedence over cooldown (§4.3) — both checks must
+      // pass for generation to occur; an expired cooldown does not
+      // override an active lockout. This must not be observable
+      // externally: the response is the same generic 200 either way.
+      // isLockedOut() also performs the §4.1 lockout-expiry full reset as
+      // a side effect when the stored lockout has passed.
+      if (isLockedOut(phoneHash)) {
+        return res.status(200).json({ success: true });
+      }
+      if (isInCooldown(phoneHash)) {
+        return res.status(200).json({ success: true });
+      }
+
       const otp = generateOtp();
       const otpHash = hashOtp(otp);
-      const phoneHash = hashPhone(phone);
 
       deleteExpiredCodes(phoneHash);
 
@@ -112,7 +132,15 @@ async function handleRequestCode(req, res) {
         .prepare(`SELECT datetime('now', '+${OTP_EXPIRY_MINUTES} minutes') AS ts`)
         .get().ts;
 
-      createAuthCode(phoneHash, otpHash, expiresAt);
+      // Generation success is defined precisely as this transaction
+      // committing (§4.3) — it supersedes any prior active OTP, inserts
+      // the new row, and starts the 60s cooldown, all atomically. Delivery
+      // has not been attempted yet and cannot roll this back.
+      const { id: authCodeId } = generateAuthCodeTransactionally(
+        phoneHash,
+        otpHash,
+        expiresAt
+      );
 
       // --- DEV-ONLY OTP BYPASS ---
       // Never active in production. Lets you test the login flow locally
@@ -122,10 +150,34 @@ async function handleRequestCode(req, res) {
         console.log(`[AUTH][DEV ONLY] OTP for ${phone}: ${otp}`);
       }
 
+      // Delivery is asynchronous and observational only (§3.1, §5) — it
+      // happens strictly after the generation transaction above has
+      // committed, and its outcome never affects OTP validity or the
+      // cooldown already started. Both success and failure produce a
+      // persisted diagnostic event tied to authCodeId.
       try {
-        await sendMessage(phone, `Your verification code is: ${otp}`);
+        const sendResult = await sendMessage(phone, `Your verification code is: ${otp}`);
+        const providerMessageId = sendResult?.messages?.[0]?.id || null;
+        recordSendResult({
+          authCodeId,
+          phoneHash,
+          providerMessageId,
+          eventStatus: providerMessageId ? 'send_accepted' : 'send_failed',
+          providerError: providerMessageId ? null : 'No message ID returned by provider',
+        });
       } catch (sendErr) {
         console.warn('[AUTH] Failed to send WhatsApp OTP:', sendErr.message);
+        // Send-failure diagnostic event (§5's explicit send-failure case):
+        // recorded even though no provider message ID was ever issued.
+        // The OTP generated above remains valid — this must never roll
+        // back or invalidate it.
+        recordSendResult({
+          authCodeId,
+          phoneHash,
+          providerMessageId: null,
+          eventStatus: 'send_failed',
+          providerError: sendErr.message,
+        });
       }
 
       return res.status(200).json({
@@ -134,6 +186,9 @@ async function handleRequestCode(req, res) {
       });
     }
 
+    // No teacher record → no OTP generated, so no phone cooldown/lockout
+    // state is created or checked (§4.3) — request-code still returns the
+    // same generic response per §3.2 (anti-enumeration, unchanged).
     return res.status(200).json({ success: true });
   } catch (err) {
     console.error('[AUTH] request-code error:', err.message);
@@ -165,9 +220,14 @@ async function handleVerifyCode(req, res) {
   }
 
   try {
-    const { getTeacherByPhone } = require('../utils/usageTracker');
-    const { hashPhone } = require('../utils/usageTracker');
-    const { getActiveAuthCode, incrementAttempts, consumeAuthCode } = require('../services/authCodeRepository');
+    const { getTeacherByPhone, hashPhone } = require('../utils/usageTracker');
+    const {
+      getActiveAuthCode,
+      consumeAuthCode,
+      isLockedOut,
+      recordFailedAttempt,
+      resetPhoneAuthState,
+    } = require('../services/authCodeRepository');
 
     const teacher = getTeacherByPhone(phone);
     if (!teacher) {
@@ -175,19 +235,30 @@ async function handleVerifyCode(req, res) {
     }
 
     const phoneHash = hashPhone(phone);
+
+    // Lockout is checked BEFORE looking at any OTP — while locked out,
+    // verification remains blocked outright (§4.1). isLockedOut() also
+    // performs the lockout-expiry full reset as a side effect.
+    if (isLockedOut(phoneHash)) {
+      return res.status(401).json({ error: 'Unauthorized' });
+    }
+
     const authCode = getActiveAuthCode(phoneHash);
 
     if (!authCode) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
-    if (authCode.attempts >= MAX_ATTEMPTS) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
+    // auth_codes.attempts is NOT authoritative for the 5-attempt security
+    // limit (§4.2) — the sole authority is the phone-level state below.
+    // This per-row field is retained only for backward-compatible shape,
+    // never read or enforced against here.
     const suppliedHash = hashOtp(code);
     if (suppliedHash !== authCode.codeHash) {
-      incrementAttempts(authCode.id);
+      // Authoritative counter (§4.1/§4.2): persists across OTP
+      // generations, not reset by requesting a new code, locks the phone
+      // at the 5th failure.
+      recordFailedAttempt(phoneHash, MAX_ATTEMPTS);
       return res.status(401).json({ error: 'Unauthorized' });
     }
 
@@ -195,6 +266,10 @@ async function handleVerifyCode(req, res) {
     if (!consumed) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
+
+    // Successful-verification rule (§4.1, the entire rule): reset failed
+    // count to 0 and clear lockout.
+    resetPhoneAuthState(phoneHash);
 
     let accessToken;
     try {

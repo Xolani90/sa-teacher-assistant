@@ -153,13 +153,18 @@ async function run() {
   consumeAuthCode(consumedSetup.id);
   assertEq(getActiveAuthCode(PHONE), null, 'consumed code excluded even though unexpired');
 
-  console.log('\nTest GA-05: when multiple active codes exist, returns the most recent');
+  console.log('\nTest GA-05: active-OTP DB backstop (ADR-XXX §3.1) rejects a second');
+  console.log('raw active row for the same phone — supersession must go through');
+  console.log('generateAuthCodeTransactionally(), not a second createAuthCode() call.');
   _db.exec(`DELETE FROM auth_codes`);
   const older = createAuthCode(PHONE, 'older_hash', futureExp);
-  const newer = createAuthCode(PHONE, 'newer_hash', futureExp);
-  const mostRecent = getActiveAuthCode(PHONE);
-  assertEq(mostRecent.id, newer.id, 'returns the newer row, not the older one');
-  assert(older.id !== newer.id, 'sanity: two distinct rows were created');
+  assertThrows(
+    () => createAuthCode(PHONE, 'newer_hash', futureExp),
+    'UNIQUE constraint failed',
+    'a second raw active row for the same phone is rejected by idx_auth_codes_active_backstop'
+  );
+  const activeAfterRejectedInsert = getActiveAuthCode(PHONE);
+  assertEq(activeAfterRejectedInsert.id, older.id, 'the original row remains the active one, untouched');
 
   console.log('\nTest GA-06: does not leak another phone_hash\'s active code');
   _db.exec(`DELETE FROM auth_codes`);
@@ -211,11 +216,20 @@ async function run() {
   console.log('\n── Section 6: deleteExpiredCodes() ──────────────────────────────────');
 
   console.log('\nTest DE-01: deletes expired rows for the given phone_hash');
+  console.log('(inserted sequentially, not simultaneously — the ADR-XXX §3.1');
+  console.log('active-OTP backstop treats any non-consumed/non-superseded row as');
+  console.log('occupying the one-active-row slot regardless of expiry, since');
+  console.log('SQLite partial indexes cannot express a time-dependent predicate;');
+  console.log('see Migration 041\'s comment in utils/database.js. In the real');
+  console.log('request-code flow this is a non-issue because deleteExpiredCodes()');
+  console.log('always runs immediately before generation.)');
   _db.exec(`DELETE FROM auth_codes`);
   createAuthCode(PHONE, 'expired_1', pastExp);
+  const firstDeleteCount = deleteExpiredCodes(PHONE);
+  assertEq(firstDeleteCount, 1, 'first expired row deleted');
   createAuthCode(PHONE, 'expired_2', pastExp);
   const deletedCount = deleteExpiredCodes(PHONE);
-  assertEq(deletedCount, 2, 'deletes both expired rows');
+  assertEq(deletedCount, 1, 'second expired row deleted');
   assertEq(getActiveAuthCode(PHONE), null, 'no active codes remain');
 
   console.log('\nTest DE-02: does not delete still-active rows');

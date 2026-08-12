@@ -53,6 +53,18 @@ function makeReqRes(body = {}) {
   return { req, res };
 }
 
+// Clears auth_phone_state and auth_codes for a phone_hash so each case
+// below gets a fresh, un-cooled-down phone (ADR-XXX §4.3 introduced a
+// 60-second resend cooldown after every successful OTP-generation
+// transaction — several cases in this file deliberately call
+// handleRequestCode for the SAME phone back-to-back to test the
+// NODE_ENV gate in isolation, which is orthogonal to cooldown behavior).
+function clearAuthState(db, phoneHash) {
+  db.prepare('DELETE FROM whatsapp_delivery_events WHERE phone_hash = ?').run(phoneHash);
+  db.prepare('DELETE FROM auth_phone_state WHERE phone_hash = ?').run(phoneHash);
+  db.prepare('DELETE FROM auth_codes WHERE phone_hash = ?').run(phoneHash);
+}
+
 function hasDevOtp(body) {
   return !!body && Object.prototype.hasOwnProperty.call(body, 'devOtp');
 }
@@ -92,6 +104,7 @@ async function run() {
 
     // --- Case 2: development (non-production) MAY return devOtp ---
     process.env.NODE_ENV = 'development';
+    clearAuthState(db, hashPhone(REGISTERED_PHONE));
     {
       const { req, res } = makeReqRes({ phone: REGISTERED_PHONE });
       await handleRequestCode(req, res);
@@ -106,6 +119,7 @@ async function run() {
 
     // --- Case 3: NODE_ENV unset (common local default) behaves like dev ---
     delete process.env.NODE_ENV;
+    clearAuthState(db, hashPhone(REGISTERED_PHONE));
     {
       const { req, res } = makeReqRes({ phone: REGISTERED_PHONE });
       await handleRequestCode(req, res);
@@ -132,6 +146,7 @@ async function run() {
     // (documents current behaviour: the gate is an equality check against
     // 'production', not an allowlist — anything else is treated as dev)
     process.env.NODE_ENV = 'staging';
+    clearAuthState(db, hashPhone(REGISTERED_PHONE));
     {
       const { req, res } = makeReqRes({ phone: REGISTERED_PHONE });
       await handleRequestCode(req, res);

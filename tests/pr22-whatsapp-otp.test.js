@@ -54,14 +54,19 @@ function assertEq(a, b, label) {
 }
 
 function resetDb() {
-  _db.exec('DELETE FROM auth_codes; DELETE FROM teachers;');
+  // whatsapp_delivery_events.auth_code_id has a FOREIGN KEY REFERENCES
+  // auth_codes(id) (Migration 041, ADR-XXX §5) — must be cleared before
+  // auth_codes or the DELETE below violates the FK constraint. Also clear
+  // auth_phone_state (Migration 041, §4.1) so phone-level lockout/cooldown
+  // state doesn't leak between sections the way auth_codes rows used to.
+  _db.exec('DELETE FROM whatsapp_delivery_events; DELETE FROM auth_phone_state; DELETE FROM auth_codes; DELETE FROM teachers;');
   // The original resetDb() created a brand-new in-memory db each time, so
   // autoincrement ids always restarted at 1. DELETE alone doesn't reset
   // sqlite's internal sequence counter, and some sections below rely on
   // insertTeacher() reproducing the same id a prior section captured
   // (e.g. VC-08 reuses validTeacherId from VC-01) — so reset the sequence
   // too, to keep that "fresh db" behavior intact.
-  _db.exec(`DELETE FROM sqlite_sequence WHERE name IN ('teachers', 'auth_codes')`);
+  _db.exec(`DELETE FROM sqlite_sequence WHERE name IN ('teachers', 'auth_codes', 'whatsapp_delivery_events', 'auth_phone_state')`);
 }
 
 function insertTeacher(phoneHash, name = null) {
@@ -99,7 +104,7 @@ async function run() {
   } = require('../routes/auth').__testExports;
 
   const { getTeacherByPhone, hashPhone } = require('../utils/usageTracker');
-  const { createAuthCode, getActiveAuthCode, incrementAttempts, consumeAuthCode } = require('../services/authCodeRepository');
+  const { createAuthCode, getActiveAuthCode, incrementAttempts, consumeAuthCode, getPhoneAuthState, recordFailedAttempt } = require('../services/authCodeRepository');
 
   // ═══════════════════════════════════════════════════════════════════════
   // SECTION 1: Helper functions
@@ -292,20 +297,23 @@ async function run() {
 
   assertEq(res11.statusCode, 401, 'returns 401 for consumed OTP');
 
-  console.log('\nTest VC-05: max attempts reached returns 401');
+  console.log('\nTest VC-05: max attempts reached returns 401 (phone-level lockout, ADR-XXX §4.1/§4.2)');
   resetDb();
   insertTeacher(validPhoneHash, 'Valid Teacher');
   const maxAttemptsCode = createAuthCode(validPhoneHash, validOtpHash, futureExp);
-  
-  // Increment to max attempts
+
+  // auth_codes.attempts is no longer authoritative (§4.2) — the 5-failure
+  // lockout is driven entirely by auth_phone_state via recordFailedAttempt().
+  // incrementAttempts() (legacy, non-authoritative) is deliberately NOT
+  // called here, to prove the lockout doesn't depend on it.
   for (let i = 0; i < 5; i++) {
-    incrementAttempts(maxAttemptsCode.id);
+    recordFailedAttempt(validPhoneHash);
   }
 
   const { req: req12, res: res12 } = makeReqRes({ phone: validPhone, code: validOtp });
   await handleVerifyCode(req12, res12);
 
-  assertEq(res12.statusCode, 401, 'returns 401 when max attempts reached');
+  assertEq(res12.statusCode, 401, 'returns 401 when max attempts reached (locked out), even with the correct OTP');
 
   console.log('\nTest VC-06: unknown phone returns 401');
   resetDb();
@@ -350,7 +358,7 @@ async function run() {
   const duration = expiryTime - now;
   assert(duration >= 3590 && duration <= 3610, 'JWT expires in approximately 1 hour');
 
-  console.log('\nTest VC-10: failed verification increments attempts');
+  console.log('\nTest VC-10: failed verification increments the phone-level counter (ADR-XXX §4.1/§4.2)');
   resetDb();
   insertTeacher(validPhoneHash, 'Valid Teacher');
   const attemptsCode = createAuthCode(validPhoneHash, validOtpHash, futureExp);
@@ -358,8 +366,13 @@ async function run() {
   const { req: req17, res: res17 } = makeReqRes({ phone: validPhone, code: '999999' });
   await handleVerifyCode(req17, res17);
 
-  const updatedCode = getActiveAuthCode(validPhoneHash);
-  assertEq(updatedCode.attempts, 1, 'attempts incremented after failed verification');
+  // auth_codes.attempts is deliberately NOT touched by verify-code anymore
+  // (§4.2) — assert it stays at its default 0 to prove non-authority, and
+  // assert the real, authoritative counter (auth_phone_state) incremented.
+  const unchangedCode = getActiveAuthCode(validPhoneHash);
+  assertEq(unchangedCode.attempts, 0, 'auth_codes.attempts is untouched (non-authoritative, §4.2)');
+  const phoneState = getPhoneAuthState(validPhoneHash);
+  assertEq(phoneState.failedAttempts, 1, 'auth_phone_state.failed_attempts incremented after failed verification');
 
   console.log('\nTest VC-11: successful verification consumes the code');
   resetDb();

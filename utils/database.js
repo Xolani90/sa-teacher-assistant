@@ -1004,6 +1004,114 @@ function runMigrations() {
       ON coaching_snapshots(phone_hash, topic_id, captured_at);
   `);
 
+  // Migration 041: ADR-XXX WhatsApp OTP authentication — phone-level auth
+  // state, delivery observability, and the active-OTP database backstop.
+  //
+  // auth_phone_state: the SOLE authoritative store for failed-attempt
+  // counting, lockout, and resend cooldown (§4.1, §4.2, §4.3). One row per
+  // canonical phone_hash (already normalized before hashing by hashPhone()
+  // in utils/usageTracker.js — see ADR §4.1). auth_codes.attempts remains
+  // in the schema for backward compatibility but is explicitly NOT
+  // authoritative for the 5-attempt lockout policy (§4.2) — do not read,
+  // write, or enforce against it for that purpose.
+  //   failed_attempts : authoritative counter, persists across OTP
+  //                     generations, reset to 0 on successful verification
+  //                     or on lockout expiry (§4.1).
+  //   lockout_until    : NULL when not locked out; a datetime string when
+  //                     locked (§4.1, 15 minutes per §3.2).
+  //   cooldown_until    : NULL or a datetime string; set to the commit
+  //                     timestamp + 60s of a successful OTP-generation
+  //                     transaction (§4.3). Never gated on delivery outcome.
+  //
+  // whatsapp_delivery_events: dedicated delivery-events model (§5).
+  // Two kinds of rows are written into this one table:
+  //   1. Send-result rows (written by routes/auth.js immediately after
+  //      attempting delivery, outside the OTP-generation transaction):
+  //      auth_code_id is always known and set at insert time.
+  //      event_status = 'send_accepted' (provider_message_id populated)
+  //      or 'send_failed' (provider_message_id IS NULL, failure reason in
+  //      provider_error) — the explicit send-failure diagnostic event
+  //      required by §5's send-failure case.
+  //   2. Status-webhook rows (written by routes/webhook.js): correlated to
+  //      a send-result row via provider_message_id. If the send-result row
+  //      hasn't been persisted yet when the webhook arrives (§5's
+  //      early-arrival race), the webhook row is still inserted with
+  //      auth_code_id = NULL and reconciled — auth_code_id backfilled onto
+  //      it — the moment the matching send-result row is written. See
+  //      services/deliveryEventRepository.js for the reconciliation logic
+  //      and the accompanying idempotency test.
+  //
+  // idx_delivery_events_msg_status supports the lookups
+  // services/deliveryEventRepository.js performs to enforce idempotency
+  // at the application level: "at most one row per
+  // (provider_message_id, event_status)" is enforced by explicit
+  // check-then-write logic there (not a SQL UNIQUE constraint), because
+  // the check must also read/backfill auth_code_id on the existing row
+  // rather than merely rejecting the duplicate write. See that file's
+  // recordSendResult()/recordStatusWebhook() for the reconciliation and
+  // idempotency logic, and the accompanying tests for proof of the
+  // early-arrival race and duplicate-webhook handling.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS auth_phone_state (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash      TEXT    NOT NULL UNIQUE,
+      failed_attempts INTEGER NOT NULL DEFAULT 0,
+      lockout_until   TEXT,
+      cooldown_until  TEXT,
+      updated_at      TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS whatsapp_delivery_events (
+      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider_message_id  TEXT,
+      phone_hash           TEXT    NOT NULL,
+      auth_code_id         INTEGER,
+      event_status         TEXT    NOT NULL,
+      provider_error       TEXT,
+      provider_event_at    TEXT,
+      received_at          TEXT    NOT NULL DEFAULT (datetime('now')),
+      created_at           TEXT    NOT NULL DEFAULT (datetime('now')),
+      FOREIGN KEY (auth_code_id) REFERENCES auth_codes(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_delivery_events_msg_status
+      ON whatsapp_delivery_events(provider_message_id, event_status);
+    CREATE INDEX IF NOT EXISTS idx_delivery_events_auth_code
+      ON whatsapp_delivery_events(auth_code_id);
+    CREATE INDEX IF NOT EXISTS idx_delivery_events_unreconciled
+      ON whatsapp_delivery_events(provider_message_id)
+      WHERE auth_code_id IS NULL;
+  `);
+
+  // auth_codes.superseded_at (§3.1): set when a newer OTP is generated for
+  // the same phone within the same generation transaction. "Active" per
+  // §3.1 is the conjunction of consumed_at IS NULL, expires_at > now, AND
+  // superseded_at IS NULL — getActiveAuthCode() (services/authCodeRepository.js)
+  // must check all three; none may be substituted for or approximated by
+  // the others.
+  try {
+    db.exec(`ALTER TABLE auth_codes ADD COLUMN superseded_at TEXT`);
+  } catch (_) { /* column already exists — additive migration, safe to re-run */ }
+
+  // Active-OTP database backstop (§3.1). This partial UNIQUE index
+  // enforces AT MOST ONE row per phone_hash among rows that are
+  // "not consumed AND not superseded". It is a backstop against a bug in
+  // application logic leaving two such rows for one phone — it does NOT
+  // enforce expires_at > now, because SQLite partial-index predicates
+  // cannot reference datetime('now') (the predicate is evaluated once,
+  // not re-evaluated per query). Expiry therefore remains, as it does
+  // today, an application-level validity condition checked in
+  // getActiveAuthCode()'s WHERE clause. This is a deliberate, documented
+  // implementation choice per §3.1's explicit instruction that the
+  // concrete SQLite mechanism is not prescribed by the ADR and must be
+  // validated during implementation rather than assumed from the ADR's
+  // illustrative example.
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_auth_codes_active_backstop
+      ON auth_codes(phone_hash)
+      WHERE consumed_at IS NULL AND superseded_at IS NULL;
+  `);
+
   console.log('[DB] Migrations complete');
 }
 
