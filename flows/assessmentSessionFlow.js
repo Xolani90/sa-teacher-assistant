@@ -234,6 +234,7 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
     hashPhone,
     safeSendMessage,
     assessmentSessionState, // SessionStore instance
+    blueprintAuthoringState, // RC1-H-004 follow-up: see STATUS/RESUME guard below
     listBlueprints,
     getTeacherClasses,
     getBlueprintById,
@@ -272,6 +273,16 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
     }
 
     if (upper === 'RESUME' || upper === 'STATUS') {
+      // RC1-H-004 follow-up: this flow has no assessment session of its
+      // own, but another flow (blueprintAuthoring) may genuinely own an
+      // active session for this phone right now — don't answer on its
+      // behalf. Returning false here lets messageProcessor's dispatch
+      // order continue on to blueprintAuthoringFlow, which has its own
+      // correct STATUS handling. Only claim STATUS/RESUME as "nothing
+      // active anywhere" once we've confirmed that.
+      if (blueprintAuthoringState?.get(phoneHash)) {
+        return false;
+      }
       await safeSendMessage(from,
         "No active assessment session found. Send *NEW TEST* to start one."
       );

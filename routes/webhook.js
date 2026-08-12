@@ -320,6 +320,10 @@ function buildAssessmentSessionDeps() {
     hashPhone,
     safeSendMessage,
     assessmentSessionState,
+    // RC1-H-004 follow-up: needed so the no-session STATUS/RESUME branch
+    // below doesn't claim STATUS out from under a blueprintAuthoring
+    // session that's genuinely active — see that branch's comment.
+    blueprintAuthoringState,
     listBlueprints,
     getBlueprintById,
     getTeacherClasses, // ADR-004: class-context resolution
