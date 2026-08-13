@@ -455,11 +455,22 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
       ? getClassRoster(phoneHash, chosenClass.id)
       : [];
 
+    // RC1-D1-003: chosenClass.learner_count is a cache and can drift
+    // behind the live active roster (see services/learnerRosterService.js's
+    // syncLearnerCount()/getActiveRosterCounts()). Using it alone here
+    // silently truncated capture to the stale count, dropping real,
+    // actively-rostered learners. roster.length alone isn't safe either:
+    // initCapture()'s own contract allows learnerCount to legitimately
+    // exceed the roster (roster prefills some learners, the rest are asked
+    // for by name). The correct population is never smaller than the live
+    // roster but may be larger — hence Math.max, not a straight substitution.
+    const effectiveLearnerCount = Math.max(chosenClass.learner_count, roster.length);
+
     const activeState = initCapture({
       blueprint,
       classId: chosenClass.id,
       className: chosenClass.name,
-      learnerCount: chosenClass.learner_count,
+      learnerCount: effectiveLearnerCount,
       roster,
     });
 
@@ -470,7 +481,7 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
       : '';
 
     await safeSendMessage(from,
-      `Assessment created.\n\nBlueprint: *${state.blueprintTitle}*\nClass: *${chosenClass.name}*\nLearners: *${chosenClass.learner_count}*${rosterNote}\n\n${formatCapturePrompt(activeState)}`
+      `Assessment created.\n\nBlueprint: *${state.blueprintTitle}*\nClass: *${chosenClass.name}*\nLearners: *${effectiveLearnerCount}*${rosterNote}\n\n${formatCapturePrompt(activeState)}`
     );
     return true;
   }
