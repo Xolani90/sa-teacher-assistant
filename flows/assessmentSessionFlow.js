@@ -94,7 +94,7 @@ function formatCompleteMenu() {
 
 function formatBlueprintList(blueprints) {
   return blueprints
-    .map((b, i) => `${i + 1}. ${b.title} (Grade ${b.grade}, ${b.subject}) — ${b.question_count} question${b.question_count === 1 ? '' : 's'}`)
+    .map((b, i) => `${i + 1}. ${b.title} (Grade ${b.grade}, ${b.subject}) — ${b.questionCount} question${b.questionCount === 1 ? '' : 's'}`)
     .join('\n');
 }
 
