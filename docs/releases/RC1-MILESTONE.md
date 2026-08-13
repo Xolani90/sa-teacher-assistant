@@ -111,7 +111,7 @@ be verified independently.
 
 | Item | Automated ref | Pass | Fail | Notes |
 |---|---|---|---|---|
-| WhatsApp OTP login (request-code → verify-code) | `pr22-whatsapp-otp.test.js` | ☐ | ☐ | Verify via API (curl/Postman); no WhatsApp trigger exists |
+| WhatsApp OTP login (request-code → verify-code) | `pr22-whatsapp-otp.test.js` | ☑ | ☐ | PASS (2026-08-13). Verified against production (`https://sa-teacher-assistant.onrender.com`): `POST /api/auth/request-code` with `{"phone":"+27782629774"}` returned `{"success":true}`; OTP code confirmed received via real WhatsApp message; `POST /api/auth/verify-code` with that code returned a valid JWT (`accessToken`, `tokenType: Bearer`, `expiresIn: 3600`) and correct teacher record (`{"id":1,"name":"Xolani"}`). Full request-code → WhatsApp delivery → verify-code round trip confirmed live, not just via automated suite. |
 | Dev OTP bypass correctly disabled in production | `pr25-dev-otp-bypass.test.js` | ☐ | ☐ | Verify via API against production |
 | Profile update | `update-teacher-profile.test.js` | ☐ | ☐ | |
 | MENU / HELP / HI (session reset) | `menu-help-session-reset.test.js` | ☐ | ☐ | |
