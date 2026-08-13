@@ -538,7 +538,7 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
 
       const completionPrefix = bulkNotice ? `${bulkNotice}\n\n` : '';
       await safeSendMessage(from,
-        `${completionPrefix}Capture complete.\n\n${result.state.learnerCount} learners\n${result.state.questions.length} questions\n\nGenerating assessment...\n\n${formatCompleteMenu()}`
+        `${completionPrefix}Capture complete.\n\n${result.state.learnerCount} learner${result.state.learnerCount === 1 ? '' : 's'}\n${result.state.questions.length} question${result.state.questions.length === 1 ? '' : 's'}\n\nGenerating assessment...\n\n${formatCompleteMenu()}`
       );
 
       const diagnostic = await processAssessmentData(phoneHash, {
