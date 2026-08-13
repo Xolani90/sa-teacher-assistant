@@ -175,7 +175,21 @@ async function processMessage(message, deps) {
   const activeFlowId = deps.assessmentSessionState.get(phoneHash)
     ? 'assessmentSession'
     : (deps.blueprintAuthoringState.get(phoneHash) ? 'blueprintAuthoring' : null);
-  require('../services/navigationService').evaluateMessage(phoneHash, text, { activeFlowId });
+  // RC1-H-007 fix: evaluateMessage() is a discarded dry-run per the comment
+  // above, but it is NOT actually side-effect-free — it calls
+  // consumeNumericReply() internally (navigationService.js §4), which
+  // destructively closes an open menu on a match. When a flow is already
+  // active and about to run its own consumeNumericReply() against the same
+  // reply (e.g. assessmentSessionFlow's COMPLETE_MENU handler), this
+  // speculative call was consuming/closing the menu first, so the real
+  // handler moments later found no_menu_open. Skipping the speculative call
+  // whenever activeFlowId is set gives the owning flow the only/first
+  // opportunity to consume the reply, matching the "no new side effects"
+  // intent this call was originally meant to have. When no flow is active,
+  // behavior is unchanged.
+  if (!activeFlowId) {
+    require('../services/navigationService').evaluateMessage(phoneHash, text, { activeFlowId });
+  }
 
   if (alreadyMidFlow) {
     // Route straight through without classifying — each handler will
