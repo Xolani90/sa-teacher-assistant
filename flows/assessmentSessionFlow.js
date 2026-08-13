@@ -590,6 +590,19 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
       }
     }
 
+    // RC1-H-007 (provisional) diagnostic instrumentation — additive only,
+    // no behavior change. consumeNumericReply() already computes `reason`
+    // internally (not_numeric | no_menu_open | unknown_option) but nothing
+    // previously logged it, so a non-matching numeric reply at COMPLETE_MENU
+    // silently fell through to the generic re-render below with no trace.
+    // Remove once RC1-H-007 root cause is confirmed and fixed.
+    if (!consumed.matched) {
+      console.log(
+        `[ASSESSMENT_SESSION] COMPLETE_MENU numeric reply not matched for ${phoneHash.slice(-8)}: ` +
+          `reason=${consumed.reason} rawReply=${JSON.stringify(trimmed)}`
+      );
+    }
+
     // Re-open the menu on an invalid/expired reply so a mistyped digit
     // doesn't strand the teacher with no way back in.
     navigationService.openMenu(phoneHash, { id: COMPLETE_MENU_ID, options: COMPLETE_MENU_OPTIONS });
