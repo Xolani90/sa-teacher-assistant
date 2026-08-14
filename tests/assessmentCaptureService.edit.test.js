@@ -13,6 +13,7 @@ const {
   submitReply,
   submitEdit,
   submitUndo,
+  formatCapturePrompt,
 } = require('../services/assessmentCaptureService');
 
 let passed = 0;
@@ -196,6 +197,28 @@ console.log('\n── submitEdit(): cannot target a learner who has not been nam
   const editResult = submitEdit(state, 'anything');
   check('EDIT rejected for unnamed learner target', editResult.ok === false);
   check('error mentions no captured learner matches', /no captured learner matches/i.test(editResult.error || ''));
+}
+
+console.log('\n── Duplicate ✏️ defect: formatCapturePrompt owns the edit prefix exactly once ──');
+{
+  // Recon finding: assessmentSessionFlow.js used to wrap formatCapturePrompt's
+  // own "✏️ Editing — " prefix in a second, redundant "✏️ " at the call
+  // site, producing "✏️ ✏️ Editing — ..." on the wire. formatCapturePrompt()
+  // is the single source of truth for that prefix; this pins its contract
+  // so the flow layer can safely pass its return value straight through.
+  let state = baseState();
+  state = captureLearner(state, 'Sipho', [5, 6]);
+  const beforeEdit = submitReply(state, 'Naledi').state;
+  const editResult = submitEdit(beforeEdit, 'Sipho');
+
+  const prompt = formatCapturePrompt(editResult.state);
+  const emojiCount = (prompt.match(/✏️/g) || []).length;
+  check('prompt contains exactly one ✏️ while mid-edit', emojiCount === 1);
+  check('prompt starts with the single edit prefix', prompt.startsWith('✏️ Editing — '));
+
+  // Non-editing state must carry no edit prefix at all.
+  const normalPrompt = formatCapturePrompt(beforeEdit);
+  check('non-editing prompt has no ✏️', !normalPrompt.includes('✏️'));
 }
 
 console.log(`\n${'─'.repeat(50)}`);

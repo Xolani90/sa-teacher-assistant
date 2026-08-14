@@ -516,7 +516,7 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
       }
 
       assessmentSessionState.set(phoneHash, editResult.state);
-      await safeSendMessage(from, `✏️ ${formatCapturePrompt(editResult.state)}`);
+      await safeSendMessage(from, formatCapturePrompt(editResult.state));
       return true;
     }
 
