@@ -58,6 +58,7 @@ async function handleWorksheetFlow(from, text, deps) {
     safeSendMessage,
     hashPhone,
     triggerGeneration,
+    buildGenerationDeps,
   } = deps;
 
   const upper = text.toUpperCase().trim();
@@ -72,7 +73,10 @@ async function handleWorksheetFlow(from, text, deps) {
   }
 
   const intent = { ...lastWorksheet.intent, type: 'worksheet', differentiation };
-  await triggerGeneration({ from, intent, deps });
+  // triggerGeneration expects the full generation dependency contract, not
+  // this flow's own narrow deps — construct it fresh here, matching every
+  // other call site of triggerGeneration in the codebase.
+  await triggerGeneration({ from, intent, deps: buildGenerationDeps() });
   return true;
 }
 

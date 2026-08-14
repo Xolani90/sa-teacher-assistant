@@ -318,6 +318,13 @@ function buildWorksheetDeps() {
     safeSendMessage,
     hashPhone,
     triggerGeneration, // core/generationPipeline.js
+    // Builder reference (not a flattened contract) so handleWorksheetFlow
+    // can construct the full generation-deps object at the point it calls
+    // triggerGeneration, matching every other call site of triggerGeneration
+    // in the codebase (commandHandler.js, messageProcessor.js) and the same
+    // pattern already used by buildBlueprintAuthoringDeps() for
+    // buildAssessmentSessionDeps. Keeps buildWorksheetDeps() itself narrow.
+    buildGenerationDeps,
   });
 }
 
@@ -946,4 +953,8 @@ module.exports.__testExports = {
   rosterState,
   processMessage,
   buildProcessMessageDeps,
+  // RC1 WORKSHEET differentiation regression (tests/rc1-worksheet-differentiation.test.js):
+  // lastWorksheetState so the EASIER/HARDER/VISUAL/ORAL bookkeeping can be
+  // inspected directly, mirroring lastGeneratedState above.
+  lastWorksheetState,
 };
