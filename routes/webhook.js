@@ -130,6 +130,40 @@ const reflectionState          = new SessionStore('reflection',          30 * 60
 const growthPlanState          = new SessionStore('growthPlan',          30 * 60 * 1000);
 const saveLock = new Set(); // B5-F1: per-phone SAVE in-flight lock (try/finally in SAVE handler)
 
+// RC1-CANCEL: the same 13 stores messageProcessor.js's alreadyMidFlow checks
+// (core/messageProcessor.js, "Skip classification entirely if already
+// mid-flow"). Kept as an explicit list, not a derived one, so the two stay
+// visibly in sync — if a new flow's store is added to alreadyMidFlow, it
+// must be added here too, and a mismatch is a one-line diff to spot in
+// review rather than a silent divergence between two independently
+// maintained checks.
+const FLOW_STORES = [
+  reportCommentState,
+  parentMessageState,
+  assessmentAnalysisState,
+  dataAssessmentState,
+  interventionPlanState,
+  profileUpdateState,
+  observationState,
+  observationHistoryState,
+  assessmentSessionState,
+  blueprintAuthoringState,
+  rosterState,
+  reflectionState,
+  growthPlanState,
+];
+
+/**
+ * True if any multi-turn flow store has an active (non-expired) session for
+ * this phone. Each store's own .get() already enforces its per-type TTL and
+ * deletes-on-expiry (see SessionStore.get()), so this is just OR-ing the
+ * same read alreadyMidFlow performs — same semantics, no new SQL, no new
+ * expiry rules of its own.
+ */
+function hasActiveFlow(phoneHash) {
+  return FLOW_STORES.some((store) => store.get(phoneHash));
+}
+
 // ── Observation flow module (extracted from this file) ─────────────────────
 const {
   handleObservationFlow,
@@ -696,6 +730,17 @@ function buildCommandDeps() {
     // while a teacher is mid-flow in rosterFlow's PREVIEW step — see the
     // guard in commandHandler.js's SAVE branch for why this is needed here.
     rosterState,
+    // RC1-CANCEL: CANCEL must not be claimed globally (discard the
+    // just-generated resource) while a teacher is mid-flow in ANY of the 13
+    // stores messageProcessor's alreadyMidFlow checks — those flows own
+    // their own CANCEL meaning (abandon the in-progress session), entirely
+    // distinct from this file's "discard the pending SAVE prompt" meaning.
+    // See the guard in commandHandler.js's CANCEL branch for why this is
+    // needed here. Same collision shape as RC1-H-004 (STATUS) and
+    // RC1-H-006 (SAVE), but broader: CANCEL is meaningful in every
+    // multi-turn flow, not just one or two, so this checks all 13 stores
+    // via hasActiveFlow() rather than naming a handful individually.
+    hasActiveFlow,
     // RC1-H-005: HELP/MENU/HI/HELLO must not short-circuit past onboarding
     // for a teacher who hasn't completed it — see the guard in
     // commandHandler.js's HELP/MENU/HI/HELLO branch.

@@ -78,9 +78,11 @@ async function handleCommand(from, text, deps) {
   // progress within the flow, not subscription usage. Falling through
   // (returning false, not handled) lets messageProcessor's alreadyMidFlow
   // dispatch route STATUS to the active flow's own handler instead.
-  // CANCEL already follows this same pattern above for the SAVE prompt —
-  // this mirrors it for STATUS/USAGE/BALANCE specifically, since those are
-  // the only aliases the global handler recognizes.
+  // CANCEL follows this same pattern below, for its own "discard the
+  // pending SAVE prompt" meaning vs. an active flow's "abandon this
+  // session" meaning (see the RC1-CANCEL comment on its guard) — this
+  // mirrors it for STATUS/USAGE/BALANCE specifically, since those are the
+  // only aliases the global handler recognizes.
   const upperIsStatusAlias = upper === 'STATUS' || upper === 'USAGE' || upper === 'BALANCE';
   if (upperIsStatusAlias) {
     // RC1-H-005 (proactive follow-up): brand-new teacher guard, same as
@@ -365,6 +367,21 @@ async function handleCommand(from, text, deps) {
   // to generic classification, which has no idea a save prompt exists and
   // responded with a confusing "did you mean to cancel something?" check-in.
   // Recognize it explicitly here, same as every other CANCEL-able flow.
+  //
+  // RC1-CANCEL: but this branch must not intercept CANCEL while a teacher
+  // is genuinely mid-flow in one of the 13 alreadyMidFlow stores (e.g.
+  // assessmentSessionFlow's marks capture) — that flow owns CANCEL's
+  // meaning there ("abandon this session"), distinct from this branch's
+  // meaning ("discard the resource I just generated"). Same collision
+  // shape as RC1-H-004 (STATUS) and RC1-H-006 (SAVE): falling through
+  // (returning false, not handled) lets messageProcessor's alreadyMidFlow
+  // dispatch route CANCEL to the owning flow's own handler instead.
+  // Checked ahead of the lastGeneratedState read below so a stale
+  // "GENERATED" resource sitting alongside an active flow can never win.
+  if (upper === 'CANCEL' && deps.hasActiveFlow?.(deps.hashPhone(from))) {
+    return false;
+  }
+
   if (upper === 'CANCEL') {
     const phoneHash = deps.hashPhone(from);
     const last = deps.lastGeneratedState.get(phoneHash);
