@@ -337,6 +337,38 @@ async function handleCommand(from, text, deps) {
   if (await handleWorkspaceFlow(from, text, buildWorkspaceDeps())) return true;
 
   // ── QMS commands (MY STATS, MY STATS ALL, MY GOALS, MY REFLECTIONS, MY COACHING) ──
+  // RC1-QMS-001: this block used to intercept unconditionally, before
+  // onboarding and before messageProcessor.js's alreadyMidFlow dispatch —
+  // so a brand-new/mid-onboarding teacher's QMS commands never reached
+  // onboarding, and a teacher mid-REFLECT/mid-growth-plan had that turn
+  // hijacked by QMS instead of the flow that owned it. QMS is not on
+  // onboardingService.js's own escape-hatch list (only PRO/STATUS/HELP/
+  // PROFILE are), so it follows the stricter HELP/MENU/HI/HELLO shape:
+  // blocked for both step === null and mid-onboarding, no exceptions.
+  // Active-flow yielding mirrors STATUS's existing state-list check above
+  // — no reason to invent a new list.
+  const upperIsQmsAlias =
+    upper === 'MY STATS' || upper === 'MY STATS ALL' || upper === 'MY GOALS' ||
+    upper === 'MY REFLECTIONS' || upper === 'MY COACHING';
+  if (upperIsQmsAlias) {
+    const qmsOnboardingStep = deps.getOnboardingStep?.(deps.hashPhone(from));
+    if (qmsOnboardingStep === null) {
+      return false; // brand-new teacher — no escape, let onboarding start
+    }
+    if (qmsOnboardingStep !== undefined && qmsOnboardingStep !== deps.ONBOARDING_STEPS?.DONE) {
+      return false; // mid-onboarding — QMS isn't an onboarding escape hatch
+    }
+    const phoneHashForQms = deps.hashPhone(from);
+    const hasActiveFlowQms =
+      deps.assessmentSessionState?.get(phoneHashForQms) ||
+      deps.blueprintAuthoringState?.get(phoneHashForQms) ||
+      deps.reflectionState?.get(phoneHashForQms) ||
+      deps.growthPlanState?.get(phoneHashForQms);
+    if (hasActiveFlowQms) {
+      return false; // let the active flow's own turn handling proceed
+    }
+  }
+
   const { handleQmsFlow } = require('../flows/qmsFlow');
 
   function buildQmsDeps() {
