@@ -33,7 +33,7 @@ function buildPrompt(intent, profile = {}) {
   // If both intent.grade and profile.grade are null, pass grade: null through
   const enriched = {
     ...intent,
-    grade:   intent.grade !== undefined ? intent.grade : parseGradeNumber(profile.grade),
+    grade:   intent.grade != null ? intent.grade : parseGradeNumber(profile.grade),
     subject: intent.subject !== 'general' ? intent.subject : (profile.subject?.toLowerCase() || 'general'),
     language: intent.language || profile.language || 'english',
   };
