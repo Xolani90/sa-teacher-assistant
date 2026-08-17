@@ -86,13 +86,7 @@ async function handleWorkspaceFlow(from, text, deps) {
 
   const upper = text.trim().toUpperCase();
 
-  const isWorkspaceCmd =
-    upper === 'MY CLASSES' || upper.startsWith('NEW CLASS') ||
-    upper === 'MY ASSESSMENTS' || upper === 'MY ASSESSMENT HISTORY' ||
-    upper === 'MY PROGRESS' || upper === 'MY CURRICULUM PROGRESS' ||
-    upper.startsWith('LEARNER PROGRESS') ||
-    upper === 'WORKSPACE' ||
-    upper.startsWith('CLASS INTERVENTION');
+  const isWorkspaceCmd = isWorkspaceCommand(upper);
 
   if (!isWorkspaceCmd) return false;
 
@@ -743,6 +737,23 @@ function formatClassInterventionPlan(cls, plan) {
   return msg;
 }
 
+// RC1-H-012: single source of truth for "is this text a workspace command"
+// — exported so commandHandler.js's onboarding guard can test the same
+// predicate handleWorkspaceFlow() itself uses, instead of duplicating (and
+// risking drift from) this match list. Accepts already-uppercased text,
+// matching how handleWorkspaceFlow() calls it internally.
+function isWorkspaceCommand(upper) {
+  return (
+    upper === 'MY CLASSES' || upper.startsWith('NEW CLASS') ||
+    upper === 'MY ASSESSMENTS' || upper === 'MY ASSESSMENT HISTORY' ||
+    upper === 'MY PROGRESS' || upper === 'MY CURRICULUM PROGRESS' ||
+    upper.startsWith('LEARNER PROGRESS') ||
+    upper === 'WORKSPACE' ||
+    upper.startsWith('CLASS INTERVENTION')
+  );
+}
+
 module.exports = {
   handleWorkspaceFlow,
+  isWorkspaceCommand,
 };

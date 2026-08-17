@@ -297,7 +297,29 @@ async function handleCommand(from, text, deps) {
   //
   // These are read-only views of data that already exists in the DB (written by the
   // data-driven assessment flow). No Pro gate — useful to any registered teacher.
-  const { handleWorkspaceFlow } = require('../flows/workspaceFlow');
+  //
+  // RC1-H-012: this block used to intercept unconditionally, before
+  // onboarding — so a teacher whose `teachers` row exists (e.g. lazily
+  // created by usageTracker.js's INSERT OR IGNORE, independent of
+  // onboarding) but who has no onboarding row, or is mid-onboarding, could
+  // reach CLASS INTERVENTION and its DB-backed siblings without ever
+  // completing onboarding. PRO/HELP/MENU/HI/HELLO already guard this
+  // (RC1-H-005), and QMS guards it the same way (RC1-QMS-001); workspace
+  // commands follow the identical brand-new/mid-onboarding shape, no
+  // exceptions — they are not on onboardingService.js's own escape-hatch
+  // list (only PRO/STATUS/HELP/PROFILE are). isWorkspaceCommand() is
+  // imported from workspaceFlow.js itself so this guard can never drift
+  // from the actual dispatch boundary it protects.
+  const { handleWorkspaceFlow, isWorkspaceCommand } = require('../flows/workspaceFlow');
+  if (isWorkspaceCommand(upper)) {
+    const workspaceOnboardingStep = deps.getOnboardingStep?.(deps.hashPhone(from));
+    if (workspaceOnboardingStep === null) {
+      return false; // brand-new teacher — no escape, let onboarding start
+    }
+    if (workspaceOnboardingStep !== undefined && workspaceOnboardingStep !== deps.ONBOARDING_STEPS?.DONE) {
+      return false; // mid-onboarding — workspace commands aren't an onboarding escape hatch
+    }
+  }
 
   function buildWorkspaceDeps() {
     const {
