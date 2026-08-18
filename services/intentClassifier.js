@@ -79,6 +79,15 @@ TYPE DEFINITIONS:
 - observation: teacher wants to RECORD a new Foundation Phase developmental observation for a learner (e.g. "record an observation", "log an observation for Sipho", "capture a developmental observation", "observe a learner"). This is about SUBMITTING new observation data.
 - observationHistory: teacher wants to VIEW past observations they already saved (e.g. "my observations", "show observations", "view observations", "observation history", "list observations", "see my observations"). This is about SEEING existing data, not submitting anything new.
 - curriculumQuery: teacher is asking a factual status question about their curriculum coverage, ATP pacing, or whether they're on track (e.g. "am I behind", "what should I be teaching this week", "curriculum coverage report") — a status check, NOT a request to generate a new ATP document (that's atp).
+- reflection: teacher wants to LOG a personal teaching reflection on a lesson they taught (e.g. "log a reflection", "reflect on my lesson", "record a reflection", bare "REFLECT"). This is the teacher journaling about their OWN practice/lesson — what happened, what went well, what they'd improve — not a plan for learners and not a diagnosis of learner performance.
+- growth_plan: teacher wants to SET a personal professional-growth goal (e.g. "create a growth plan", "new goal", "development plan", "professional growth", bare "NEW GOAL"). This is the teacher setting their OWN development goal — not a plan for learners.
+
+CRITICAL DISAMBIGUATION RULES (reflection / growth_plan):
+- reflection vs interventionPlan: reflection is the teacher journaling about their OWN lesson/practice ("reflect on my lesson", "log a reflection"). interventionPlan is a remediation plan FOR LEARNERS who are behind. If the message is about the teacher's own teaching experience with no learner-remediation ask, use reflection.
+- reflection vs assessmentAnalysis: reflection is the teacher's own narrative reflection on a lesson (no marks/data involved). assessmentAnalysis is diagnosing learner performance on an assessment already given. A message about how a lesson went, with no scores mentioned, is reflection.
+- growth_plan vs interventionPlan: growth_plan is the TEACHER's own professional development goal ("I want to get better at differentiation", "my growth plan for this term"). interventionPlan is a plan targeting LEARNERS. If the goal-owner is the teacher themselves, use growth_plan.
+- growth_plan vs lessonPlan: growth_plan is a professional-development GOAL for the teacher (no lesson content requested). lessonPlan is a request for actual lesson content/activities to teach. "I want to grow as a teacher this term" = growth_plan; "give me a lesson plan for fractions" = lessonPlan.
+- Bare "REFLECT" (with nothing else) = reflection. Bare "NEW GOAL" (with nothing else) = growth_plan. These are the flows' own shortcut entry commands and should never be reclassified as something else.
 - greeting: a simple hello/hi with no actual request
 - smallTalk: "how are you", "are you there" type chit-chat with no request
 - emotionalSupport: teacher is venting about stress, exhaustion, a hard day, difficult learners/parents, burnout — with NO concrete content request attached
@@ -148,8 +157,11 @@ function normalize(raw) {
   let topic = typeof raw?.topic === 'string' ? raw.topic.trim() : null;
   if (!topic || topic.length === 0) topic = null;
 
-  // These types never carry a free-text topic — same rule as the regex parser
-  if ([INTENT_TYPES.ATP, INTENT_TYPES.ASSESSMENT_ANALYSIS, INTENT_TYPES.INTERVENTION_PLAN, INTENT_TYPES.PARENT_MESSAGE].includes(type)) {
+  // These types never carry a free-text topic — same rule as the regex parser.
+  // reflection/growth_plan added here: both flows resolve topic exclusively
+  // via their own numbered menu (utils/qmsTopicSelection.js), never from
+  // classifier free text — same precedent as interventionPlan above.
+  if ([INTENT_TYPES.ATP, INTENT_TYPES.ASSESSMENT_ANALYSIS, INTENT_TYPES.INTERVENTION_PLAN, INTENT_TYPES.PARENT_MESSAGE, INTENT_TYPES.REFLECTION, INTENT_TYPES.GROWTH_PLAN].includes(type)) {
     topic = null;
   }
 
