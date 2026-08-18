@@ -47,6 +47,7 @@ const {
   safeSendMessage,
   intentLabel,
   FREE_LIMIT_DISPLAY,
+  isMessagingPairThrottled,
 } = require('../utils/webhookHelpers');
 
 const {
@@ -885,6 +886,22 @@ router.post('/', async (req, res) => {
         await processMessage(message, buildProcessMessageDeps());
       } catch (err) {
         console.error(`[WEBHOOK] Failed to process message ${message?.id || '(no id)'}:`, err.message);
+
+        // RC1-H-015: if the original failure was itself a Meta messaging-pair
+        // throttle (Graph error 131056 — the business already sent this
+        // recipient a message outside the open 24h window), attempting the
+        // apology fallback would just hit the SAME throttle and fail again,
+        // for no benefit — Meta is not going to deliver a second message to
+        // this pair right now regardless of content. Skip it and log
+        // distinctly so this is visible as a throttle event, not a silent
+        // drop. This check is intentionally narrow: it only suppresses the
+        // fallback for the specific throttle class, never for any other
+        // failure — every other error keeps the existing best-effort
+        // fallback behavior below unchanged.
+        if (isMessagingPairThrottled(err)) {
+          console.warn(`[WEBHOOK] Messaging-pair throttle (Graph 131056) — skipping apology fallback for ${message?.id || '(no id)'}`);
+          continue;
+        }
 
         // Previously a failure here meant total silence for the teacher — no
         // error, no retry prompt, nothing. From their side that's indistinguishable

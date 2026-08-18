@@ -103,7 +103,16 @@ function graphPost(url, payload) {
             resolve(result);
           } else {
             const errDetail = result?.error?.message || JSON.stringify(result).slice(0, 200);
-            reject(new Error(`Graph API ${res.statusCode}: ${errDetail}`));
+            const graphErr = new Error(`Graph API ${res.statusCode}: ${errDetail}`);
+            // RC1-H-015: preserve Meta's structured error code (e.g. 131056,
+            // "Re-engagement message" / messaging-pair throttle) so callers
+            // upstream can classify specific Graph error conditions instead
+            // of string-matching the message text. Only attached when Meta
+            // actually returns one — no invented default.
+            if (result?.error?.code !== undefined) {
+              graphErr.graphErrorCode = result.error.code;
+            }
+            reject(graphErr);
           }
         } catch {
           reject(new Error(`Failed to parse Graph API response: ${data.slice(0, 200)}`));

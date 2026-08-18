@@ -127,6 +127,22 @@ async function safeSendMessage(from, text) {
   await sendMessage(from, text);
 }
 
+// ── RC1-H-015: messaging-pair throttle classification ──────────────────────
+// Meta returns Graph error code 131056 ("Re-engagement message") when the
+// business has already sent a message to this recipient outside an open
+// 24h customer-service window and is being rate-limited on that specific
+// sender/recipient pair. This is the ONLY code classified here — no other
+// Meta error codes are inferred or guessed at without direct evidence.
+const MESSAGING_PAIR_THROTTLE_CODES = [131056];
+
+/**
+ * @param {Error & {graphErrorCode?: number}} err
+ * @returns {boolean}
+ */
+function isMessagingPairThrottled(err) {
+  return !!err && MESSAGING_PAIR_THROTTLE_CODES.includes(err.graphErrorCode);
+}
+
 function intentLabel(type) {
   const labels = {
     worksheet:   'worksheet',
@@ -159,4 +175,6 @@ module.exports = {
   safeSendMessage,
   intentLabel,
   FREE_LIMIT_DISPLAY,
+  isMessagingPairThrottled,
+  MESSAGING_PAIR_THROTTLE_CODES,
 };

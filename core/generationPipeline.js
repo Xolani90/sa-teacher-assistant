@@ -158,7 +158,21 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
   const teacher = getTeacherByPhone(from);
   const gradeDisplay = intent.grade != null ? ` for ${gradeLabel(intent.grade)}` : (teacher?.grade != null ? ` for your grade (${gradeLabel(teacher.grade)})` : '');
   const subjectDisplay = intent.subject !== 'general' ? ` in ${intent.subject.charAt(0).toUpperCase() + intent.subject.slice(1)}` : '';
-  await safeSendMessage(from, `⏳ Generating your CAPS-aligned ${intentLabel(intent.type)}${gradeDisplay}${subjectDisplay}... Please wait.`);
+  // RC1-H-015: checkAndIncrementUsage() above has already consumed one
+  // generation from the teacher's free-tier quota. If this interim send
+  // fails (e.g. Meta messaging-pair throttle, network error), the whole
+  // request aborts here with nothing generated — but until now the quota
+  // decrement was never rolled back, so the teacher silently lost a
+  // generation for a message that never even started. Roll back exactly
+  // like the generateContent() failure path below does, then re-throw so
+  // the existing outer webhook.js catch/fallback-notice behavior is
+  // unchanged for every other aspect of this failure.
+  try {
+    await safeSendMessage(from, `⏳ Generating your CAPS-aligned ${intentLabel(intent.type)}${gradeDisplay}${subjectDisplay}... Please wait.`);
+  } catch (err) {
+    rollbackUsage(quota, from);
+    throw err;
+  }
 
   // ── Log enriched intent ───────────────────────────────────────
   console.log(`[WEBHOOK] Intent:`, {
