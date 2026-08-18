@@ -250,7 +250,7 @@ async function processMessage(message, deps) {
 
   const skipClassifier = deps.isClassifierRateLimited(from) || deps.isCeilingReached();
   const intent = skipClassifier
-    ? { ...parseIntent(text), _source: deps.isCeilingReached() ? 'fallback-ceiling' : 'fallback-rate-limited' }
+    ? { ...deps.parseIntent(text), _source: deps.isCeilingReached() ? 'fallback-ceiling' : 'fallback-rate-limited' }
     : await deps.classifyIntent(text, {
         grade: teacherForClassification?.grade ?? null,
         subject: teacherForClassification?.subject || null,
