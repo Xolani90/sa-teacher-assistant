@@ -172,9 +172,25 @@ async function processMessage(message, deps) {
   // tests/navigation-service.test.js, not exercised here. Commit 3 is the
   // first commit where messageProcessor acts on any part of this result,
   // starting with the assessment-session flow only.
+  // RC1-H-013 fix: reflectionState and growthPlanState are active-flow
+  // state stores exactly like assessmentSessionState/blueprintAuthoringState
+  // above (see the alreadyMidFlow computation, which already includes them)
+  // but were missing from this gate. Both flows open a bare numeric
+  // correction menu (reflectionFlow.js/growthPlanFlow.js CORRECTION_MENU_ID)
+  // via navigationService.openMenu(), which defaults expiresAfterReply to
+  // true — so the same double-consumption bug RC1-H-007 fixed for
+  // assessmentSession's COMPLETE_MENU applies here too: without these two
+  // branches, the speculative evaluateMessage() call below closes the
+  // correction menu before the real flow handler's own
+  // consumeNumericReply() call gets a chance to, causing every correction
+  // choice to be rejected as invalid and the menu to loop.
   const activeFlowId = deps.assessmentSessionState.get(phoneHash)
     ? 'assessmentSession'
-    : (deps.blueprintAuthoringState.get(phoneHash) ? 'blueprintAuthoring' : null);
+    : (deps.blueprintAuthoringState.get(phoneHash)
+      ? 'blueprintAuthoring'
+      : (deps.reflectionState.get(phoneHash)
+        ? 'reflection'
+        : (deps.growthPlanState.get(phoneHash) ? 'growthPlan' : null)));
   // RC1-H-007 fix: evaluateMessage() is a discarded dry-run per the comment
   // above, but it is NOT actually side-effect-free — it calls
   // consumeNumericReply() internally (navigationService.js §4), which
