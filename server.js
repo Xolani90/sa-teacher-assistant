@@ -369,7 +369,7 @@ app.post('/admin/grant-pro', adminLimiter, requireAdminSecret, async (req, res) 
       expiresAt: expiresAt.toISOString(),
     });
 
-    console.log(`[ADMIN] Pro status granted to ${normalizedPhone} (hash: ...${phoneHash})`);
+    console.log(`[ADMIN] Pro status granted to ...${normalizedPhone.slice(-4)} (hash: ...${phoneHash})`);
   } catch (err) {
     console.error('[ADMIN] Error granting Pro status:', err.message);
     res.status(500).json({ error: 'Internal server error' });
