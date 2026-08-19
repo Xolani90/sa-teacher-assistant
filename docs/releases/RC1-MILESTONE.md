@@ -169,11 +169,11 @@ be verified independently.
 ### Observations / portfolio
 | Item | Automated ref | Pass | Fail | Notes |
 |---|---|---|---|---|
-| Observation capture (incremental) | `observation-smoke-test.js` | ☐ | ☐ | |
-| MY OBSERVATIONS / detail view | `observation-smoke-test.js` | ☐ | ☐ | |
-| ADD NOTE | `observationFlow-corrections-delete-resolve-incremental.test.js` | ☐ | ☐ | |
-| CORRECT / DELETE / RESOLVE | `observationRepository-corrections-delete-resolve.test.js` | ☐ | ☐ | |
-| Follow-up summary | `observationFlow-followup.test.js` | ☐ | ☐ | |
+| Observation capture (incremental) | `observation-smoke-test.js`, `rc1-observations-dispatch.test.js` | ☑ | ☐ | ✅ Verified — coverage gap closed. `observation-smoke-test.js` (45/45) already proved the real flow/DB/session lifecycle, but with a manually injected intent. `rc1-observations-dispatch.test.js` (26/26) closes the remaining dispatch-boundary gap: real WhatsApp text through the real `processMessage()` router, real classifier fallback to `parseIntent()` (not a mocked intent), persisted to the real DB. No production defect found. |
+| MY OBSERVATIONS / detail view | `observation-smoke-test.js`, `rc1-observations-dispatch.test.js` | ☑ | ☐ | ✅ Verified — coverage gap closed. Real "MY OBSERVATIONS" text now proven to reach the observation-history flow via real `processMessage()` dispatch and real classifier fallback, with correct history/detail rendering from real DB data. No production defect found. |
+| ADD NOTE | `observationFlow-corrections-delete-resolve-incremental.test.js`, `rc1-observations-dispatch.test.js` | ☑ | ☐ | ✅ Verified — coverage gap closed. Flow-layer coverage against a fake repository now supplemented with a real-dispatch, real-DB assertion (`rc1-observations-dispatch.test.js`) confirming the note text is actually persisted via the real `processMessage()` → `alreadyMidFlow` in-session path. No production defect found. |
+| CORRECT / DELETE / RESOLVE | `observationRepository-corrections-delete-resolve.test.js`, `rc1-observations-dispatch.test.js` | ☑ | ☐ | ✅ Verified — coverage gap closed. Real-SQL repository coverage now supplemented with real-dispatch, real-DB assertions (`rc1-observations-dispatch.test.js`) confirming each operation's actual DB effect (correction row inserted, resolved flag flipped, correction row deleted) through the real `processMessage()` router. No production defect found. |
+| Follow-up summary | `observationFlow-followup.test.js`, `rc1-observations-dispatch.test.js` | ☑ | ☐ | ✅ Verified — coverage gap closed. Rendering-only coverage against a fake `analyzeObservations()` now supplemented with a real-dispatch assertion (`rc1-observations-dispatch.test.js`) confirming the follow-up section is populated from real observation data reached through the real `processMessage()` router. Not an independent entry point — embedded in the detail view, per recon. No production defect found. |
 
 ### Payments
 | Item | Automated ref | Pass | Fail | Notes |
