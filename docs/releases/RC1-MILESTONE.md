@@ -178,9 +178,9 @@ be verified independently.
 ### Payments
 | Item | Automated ref | Pass | Fail | Notes |
 |---|---|---|---|---|
-| Yoco payment → Pro upgrade | `phase-d-payment-renewal.test.js` | ☐ | ☐ | |
-| Duplicate/replayed webhook idempotency | `phase-d-replay-stress.test.js` | ☐ | ☐ | |
-| Stacked renewals extend correctly | `phase-d-payment-renewal.test.js` | ☐ | ☐ | |
+| Yoco payment → Pro upgrade | `phase-d-payment-renewal.test.js`, `payment-webhook-smoke.test.js`, `yocoWebhookVerifier.test.js` | ☑ | ☐ | ✅ Verified — coverage gap closed. `phase-d-payment-renewal.test.js` (20/20) proves the business-logic path — first payment, expiry math, WhatsApp confirmation content matching the real DB value — calling `handleWebhookEvent()` directly. `payment-webhook-smoke.test.js` (4/4) closes the remaining HTTP-boundary gap: spawns the literal `server.js` process and hits the real `POST /payment/webhook` registration with a genuinely signed request, confirming the actual production route (not a re-implementation of it) reaches the handler. `yocoWebhookVerifier.test.js` (9/9) independently covers the signature algorithm itself. No production defect found. |
+| Duplicate/replayed webhook idempotency | `phase-d-replay-stress.test.js`, `payment-webhook-smoke.test.js` | ☑ | ☐ | ✅ Verified — coverage gap closed. `phase-d-replay-stress.test.js` (15/15) proves idempotency under concurrency and out-of-order delivery — 5 simultaneous identical webhooks yield exactly one applied ledger row and one confirmation message; 2 out-of-order deliveries stack correctly regardless of arrival order. `payment-webhook-smoke.test.js` (4/4) independently closes the literal HTTP route boundary, confirming that requests reach the production `/payment/webhook` registration and that invalid signatures follow the intentional acknowledge-first rejection contract — this is HTTP-boundary evidence, not idempotency evidence; the idempotency claim itself rests on `phase-d-replay-stress.test.js`. No production defect found. |
+| Stacked renewals extend correctly | `phase-d-payment-renewal.test.js` | ☑ | ☐ | ✅ Verified — coverage gap closed. `phase-d-payment-renewal.test.js` (20/20) confirms stacked renewals extend from the prior expiry rather than from "now" (D-08), three sequential payments total ~93 days with no cap (D-11), and each stack step produces a correctly-updated real DB `pro_expires` value reflected in the WhatsApp confirmation text. No production defect found. |
 
 ---
 
