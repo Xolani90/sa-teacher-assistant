@@ -214,8 +214,8 @@ Notes:
 - [ ] Restore-from-backup tested at least once
 - [ ] DB migrations verified (apply cleanly on fresh DB, idempotent on re-run)
 - [ ] `DB_PATH` set to a persistent disk in production (the `[DB] ⚠️ DB_PATH is not set` warning never fires there)
-- [ ] Monitoring enabled (Sentry `SENTRY_DSN` set and confirmed receiving events)
-- [ ] Error logging verified end-to-end (a forced error actually shows up in the monitoring dashboard)
+- [x] Monitoring enabled (Sentry `SENTRY_DSN` set and confirmed receiving events) — ✅ Verified. `SENTRY_DSN` confirmed present in the live Render production environment (service `sa-teacher-assistant`). Render boot log shows `[SENTRY] Error monitoring enabled` at `2026-08-19T13:05:32.474426227Z`, confirming Sentry initialization on startup.
+- [x] Error logging verified end-to-end (a forced error actually shows up in the monitoring dashboard) — ✅ Verified — by a real/organic production error, not a deliberately forced one. A malformed-JSON request against `POST /admin/grant-pro` occurred naturally in production (Render log: `[ERROR] Unexpected end of JSON input`, observed ~`13:06:55Z`), passed through the existing global error handler, and reached `Sentry.captureException(err)`. Confirmed independently in the Sentry dashboard: issue/event ID `843797a2`, `SyntaxError: Unexpected end of JSON input`, `handled: true`, environment `production`, transaction `POST /admin/grant-pro`, release `7029cc339db9` (baseline commit `7029cc3`). This confirms the existing error-monitoring path functions correctly for at least this error class; it does not establish that every production error class reaches Sentry.
 
 ---
 
