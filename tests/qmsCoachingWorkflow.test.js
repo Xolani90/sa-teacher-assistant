@@ -80,6 +80,7 @@ async function run() {
   const { createReflection } = require('../services/reflectionService');
   const { createGrowthPlan } = require('../services/growthPlanService');
   const { getCoachingInsights } = require('../services/coachingEngineService');
+  const { getLatestTrend } = require('../services/coachingTrendService');
   const { getSummary, getGrowthPlanSummary, getCommonFocusAreas } = require('../services/qmsAnalyticsService');
   const { listReflections } = require('../services/reflectionService');
 
@@ -230,6 +231,25 @@ async function run() {
       `SELECT COUNT(*) AS n FROM qms_growth_plans WHERE phone_hash = ? AND topic_id = 'TOPIC_CLASSROOM_MANAGEMENT' AND status = 'active'`
     ).get(hashPhone(PHONE)).n;
     assert(growthPlanCount === 1, 'the active growth plan persisted with the correct topic_id');
+
+    // Trend classification (ADR-016/PR39): the 3 same-topic reflections
+    // above each trigger recordSnapshotsForTeacher() on creation, so by
+    // the time MY COACHING runs, a prior snapshot already exists for
+    // TOPIC_CLASSROOM_MANAGEMENT. getLatestTrend() should therefore
+    // return status:'trend' (not 'baseline') for this call — this
+    // proves the real MY COACHING -> qmsFlow -> coachingEngineService ->
+    // coachingTrendService integration actually reached trend
+    // classification, not just that the machinery executed unchecked.
+    // Deliberately calling getLatestTrend() with the same real DB state
+    // MY COACHING just read, rather than re-deriving the math here (that
+    // belongs to coachingTrendService.test.js) — this only confirms the
+    // integration's resulting state matches what the reply implied.
+    const trendAfterCoaching = getLatestTrend(hashPhone(PHONE), 'TOPIC_CLASSROOM_MANAGEMENT');
+    assert(trendAfterCoaching.status === 'trend', 'MY COACHING ran with a prior snapshot in place, so trend classification (not baseline) was reached');
+    assert(
+      ['rising', 'falling', 'flat'].includes(trendAfterCoaching.trendDirection),
+      'a concrete trend direction was computed, not left undefined'
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════════

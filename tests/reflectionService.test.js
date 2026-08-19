@@ -75,6 +75,7 @@ async function run() {
     updateReflection,
     deleteReflection,
   } = require('../services/reflectionService');
+  const { getLatestSnapshot } = require('../services/coachingSnapshotService');
 
   const PHONE = 'reflection_test_hash_001';
   const OTHER_PHONE = 'reflection_test_hash_002';
@@ -236,6 +237,13 @@ async function run() {
     aiAssisted: false,
     evidenceLinkIds: [1, 2],});
 
+  // Snapshot side effect (ADR-016 §2, PR37): createReflection() already
+  // triggers recordSnapshotsForTeacher() — confirm that baseline snapshot
+  // exists before exercising updateReflection()'s own trigger below.
+  console.log('\nTest U-00: creating the reflection already wrote a coaching snapshot for its topic');
+  const cmSnapshotBeforeUpdate = getLatestSnapshot(PHONE, 'TOPIC_CLASSROOM_MANAGEMENT');
+  assert(cmSnapshotBeforeUpdate !== null, 'a coaching_snapshots row exists for TOPIC_CLASSROOM_MANAGEMENT after createReflection');
+
   console.log('\nTest U-01: updates content');
   const updatedContent = updateReflection(PHONE, toUpdate.id, { content: 'Revised content' });
   assertEq(updatedContent.content, 'Revised content', 'content is updated');
@@ -258,6 +266,22 @@ async function run() {
   const updatedTopic = updateReflection(PHONE, toUpdate.id, { topicId: 'TOPIC_ASSESSMENT' });
   assertEq(updatedTopic.topicId, 'TOPIC_ASSESSMENT', 'topicId is updated');
   assertEq(updatedTopic.content, 'Revised content', 'content unaffected by a topicId-only update');
+
+  // Snapshot side effect (ADR-016 §2, PR37): updateReflection() calls
+  // recordSnapshotsForTeacher() on a successful write (reflectionService.js
+  // ~line 253). Moving the reflection's topic is a decisive way to prove
+  // that trigger actually ran through the real DB, not just that a stale
+  // snapshot from creation-time is still sitting there: the old topic
+  // should lose its only evidence and the new topic should gain a
+  // snapshot it never had before.
+  console.log('\nTest U-03e: updateReflection\'s topicId move triggers a snapshot side effect on BOTH topics');
+  const cmSnapshotAfterTopicMove = getLatestSnapshot(PHONE, 'TOPIC_CLASSROOM_MANAGEMENT');
+  const assessmentSnapshotAfterTopicMove = getLatestSnapshot(PHONE, 'TOPIC_ASSESSMENT');
+  assert(assessmentSnapshotAfterTopicMove !== null, 'a coaching_snapshots row now exists for TOPIC_ASSESSMENT (recordSnapshotsForTeacher ran after updateReflection)');
+  assert(
+    cmSnapshotAfterTopicMove.confidence < cmSnapshotBeforeUpdate.confidence,
+    'TOPIC_CLASSROOM_MANAGEMENT confidence drops after its only reflection moves away (recordSnapshotsForTeacher recomputed it)'
+  );
 
   console.log('\nTest U-03d: rejects an unknown topicId on update');
   assertThrows(
@@ -293,10 +317,26 @@ async function run() {
   console.log('\n── Section 7: deleteReflection() ────────────────────────────────────');
 
   const toDelete = createReflection(PHONE, { topicId: 'TOPIC_CLASSROOM_MANAGEMENT', content: 'Will be soft-deleted'});
+  const cmSnapshotBeforeDelete = getLatestSnapshot(PHONE, 'TOPIC_CLASSROOM_MANAGEMENT');
+  assert(cmSnapshotBeforeDelete !== null, 'a coaching_snapshots row exists for TOPIC_CLASSROOM_MANAGEMENT after createReflection');
 
   console.log('\nTest D-01: soft-deletes successfully');
   const deleteResult = deleteReflection(PHONE, toDelete.id);
   assertEq(deleteResult, true, 'deleteReflection returns true on success');
+
+  // Snapshot side effect (ADR-016 §2, PR37): deleteReflection() calls
+  // recordSnapshotsForTeacher() on a successful soft-delete
+  // (reflectionService.js ~line 290). This is the only reflection on
+  // this topic in this isolated run, so deleting it should measurably
+  // drop the topic's confidence, not merely leave the pre-existing row
+  // untouched.
+  console.log('\nTest D-01b: deleteReflection\'s soft-delete triggers a snapshot side effect');
+  const cmSnapshotAfterDelete = getLatestSnapshot(PHONE, 'TOPIC_CLASSROOM_MANAGEMENT');
+  assert(cmSnapshotAfterDelete !== null, 'the coaching_snapshots row for TOPIC_CLASSROOM_MANAGEMENT still exists after delete');
+  assert(
+    cmSnapshotAfterDelete.confidence < cmSnapshotBeforeDelete.confidence,
+    'confidence drops after the only reflection on this topic is soft-deleted (recordSnapshotsForTeacher ran)'
+  );
 
   console.log('\nTest D-02: row still exists in the table (never a hard DELETE)');
   const rawAfterDelete = _db.prepare(`SELECT * FROM qms_reflections WHERE id = ?`).get(toDelete.id);
