@@ -197,7 +197,7 @@ Date: _______  Approved by: _______
 Notes:
 
 ### Security
-- [ ] WhatsApp webhook signature validation
+- [x] WhatsApp webhook signature validation — ✅ Verified — coverage gap closed. `tests/whatsapp-webhook-signature-smoke.test.js` (6/6) spawns the literal `server.js` process and exercises the real `POST /webhook` HTTP boundary with genuine HMAC-SHA256 signatures computed over the exact raw request bytes: a validly-signed request passes the signature gate, a tampered body is rejected, an incorrect signature is rejected, and a missing `x-hub-signature-256` header is rejected. The missing-`META_APP_SECRET` case is verified at the real, unmocked verifier level rather than through the HTTP boundary, because `validateEnv.js` terminates the server before it starts listening when `META_APP_SECRET` is absent — no HTTP boundary exists to exercise in that condition. No mocks or stubs used anywhere in the harness. No production defect found.
 - [ ] Yoco webhook signature validation
 - [ ] JWT secrets configured (`TEACHER_JWT_SECRET`)
 - [ ] Environment variables verified against `validateEnv.js`
