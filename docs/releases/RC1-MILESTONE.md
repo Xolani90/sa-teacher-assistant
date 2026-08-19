@@ -202,7 +202,7 @@ Notes:
 - [ ] JWT secrets configured (`TEACHER_JWT_SECRET`)
 - [ ] Environment variables verified against `validateEnv.js`
 - [ ] No secrets committed to git history
-- [ ] Rate limiting verified (`/api`, `/api/auth`)
+- [x] Rate limiting verified (`/api`, `/api/auth`) — ✅ Verified — coverage gap closed. `tests/rate-limit-smoke.test.js` (6/6) spawns two isolated `server.js` child-process instances and exercises the real mounted `apiLimiter`/`authLimiter` middleware with real HTTP: `/api` allows 100 requests before the 101st is rejected with `429`; `/api/auth` allows 20 requests before the 21st is rejected with `429`. Each `429` is confirmed as genuinely coming from the rate limiter (not downstream auth/validation) by requiring the limiter's own configured error message and a `ratelimit-remaining: 0` response header, not status code alone. Limiter independence was verified at runtime in both directions on fresh, uncontaminated servers — exhausting `apiLimiter` does not affect `authLimiter`'s budget, and exhausting `authLimiter` does not affect `apiLimiter`'s budget. No mocks or stubs used anywhere in the harness. Window-reset timing (whether the counter clears after the 15-minute window) was not tested and is not claimed as verified. No production defect found.
 - [ ] Admin endpoints protected (`requireAdminSecret`, not reachable via `/api`)
 - [ ] Webhook secrets verified (Yoco `whsec_` format, replay-window rejection)
 - [ ] Production logs redact phone numbers (dev-only OTP logging confirmed gated off `NODE_ENV=production`)
