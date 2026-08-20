@@ -230,7 +230,7 @@ place for releases to fail even when everything above has passed.
 - [ ] Health endpoint returns OK
 - [ ] WhatsApp webhook connected and verified against the production URL
 - [ ] Yoco payment webhook connected and verified against the production URL
-- [ ] Database migration completed successfully on the production database
+- [x] Database migration completed successfully on the production database — ✅ Verified — direct read-only production inspection (2026-08-20). The live `/var/data/teacher_assistant.db` was inspected read-only and returned all 29 expected application tables, matching the migration source exactly by name, plus SQLite's internal `sqlite_sequence` table (30 total). Production also reports 56 indexes: 47 explicit migration indexes plus 9 SQLite-generated autoindexes arising from `UNIQUE`/composite `PRIMARY KEY` constraints. This reconciles exactly with a fresh local migration run and confirms the production schema matches the expected migrated schema. The separate migration idempotency test (`tests/row-infra-migration-idempotency.test.js`) independently confirms fresh migration and re-run stability.
 - [ ] Smoke test completed after deployment (at minimum: one full command from each Phase A category, run against production)
 
 **Deployment Result**
