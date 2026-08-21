@@ -104,6 +104,16 @@ app.get('/privacy', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'privacy.html'));
 });
 
+// ── Public landing page ─────────────────────────────────────────────────────
+// The bare domain root must load without hitting the SPA's ProtectedRoute
+// (payment-processor domain verification requires a login-free page at the
+// root, not a subpath). The teacher app itself now lives at /app; this route
+// takes priority over the dashboard catch-all below because it's registered
+// first.
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'about.html'));
+});
+
 // ── Security ───────────────────────────────────────────────────────────────
 app.use(helmet({ contentSecurityPolicy: false }));
 

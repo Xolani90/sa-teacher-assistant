@@ -4,7 +4,7 @@ import { useTheme } from '../theme/ThemeContext';
 import logo from '../assets/logo.png';
 
 const NAV_ITEMS = [
-  { to: '/', label: 'Overview', icon: '◆', end: true },
+  { to: '/app', label: 'Overview', icon: '◆', end: true },
   { to: '/classes', label: 'Classes', icon: '▤' },
   { to: '/observations', label: 'Observations', icon: '◎' },
   { to: '/qms', label: 'QMS Readiness', icon: '✓' },

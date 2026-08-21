@@ -38,7 +38,7 @@ export default function Login() {
     setSubmitting(true);
     try {
       await verifyCode(phone.trim(), code.trim());
-      navigate('/', { replace: true });
+      navigate('/app', { replace: true });
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         setError('Incorrect or expired code. Please try again.');
