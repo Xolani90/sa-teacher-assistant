@@ -111,7 +111,7 @@ app.get('/privacy', (req, res) => {
 // takes priority over the dashboard catch-all below because it's registered
 // first.
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'about.html'));
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // ── Security ───────────────────────────────────────────────────────────────
