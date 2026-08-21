@@ -65,10 +65,17 @@ function postWebhook(body, headers) {
   });
 }
 
-function waitForServer(timeoutMs = 8000) {
+function waitForServer(child, timeoutMs = 8000) {
   const start = Date.now();
   return new Promise((resolve, reject) => {
+    let spawnErrored = false;
+    child.once('error', err => {
+      spawnErrored = true;
+      reject(new Error(`child process failed to spawn: ${err.message}`));
+    });
+
     (function attempt() {
+      if (spawnErrored) return; // already rejected via the 'error' listener above
       const req = http.get({ host: 'localhost', port: PORT, path: '/healthz' }, res => {
         res.resume();
         resolve();
@@ -142,7 +149,7 @@ async function main() {
   child.stderr.on('data', d => (logs += d.toString()));
 
   try {
-    await waitForServer();
+    await waitForServer(child);
 
     const body = JSON.stringify({ object: 'whatsapp_business_account' });
 
@@ -193,6 +200,11 @@ async function main() {
       const res = await postWebhook(body, {});
       check('Case 4: missing x-hub-signature-256 header → 403', res.status === 403, `got ${res.status}`);
     }
+  } catch (readinessErr) {
+    console.error(`\n${readinessErr.message}`);
+    console.error('--- Captured child stdout/stderr ---');
+    console.error(logs || '(empty — child produced no output before failure)');
+    throw readinessErr;
   } finally {
     child.kill('SIGTERM');
     try { fs.unlinkSync(TMP_DB); } catch {}
