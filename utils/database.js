@@ -1124,6 +1124,23 @@ function runMigrations() {
       WHERE consumed_at IS NULL AND superseded_at IS NULL;
   `);
 
+  // Migration 042: controlled pilot Pro accounts. is_pilot_account marks a
+  // teacher as holding free, time-limited Pro granted via
+  // POST /admin/grant-pro { pilot: true } rather than a real Yoco payment.
+  // Additive column, safe to re-run (mirrors Migration 041's pattern above).
+  //
+  // Pilot Pro is otherwise indistinguishable from paid Pro to isProActive()
+  // and the rest of the app (is_pro = 1, pro_expires set) — this column
+  // only gates: (a) whether grantPilotPro() will overwrite the row, and
+  // (b) whether a teacher is excluded from renewal-reminder nudges, since a
+  // free pilot shouldn't be told their (non-existent) subscription is
+  // expiring. Any real payment (markUserAsPro admin grant, or a Yoco
+  // webhook via applyRenewal) resets this to 0, since a genuine paid grant
+  // always supersedes pilot status.
+  try {
+    db.exec(`ALTER TABLE teachers ADD COLUMN is_pilot_account INTEGER NOT NULL DEFAULT 0`);
+  } catch (_) { /* column already exists — additive migration, safe to re-run */ }
+
   console.log('[DB] Migrations complete');
 }
 

@@ -31,6 +31,7 @@ const {
   getTeachersExpiringWithin,
   markRenewalReminderSent,
   markUserAsPro,
+  grantPilotPro,
 } = require('./utils/usageTracker');
 const { decryptPhone } = require('./utils/encryption');
 const { sendMessage }  = require('./services/whatsappService');
@@ -366,12 +367,29 @@ app.post('/admin/grant-pro', adminLimiter, requireAdminSecret, async (req, res) 
       return res.status(400).json({ error: 'Invalid phone number format' });
     }
 
-    // Grant Pro status (default 31 days)
-    const { expiresAt } = markUserAsPro(normalizedPhone, 31);
-
-    // Hash the phone for the response (don't return raw phone)
     const crypto = require('crypto');
     const phoneHash = crypto.createHash('sha256').update(normalizedPhone).digest('hex').slice(0, 16);
+
+    if (req.body.pilot === true) {
+      const { granted, reason, newExpiry } = grantPilotPro(normalizedPhone);
+
+      if (!granted) {
+        return res.status(400).json({ error: 'Pilot grant rejected', reason });
+      }
+
+      res.json({
+        success: true,
+        pilot: true,
+        phone: phoneHash,
+        expiresAt: new Date(newExpiry).toISOString(),
+      });
+
+      console.log(`[ADMIN] Pilot Pro granted to ...${normalizedPhone.slice(-4)} (hash: ...${phoneHash})`);
+      return;
+    }
+
+    // Grant Pro status (default 31 days)
+    const { expiresAt } = markUserAsPro(normalizedPhone, 31);
 
     res.json({
       success: true,

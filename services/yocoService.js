@@ -467,6 +467,7 @@ async function handleWebhookEvent(event) {
     const row = db.prepare(`
       UPDATE teachers
       SET is_pro = 1,
+          is_pilot_account = 0,
           pro_expires = datetime(
             MAX(COALESCE(pro_expires, datetime('now')), datetime('now')),
             '+31 days'

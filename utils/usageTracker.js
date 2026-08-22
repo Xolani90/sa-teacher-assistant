@@ -319,6 +319,7 @@ function getTeachersExpiringWithin(days) {
     SELECT phone_hash, phone_enc, name, pro_expires
     FROM teachers
     WHERE is_pro = 1
+      AND is_pilot_account = 0
       AND pro_expires IS NOT NULL
       AND pro_expires > datetime('now')
       AND pro_expires <= datetime('now', '+' || ? || ' days')
@@ -360,6 +361,7 @@ function markUserAsPro(phoneNumber, daysValid = 31) {
   db.prepare(`
     UPDATE teachers
     SET is_pro = 1,
+        is_pilot_account = 0,
         pro_expires = datetime(
           MAX(COALESCE(pro_expires, datetime('now')), datetime('now')),
           '+' || ? || ' days'
@@ -386,6 +388,84 @@ function markUserAsPro(phoneNumber, daysValid = 31) {
   };
 }
 
+/**
+ * Grants (or extends) a free, 14-day pilot Pro period.
+ *
+ * The pilot duration is intrinsically 14 days — not caller-configurable —
+ * since a pilot grant is a fixed-scope trial, unlike markUserAsPro()'s
+ * caller-supplied daysValid for real paid/admin grants.
+ *
+ * Eligibility is enforced entirely inside the UPDATE's WHERE clause (no
+ * separate read-then-write gap): the write is rejected — atomically, with
+ * zero mutation — if the teacher currently holds active, non-pilot Pro.
+ * "Active" here mirrors isProActive()'s own definition exactly (is_pro = 1
+ * AND (pro_expires IS NULL OR pro_expires > now)), including the permanent
+ * (NULL-expiry) case, so this guard can never disagree with the app's own
+ * authoritative definition of "active Pro".
+ *
+ * An already-pilot teacher (active or expired) is always eligible — this
+ * call either extends an active pilot or starts a fresh one for an expired
+ * pilot, both measured 14 days from now via the same
+ * MAX(COALESCE(pro_expires, now), now) pattern markUserAsPro() uses.
+ *
+ * @param {string} phoneNumber
+ * @returns {{ granted: boolean, reason: string|null, previousExpiry: string|null, newExpiry: string|null }}
+ */
+function grantPilotPro(phoneNumber) {
+  const db   = getDb();
+  const hash = hashPhone(phoneNumber);
+  ensureTeacher(hash);
+
+  const before = getTeacher(hash);
+
+  const result = db.prepare(`
+    UPDATE teachers
+    SET is_pro = 1,
+        is_pilot_account = 1,
+        pro_expires = datetime(
+          MAX(COALESCE(pro_expires, datetime('now')), datetime('now')),
+          '+14 days'
+        ),
+        renewal_reminder_sent_at = NULL,
+        updated_at = datetime('now')
+    WHERE phone_hash = ?
+      AND NOT (
+        is_pro = 1
+        AND is_pilot_account = 0
+        AND (pro_expires IS NULL OR pro_expires > datetime('now'))
+      )
+  `).run(hash);
+
+  if (result.changes === 0) {
+    console.log(
+      `[ADMIN] Pilot grant rejected`,
+      { teacher: `...${hash.slice(-8)}`, reason: 'active_non_pilot_pro' }
+    );
+    return {
+      granted: false,
+      reason: 'active_non_pilot_pro',
+      previousExpiry: before?.pro_expires ?? null,
+      newExpiry: null,
+    };
+  }
+
+  const teacher = getTeacher(hash);
+  console.log(
+    `[ADMIN] Pilot grant`,
+    {
+      teacher: `...${hash.slice(-8)}`,
+      before: before?.pro_expires ?? null,
+      after: teacher.pro_expires,
+    }
+  );
+  return {
+    granted: true,
+    reason: null,
+    previousExpiry: before?.pro_expires ?? null,
+    newExpiry: teacher.pro_expires,
+  };
+}
+
 module.exports = {
   hashPhone,
   currentMonthKey,
@@ -397,4 +477,5 @@ module.exports = {
   getTeachersExpiringWithin,
   markRenewalReminderSent,
   markUserAsPro,
+  grantPilotPro,
 };
