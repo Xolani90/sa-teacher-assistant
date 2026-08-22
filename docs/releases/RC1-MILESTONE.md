@@ -212,7 +212,26 @@ Notes:
 
 ### Infrastructure
 - [x] Database backups tested — ✅ Verified — direct read-only inspection of the Render production control plane (2026-08-20). Confirmed for the production service `sa-teacher-assistant` (srv-d8js9q57vvec73e2teg0), live on `main` at commit `6ae9670`, that the persistent `data` disk is mounted at `/var/data`, matching the application's production `DB_PATH` and the disk declared in `render.yaml`. Render's automatic daily disk-snapshot feature is enabled and actively executing on the service's current Starter plan. The Render dashboard lists 7 consecutive daily snapshots spanning August 14–20, 2026, each with an available Restore action; Render states that disk snapshots are captured once every 24 hours and remain available for seven days. This directly establishes that the production disk backup mechanism is configured and has demonstrably executed repeatedly on schedule, rather than relying only on repository documentation. This does not establish that restoration from a snapshot produces a valid, usable database; that remains intentionally separate under the `Restore-from-backup tested at least once` criterion and ADR-020.
-- [ ] Restore-from-backup tested at least once
+- [ ] Restore-from-backup tested at least once — 🚫 Blocked, not failed —
+  platform does not offer a confirmed non-destructive path to execute this
+  verification safely. Investigated 2026-08-22 per ADR-020. Render's Disks
+  page for the production service was inspected directly (read-only; no
+  snapshot action invoked). The only restore mechanism exposed is a single
+  per-snapshot "Restore" button with no target selector or "restore to new
+  disk" path. Render's UI warns that restoring a snapshot will cause changes
+  after the selected snapshot to be lost. This is consistent with Render's
+  public restore-snapshot API documentation, which describes the operation
+  as overwriting the current disk data. ADR-020 §2/§4 requires a confirmed
+  non-production restore target before any Restore action may be invoked and
+  explicitly directs that the procedure stop rather than substitute a
+  workaround if no such non-destructive path exists. No such path was found.
+  No Restore action was invoked against any snapshot; the production disk
+  was not restored, overwritten, or otherwise modified. No manual file-copy
+  or restore-test.db substitute was used in place of an actual snapshot
+  restore, consistent with ADR-020's Alternatives Considered. This
+  criterion remains open. Per ADR-020 §8, this blocked verification is
+  recorded as a documented platform limitation rather than treated as a
+  pass or as a failed restore test.
 - [x] DB migrations verified (apply cleanly on fresh DB, idempotent on re-run) — ✅ Verified. `tests/row-infra-migration-idempotency.test.js`, run directly with `node` (not Jest) against a genuinely fresh, throwaway file-backed SQLite database, exercises the real, unmodified `runMigrations()` from `utils/database.js` — the same function `server.js` calls at startup. Fresh-database migration completed successfully; a second run against the now-migrated database also completed successfully with the schema left unchanged: 29 tables before and after, 47 indexes before and after, no duplicate schema objects, exit code `0`. Verification is scoped strictly to fresh-database application and idempotent re-run, matching the criterion's literal wording; it does not test migration behavior against a database already holding data, concurrent access, crash/partial-failure recovery, or production-scale data volumes.
 - [x] `DB_PATH` set to a persistent disk in production (the `[DB] ⚠️ DB_PATH is not set` warning never fires there) — ✅ Verified — direct read-only inspection of the live Render dashboard on 2026-08-21. `DB_PATH` is present as a configured key on the production service's Environment tab, and deploy logs from two independent, consecutive boot cycles (`2026-08-20T12:49:38Z` and `2026-08-21T05:11:55Z`) both show `[DB] Connected to SQLite at /var/data/teacher_assistant.db`, followed by `[DB] Migrations complete` and `[SERVER] ✓ SA Teacher Assistant running`. Per `utils/database.js`, an unset `DB_PATH` in production triggers `[DB] CRITICAL: No persistent DB_PATH in production. Exiting.` followed by `process.exit(1)`, so both successful production boots are consistent with the persistent `DB_PATH` configuration being active. The `/var/data` path is independently corroborated by the closed "Database backups tested" row (persistent disk mount) and "Database migration completed successfully on the production database" row (direct inspection of the live database at `/var/data/teacher_assistant.db`).
 - [x] Monitoring enabled (Sentry `SENTRY_DSN` set and confirmed receiving events) — ✅ Verified. `SENTRY_DSN` confirmed present in the live Render production environment (service `sa-teacher-assistant`). Render boot log shows `[SENTRY] Error monitoring enabled` at `2026-08-19T13:05:32.474426227Z`, confirming Sentry initialization on startup.
