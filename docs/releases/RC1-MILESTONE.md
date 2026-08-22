@@ -277,6 +277,88 @@ no difference. After the fix, the replacement RC starts a fresh 14-day
 pilot from day 1. Partial pilot time is never carried over, since the
 fix itself is what's unverified.
 
+### Pilot Scope (RC1 Controlled Pilot Definition)
+
+**Purpose:** this pilot is a real-teacher validation of six journeys —
+Authentication, Teaching, Assessment, Coaching/QMS, Workspace, and
+Observations/portfolio — plus the WhatsApp delivery and production
+infrastructure supporting them. It is **not** a validation of the
+complete commercial product.
+
+**Payments/Yoco is explicitly OUT OF SCOPE for this pilot.** The
+following remain unresolved and open regardless of pilot outcome:
+Yoco checkout, Yoco webhook, the Payments smoke-test leg,
+payment-dependent commercial activation, full Deployment Verification,
+and any claim that the commercial product is fully release-ready.
+Yoco remains a separate, independent release gate. Once Yoco is
+resolved, a separate decision will determine whether Payments requires
+its own dedicated pilot pass or can be validated using the existing
+pilot cohort.
+
+**IN SCOPE:** Authentication, Teaching, Assessment, Coaching/QMS,
+Workspace, Observations/portfolio, WhatsApp delivery supporting these
+journeys, and the persistence/rate-limiting/security/observability
+infrastructure supporting them.
+
+**OUT OF SCOPE:** Yoco checkout, Yoco webhook, the Payments smoke
+test, payment-dependent commercial activation, and full commercial
+release validation.
+
+**Pilot account quota:** pilot teachers receive Pro status for the
+duration of the pilot via the existing, already-verified production
+mechanism (`is_pro`/`pro_expires` on the teacher record, granted
+through the existing `/admin/grant-pro` endpoint, which is protected
+by the existing admin-secret mechanism and was already covered under
+Phase B Security verification). No new quota system, pilot-only code
+path, or special pilot build is introduced. The reason: an ordinary
+Free-tier teacher hitting the normal commercial usage cap should not
+be recorded as a product defect when the pilot's purpose is to
+validate the six journeys, not commercial quota behaviour — this
+removes commercial quota friction, not technical safety controls.
+Authentication protection, rate limiting, security controls, abuse
+protections, and infrastructure safeguards all remain fully active
+for pilot accounts exactly as for any other teacher. A useful,
+already-established consequence of this mechanism: a pilot teacher
+with valid Pro status follows the normal Pro path and therefore does
+not encounter the normal upgrade/payment prompt in ordinary use —
+this is a property of the existing `is_pro` check, not a fix to
+Yoco, which remains unresolved.
+
+Operationally, granting pilot Pro status means: select the actual
+pilot teacher, grant Pro through the existing verified administrative
+mechanism, set the Pro expiry to correspond to the 14-day pilot
+window, record the action without exposing unnecessary personal
+information, and revoke/allow expiry after the pilot according to the
+existing mechanism and the final pilot decision. No `/admin/grant-pro`
+calls have been made against real teachers as part of this
+documentation change — this describes the procedure only.
+
+**Defect handling during the pilot:** the pilot reuses the existing
+Defect Classification (Critical/High/Medium/Low) and existing
+Rollback Conditions in full — no separate pilot severity system or
+rollback framework is introduced. For pilot operations specifically:
+Critical → immediate escalation and consideration of a pilot pause;
+High → immediate investigation and consideration of pausing the
+affected journey; Medium → track and assess through normal triage;
+Low → track through normal backlog/triage unless a pattern or volume
+makes it materially significant.
+
+**Success criteria:** the pilot reuses the six existing Success
+metrics below without modification or replacement. Meeting them
+establishes success for the six-journey pilot scope defined here —
+it does not by itself establish commercial-release readiness.
+
+**No special pilot build:** the pilot runs against the same
+production baseline, `5af40176fa493e8376fb64132978f5f566062034`.
+There is no pilot fork and no pilot-only product implementation. The
+only pilot-specific entitlement is the operational granting of
+existing Pro status to selected pilot accounts, as described above.
+
+> **Governance anchor:** Pilot success means that the defined
+> six-journey teacher-validation scope has met its Phase-C criteria.
+> It does not constitute full RC1 release approval, commercial
+> readiness, or Payments readiness.
+
 ### Success metrics
 - [ ] ≥95% successful command completion rate
 - [ ] No data corruption
