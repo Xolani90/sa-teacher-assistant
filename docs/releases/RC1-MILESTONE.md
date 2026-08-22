@@ -471,11 +471,31 @@ committed and pushed.
 - [ ] Teachers complete real work without assistance from you
 
 ### Pilot operations
-- [ ] Pilot teachers selected
-- [ ] Onboarding materials/process complete
-- [ ] Feedback channel active (WhatsApp group, form, etc.)
-- [ ] Bug triage process defined (who reviews reports, how often)
-- [ ] Daily review cadence established during the 14 days
+- [ ] Pilot teachers selected — pilot cohort has not yet been selected.
+  Selection must occur before Day 1. The private roster (names/WhatsApp
+  numbers) will be maintained outside Git; this repository records only
+  the eventual cohort count and selection date, never teacher PII.
+- [ ] Onboarding materials/process complete — a pilot-specific briefing
+  (distinct from the product's own in-app teacher onboarding flow, which
+  is unrelated and already implemented/deployed) has not yet been
+  finalized or sent to any teacher. Must be completed before Day 1.
+- [ ] Feedback channel active — decision made, not yet activated. A
+  dedicated WhatsApp group is the designated pilot feedback channel.
+  The group has not yet been created/confirmed reachable by the pilot
+  cohort. Activation (group created, all selected teachers able to
+  reach it) remains a required Day-1 prerequisite.
+- [x] Bug triage process defined — ✅ Decided. Reuses the existing RC1
+  Defect Log and Defect Classification framework unmodified — no new
+  severity system or logging mechanism introduced. Owner: X.O.
+  🔴 Critical: immediate review/escalation. 🟠 High: same-day review.
+  🟡 Medium / 🟢 Low: next scheduled 19:00 daily review. Existing
+  Rollback Conditions and Rollback Procedure remain unchanged and govern
+  escalation as already documented above.
+- [x] Daily review cadence established — ✅ Decided. Review time: 19:00
+  every evening, for the full 14-day pilot period. Owner: X.O. Minimum
+  review scope: the pilot WhatsApp feedback channel, Sentry, and Render
+  logs when indicated. Material findings are recorded through the
+  existing Defect Log, per the process above — no new tooling introduced.
 
 ---
 
