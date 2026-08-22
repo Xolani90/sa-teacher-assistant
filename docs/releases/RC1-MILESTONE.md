@@ -359,6 +359,109 @@ existing Pro status to selected pilot accounts, as described above.
 > It does not constitute full RC1 release approval, commercial
 > readiness, or Payments readiness.
 
+### Pilot Grant Implementation / Evidence — 2026-08-22
+
+**Status update to the Pilot account quota mechanism described above.**
+The section above records the pilot-quota decision as it stood at the
+time it was written: pilot Pro would be granted by reusing the
+existing, already-verified `is_pro`/`pro_expires` mechanism directly
+through `/admin/grant-pro`, with the stated rationale that "no new
+quota system, pilot-only code path, or special pilot build" was
+needed. That description was accurate for the design as decided at
+that point in the RC1 process and is preserved above unmodified as
+the historical record of that decision.
+
+The implementation subsequently evolved. As of commit `b0b98dc`, the
+production mechanism for granting pilot Pro is a dedicated,
+purpose-built code path rather than a direct reuse of the general
+paid-Pro grant:
+
+- **Migration 042** (`utils/database.js`) adds `teachers.is_pilot_account`,
+  an additive column following Migration 041's `ALTER TABLE`
+  try/catch convention.
+- **`grantPilotPro(phoneNumber)`** (`utils/usageTracker.js`) is the
+  dedicated 14-day pilot-grant function. The 14-day duration is
+  intrinsic to the function, not a caller-supplied argument. The
+  entire eligibility check is enforced inside a single guarded
+  `UPDATE`'s `WHERE` clause — there is no separate read-then-write
+  gap — with `result.changes` used as the authoritative signal of
+  whether the write actually took effect, per the codebase's existing
+  `.run(...).changes` convention (see `yocoService.js`'s
+  `insertResult.changes === 0` / `reclaim.changes === 0` checks).
+- The guard **rejects any active normal (non-pilot) Pro account**,
+  including the **permanent-Pro case where `pro_expires IS NULL`** —
+  this NULL-expiry case was identified during implementation as a
+  genuine defect in an earlier draft of the guard (the `WHERE` clause
+  initially required a non-NULL `pro_expires` to treat a row as
+  "active," which disagreed with `isProActive()`'s own documented
+  definition that `pro_expires IS NULL` means permanent/active Pro,
+  and would have let a permanent-Pro teacher be silently downgraded
+  into a 14-day pilot). The defect was found before commit, fixed to
+  mirror `isProActive()`'s definition exactly, and is now covered by
+  a dedicated regression test.
+- A **rejected grant produces zero database mutation** — verified by
+  asserting `pro_expires`, `is_pilot_account`, and `updated_at` are
+  byte-identical before and after a rejected call, both at the
+  function level and, separately, at the HTTP level.
+- **`markUserAsPro()`** and **`applyRenewal()`** (`services/yocoService.js`)
+  both now reset `is_pilot_account = 0` on any real paid grant or
+  renewal, so pilot status can never survive a genuine payment.
+- **`getTeachersExpiringWithin()`** excludes pilot accounts from
+  normal paid-subscription renewal reminders.
+- **`/admin/grant-pro`** (`server.js`) dispatches to `grantPilotPro()`
+  when the request body includes `{ pilot: true }`, returning HTTP
+  `400` with the rejection reason on ineligibility. Non-pilot
+  behavior, existing admin authentication, and existing rate limiting
+  are all unchanged.
+
+This supersedes the "no new pilot-only code path" description above
+as an account of the current implementation — it does not mean that
+description was incorrect when written; the design simply changed
+during implementation, for the reasons given above (the permanent-Pro
+guard case in particular required eligibility logic that a direct
+reuse of `markUserAsPro()` did not have a way to express safely).
+
+**Verification evidence.** Final verification was performed on the
+real local working tree (`~/Downloads/sa-teacher-assistant`, commit
+`b0b98dc`), not a sandbox, using the project's real migration chain
+via the `createTestDb` shim for most files plus the real native
+`better-sqlite3` driver for `payment.test.js`:
+
+| Test file | Result |
+|---|---|
+| `tests/pilot-pro-grant.test.js` | 26/26 |
+| `tests/admin-grant-pro-pilot-route.test.js` | 13/13 |
+| `tests/phase-d-payment-renewal.test.js` | 20/20 |
+| `tests/mark-user-as-pro.test.js` | 13/13 |
+| `tests/yocoWebhookVerifier.test.js` | 9/9 |
+| `tests/phase-d-replay-stress.test.js` | 15/15 |
+| `tests/phase-e-crash-recovery.test.js` | 9/9 |
+| `tests/phase-e-usage-rollback.test.js` | 5/5 |
+| `tests/pr22-whatsapp-otp.test.js` | 56/56 |
+| `tests/pr25-dev-otp-bypass.test.js` | 12/12 |
+| `tests/rc1-h-012-workspace-onboarding-dispatch.test.js` | 73/73 |
+| `tests/rc1-workspace-group-a-dispatch.test.js` | 88/88 |
+| `tests/rc1-v011-coaching-group-c-dispatch.test.js` | 66/66 |
+| `tests/phase1-delivery-rollback.test.js` | 7/7 |
+| `tests/payment.test.js` (real native `better-sqlite3`) | 2/2 |
+
+**Total: 414/414 assertions passed, 0 failures, across 15 test files.**
+
+`tests/admin-grant-pro-pilot-route.test.js` exercises the actual
+Express app in-process over real HTTP — real `requireAdminSecret`,
+real `adminLimiter`, real `grantPilotPro()` — confirming a successful
+pilot grant (`200`), a rejected grant on active normal Pro (`400` with
+`reason: 'active_non_pilot_pro'`, zero DB mutation), a rejection on
+missing admin auth (`401`), and unchanged non-pilot behavior (`200`,
+no `pilot` field in the response). Migration 042 was confirmed
+additive and idempotent by repeated execution of the real
+`runMigrations()` across all 15 test files' independent throwaway
+databases; Migration 041 was diff-verified unmodified. `git diff --check`
+was clean at time of commit. No production defect remains open from
+this work — the one defect found (the permanent-Pro NULL-expiry guard
+gap, above) was fixed and regression-tested before `b0b98dc` was
+committed and pushed.
+
 ### Success metrics
 - [ ] ≥95% successful command completion rate
 - [ ] No data corruption
