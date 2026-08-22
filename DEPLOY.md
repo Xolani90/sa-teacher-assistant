@@ -16,7 +16,7 @@
 | `WHATSAPP_TOKEN` | Meta for Developers → your app → WhatsApp → API Setup |
 | `WHATSAPP_PHONE_NUMBER_ID` | Same page as above |
 | `VERIFY_TOKEN` | Any string you choose — must match what you set in Meta webhook config |
-| `WEBHOOK_SECRET` | Any strong random string — used to verify Meta webhook signatures |
+| `META_APP_SECRET` | Meta App Secret (from Meta Developers → your app → Settings → Basic) — used to verify Meta webhook signatures |
 | `PII_SECRET` | Generate: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"` |
 | `ANTHROPIC_API_KEY` | console.anthropic.com |
 | `ADMIN_SECRET` | Any strong random string — used to authenticate admin endpoints |

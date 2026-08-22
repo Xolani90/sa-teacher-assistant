@@ -54,7 +54,7 @@ Add every variable from the table below.
 | `WHATSAPP_TOKEN` | ✅ | Meta WhatsApp access token |
 | `WHATSAPP_PHONE_NUMBER_ID` | ✅ | Meta phone number ID |
 | `VERIFY_TOKEN` | ✅ | Any string — must match Meta dashboard |
-| `WEBHOOK_SECRET` | ✅ | Meta App Secret (from Meta Developers → Settings → Basic) |
+| `META_APP_SECRET` | ✅ | Meta App Secret (from Meta Developers → Settings → Basic) |
 | `ANTHROPIC_API_KEY` | ✅ | From console.anthropic.com |
 | `PII_SECRET` | ✅ | 32-byte random hex — generate below |
 | `APP_URL` | ✅ | `https://your-app-name.onrender.com` |
@@ -138,4 +138,4 @@ curl https://your-app-name.onrender.com/
 - [ ] `PII_SECRET` — freshly generated, 32 hex bytes
 - [ ] `APP_URL` — your actual Render URL (no trailing slash)
 - [ ] `WHATSAPP_TOKEN` — valid, not expired
-- [ ] `WEBHOOK_SECRET` — Meta App Secret
+- [ ] `META_APP_SECRET` — Meta App Secret
