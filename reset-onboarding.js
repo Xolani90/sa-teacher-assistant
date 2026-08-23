@@ -1,5 +1,6 @@
 'use strict';
 
+require('dotenv').config();
 const { hashPhone } = require('./utils/usageTracker');
 const { getDb } = require('./utils/database');
 
