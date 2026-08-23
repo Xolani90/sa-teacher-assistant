@@ -167,60 +167,12 @@ async function handleCommand(from, text, deps) {
     // the teacher to a clean slate.
     deps.clearAllSessions(from);
 
-    const teacher = deps.getTeacherByPhone(from);
-    const name    = teacher?.name || 'there';
-    await deps.safeSendMessage(from,
-      `👋 Hey ${name}! Here's what I can do:\n\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `📝 *1. CREATE A RESOURCE*\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `Just describe what you need, e.g.:\n` +
-      `_"Grade 7 Maths worksheet on fractions"_\n` +
-      `_"30-mark test on photosynthesis, Grade 9"_\n` +
-      `_"Lesson plan, Grade 10 Accounting"_\n` +
-      `_"Rubric for persuasive essay"_\n` +
-      `_"Quick quiz on the water cycle"_\n` +
-      `_"Explain long division simply"_\n` +
-      `_"Parent message: Thabo absent 3 days"_\n` +
-      `_"Report comment for Lindiwe, Term 2"_\n\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `📊 *2. SUBMIT & ANALYSE MARKS*\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `_"Upload marks"_ — submit a mark sheet (type, photo, CSV or Excel) for full item analysis, error analysis & learner grouping\n` +
-      `_"How did my class do?"_ — quick assessment analysis\n` +
-      `_"Intervention plan for my strugglers"_\n` +
-      `_"Moderation pack for HOD sign-off"_\n\n` +
-      `After uploading, reply:\n` +
-      `*REPORT* — full diagnostic PDF\n` +
-      `*HOD REPORT* — for department submission\n` +
-      `*PARENT REPORT* — for one learner or class\n\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `👁️ *3. CLASSROOM OBSERVATIONS*\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `_"Observe my class"_ — start a play-based / structured observation\n` +
-      `*MY OBSERVATIONS* — view your observation history\n\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `📅 *4. CURRICULUM & PLANNING*\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `_"Annual teaching plan for Grade 8 Maths"_ — CAPS ATP\n` +
-      `_"Am I behind on the curriculum?"_ — pacing check\n\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `🏫 *5. YOUR WORKSPACE*\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `*WORKSPACE* — classes, assessments & progress\n` +
-      `*MY CLASSES* — list classes (NEW CLASS to add)\n` +
-      `*MY ASSESSMENTS* — history with averages\n` +
-      `*MY PROGRESS* — CAPS curriculum coverage\n\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `👤 *6. YOUR ACCOUNT*\n` +
-      `━━━━━━━━━━━━━━━━━━━\n` +
-      `*STATUS* — usage & plan\n` +
-      `*PRO* — upgrade to Pro (unlocks ATP, analysis, intervention plans & moderation packs)\n` +
-      `*PROFILE* — view your defaults\n` +
-      `*UPDATE* — change your defaults\n\n` +
-      `💡 _After a worksheet, reply_ *EASIER · HARDER · VISUAL · ORAL* _to adapt it._\n\n` +
-      `Type anything to get started, or reply *MENU* any time to see this again. 😊`
-    );
+    // Guided numbered menu (flows/mainMenuFlow.js) replaces the old wall
+    // of free text here. The original text is preserved verbatim in
+    // sendLegacyHelpText() below, reachable via the new menu's own
+    // "Help — how this works" option.
+    const { sendMainMenu } = require('../flows/mainMenuFlow');
+    await sendMainMenu(from, deps);
     return true;
   }
 
@@ -909,4 +861,72 @@ async function handleCommand(from, text, deps) {
 }
 
 
-module.exports = { handleCommand };
+/**
+ * The original full-text HELP listing, preserved verbatim from before the
+ * numbered main menu (flows/mainMenuFlow.js) replaced it as the default
+ * HELP/MENU response. Reachable via the new menu's "Help — how this
+ * works" option, and callable directly for anything that still wants
+ * the full command reference.
+ *
+ * @param {string} from
+ * @param {Object} deps - same shape as handleCommand's deps (needs
+ *   getTeacherByPhone, safeSendMessage)
+ */
+async function sendLegacyHelpText(from, deps) {
+  const teacher = deps.getTeacherByPhone(from);
+  const name    = teacher?.name || 'there';
+  await deps.safeSendMessage(from,
+    `👋 Hey ${name}! Here's what I can do:\n\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `📝 *1. CREATE A RESOURCE*\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `Just describe what you need, e.g.:\n` +
+    `_"Grade 7 Maths worksheet on fractions"_\n` +
+    `_"30-mark test on photosynthesis, Grade 9"_\n` +
+    `_"Lesson plan, Grade 10 Accounting"_\n` +
+    `_"Rubric for persuasive essay"_\n` +
+    `_"Quick quiz on the water cycle"_\n` +
+    `_"Explain long division simply"_\n` +
+    `_"Parent message: Thabo absent 3 days"_\n` +
+    `_"Report comment for Lindiwe, Term 2"_\n\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `📊 *2. SUBMIT & ANALYSE MARKS*\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `_"Upload marks"_ — submit a mark sheet (type, photo, CSV or Excel) for full item analysis, error analysis & learner grouping\n` +
+    `_"How did my class do?"_ — quick assessment analysis\n` +
+    `_"Intervention plan for my strugglers"_\n` +
+    `_"Moderation pack for HOD sign-off"_\n\n` +
+    `After uploading, reply:\n` +
+    `*REPORT* — full diagnostic PDF\n` +
+    `*HOD REPORT* — for department submission\n` +
+    `*PARENT REPORT* — for one learner or class\n\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `👁️ *3. CLASSROOM OBSERVATIONS*\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `_"Observe my class"_ — start a play-based / structured observation\n` +
+    `*MY OBSERVATIONS* — view your observation history\n\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `📅 *4. CURRICULUM & PLANNING*\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `_"Annual teaching plan for Grade 8 Maths"_ — CAPS ATP\n` +
+    `_"Am I behind on the curriculum?"_ — pacing check\n\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `🏫 *5. YOUR WORKSPACE*\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `*WORKSPACE* — classes, assessments & progress\n` +
+    `*MY CLASSES* — list classes (NEW CLASS to add)\n` +
+    `*MY ASSESSMENTS* — history with averages\n` +
+    `*MY PROGRESS* — CAPS curriculum coverage\n\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `👤 *6. YOUR ACCOUNT*\n` +
+    `━━━━━━━━━━━━━━━━━━━\n` +
+    `*STATUS* — usage & plan\n` +
+    `*PRO* — upgrade to Pro (unlocks ATP, analysis, intervention plans & moderation packs)\n` +
+    `*PROFILE* — view your defaults\n` +
+    `*UPDATE* — change your defaults\n\n` +
+    `💡 _After a worksheet, reply_ *EASIER · HARDER · VISUAL · ORAL* _to adapt it._\n\n` +
+    `Type anything to get started, or reply *MENU* any time to see this again. 😊`
+  );
+}
+
+module.exports = { handleCommand, sendLegacyHelpText };

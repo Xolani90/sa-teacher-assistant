@@ -105,6 +105,21 @@ async function processMessage(message, deps) {
   // ── Command handler (simple commands short-circuit AI; all commands checked here) ──
   const commandHandled = await deps.handleCommand(from, text);
   if (commandHandled) return;
+
+  // ── Guided main menu (flows/mainMenuFlow.js) ──────────────────────────
+  // Checked immediately after commandHandler and BEFORE onboarding: a
+  // teacher replying to an already-open numbered main-menu prompt must
+  // never be re-routed into onboarding. This flow does not use the
+  // alreadyMidFlow/FLOW_STORES mechanism the 13 stateful flows below use —
+  // an open NavigationService menu IS its entire state (see the flow
+  // file's own header comment for why that's safe here), so it needs no
+  // entry in that list. handleMainMenuFlow() itself only claims a message
+  // when one of ITS OWN menus is genuinely open for this phone (via
+  // navigationService.consumeNumericReply()), so a bare "1" with nothing
+  // of ours open safely falls through to existing behavior unchanged.
+  const mainMenuHandled = await deps.handleMainMenuFlow(from, text, deps.buildMainMenuDeps());
+  if (mainMenuHandled) return;
+
   // ── Onboarding (new users) ────────────────────────────────────
   const needsOb = deps.needsOnboarding(from);
   if (needsOb) {

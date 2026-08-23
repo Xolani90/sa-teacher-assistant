@@ -677,6 +677,37 @@ function buildProcessMessageDeps() {
     isCeilingReached,
     parseIntent,
     classifyIntent,
+    handleMainMenuFlow,
+    buildMainMenuDeps,
+  });
+}
+
+const { handleMainMenuFlow } = require('../flows/mainMenuFlow');
+
+/**
+ * Bundles what flows/mainMenuFlow.js needs. Kept separate from
+ * buildProcessMessageDeps() (rather than folded into it) so the flow's
+ * dependency contract stays explicit and small, matching the pattern
+ * every other flow's build*Deps() already follows.
+ */
+function buildMainMenuDeps() {
+  const { sendLegacyHelpText } = require('../core/commandHandler');
+  return Object.freeze({
+    hashPhone,
+    getTeacherByPhone,
+    safeSendMessage,
+    pendingIntentState,
+    triggerGeneration,
+    buildGenerationDeps,
+    sendLegacyHelpText: (fromArg) => sendLegacyHelpText(fromArg, buildCommandDeps()),
+    // Re-enters processMessage() with synthetic text so every existing
+    // command/flow stays the single source of truth for its own
+    // behavior — this flow never duplicates that logic.
+    reDispatchAsText: (fromArg, textArg) =>
+      processMessage(
+        { from: fromArg, id: `mainmenu-redispatch-${Date.now()}`, type: 'text', text: { body: textArg } },
+        buildProcessMessageDeps()
+      ),
   });
 }
 
