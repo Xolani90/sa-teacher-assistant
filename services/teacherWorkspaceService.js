@@ -239,7 +239,7 @@ function saveResource(phoneHash, resourceType, title, content, metadata = {}, ge
   }
 
   // Guard: resourceType must be one of the known saveable types.
-  const KNOWN_RESOURCE_TYPES = ['worksheet', 'test', 'lessonPlan', 'atp', 'sbaTask', 'examPaper', 'rubric', 'moderationPack'];
+  const KNOWN_RESOURCE_TYPES = ['worksheet', 'test', 'lessonPlan', 'atp', 'sbaTask', 'examPaper', 'rubric', 'moderationPack', 'mentalMaths'];
   if (!resourceType || !KNOWN_RESOURCE_TYPES.includes(resourceType)) {
     throw new Error(`saveResource: unknown resourceType "${resourceType}"`);
   }

@@ -378,7 +378,7 @@ async function processMessage(message, deps) {
   // moderationPack only needs a topic in full-build mode — if the teacher has
   // a recently analysed assessment (wrap mode), the assessment's own title
   // stands in for the topic, so skip the clarifier in that case.
-  const noTopicNeeded = ['atp', 'assessmentAnalysis', 'dataAssessment', 'interventionPlan', 'curriculumQuery', 'observation'];
+  const noTopicNeeded = ['atp', 'mentalMaths', 'assessmentAnalysis', 'dataAssessment', 'interventionPlan', 'curriculumQuery', 'observation'];
   const moderationPackHasExistingAssessment = intent.type === 'moderationPack' && !!(deps.getTeacherByPhone(from)?.last_assessment_id);
   if (!noTopicNeeded.includes(intent.type) && !moderationPackHasExistingAssessment && (!intent.topic || intent.topic.length < 3)) {
     deps.pendingIntentState.set(phoneHash, {

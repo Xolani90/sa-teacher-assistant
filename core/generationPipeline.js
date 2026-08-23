@@ -15,6 +15,7 @@
 
 const { validateAtpWeeks } = require('../utils/atpWeekValidator');
 const { resolveCurrentTopic, topicMatchesCurrentATP } = require('../services/curriculumIntelligenceService');
+const { generateMentalMathsSet, isSupportedGrade: isMentalMathsGrade, MIN_GRADE: MM_MIN_GRADE, MAX_GRADE: MM_MAX_GRADE } = require('../services/mentalMathsService');
 
 // Types whose content is tied to a specific CAPS topic and should be
 // grounded against the ATP (rather than left to the AI to free-associate
@@ -145,6 +146,34 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
     }
   }
 
+  // Mental Maths V1 supports Grades 7-9 only — gate before quota deduction,
+  // same pattern as the atp/moderationPack Pro-gates above. Also compute
+  // the deterministic question set here (not inside buildPrompt/promptService)
+  // because it needs the resolved effective grade, and because the set must
+  // exist before the AI wording call is ever made — the AI never authors
+  // or alters the arithmetic, only wraps this pre-computed set in wording.
+  if (intent.type === 'mentalMaths') {
+    const teacherForGrade = getTeacherByPhone(from);
+    // teachers.grade is a TEXT column (see the ROOT CAUSE FIX comment in
+    // utils/usageTracker.js#updateTeacherProfile) — it comes back from the
+    // DB as a clean numeric string (e.g. "8"), never a JS number, so it
+    // must be parsed before isMentalMathsGrade()'s Number.isInteger()
+    // check ever sees it. intent.grade (parsed fresh from the message by
+    // intentParser) is already a number or null and needs no conversion.
+    const rawGrade = intent.grade != null ? intent.grade : teacherForGrade?.grade;
+    const effGrade = rawGrade != null && rawGrade !== '' ? parseInt(rawGrade, 10) : null;
+    if (!isMentalMathsGrade(effGrade)) {
+      await safeSendMessage(from,
+        `🔢 *Mental Maths is available for Grades ${MM_MIN_GRADE}-${MM_MAX_GRADE}*\n\n` +
+        `${effGrade != null && !Number.isNaN(effGrade) ? `Grade ${effGrade} isn't in that range yet.` : `Let me know which grade (${MM_MIN_GRADE}-${MM_MAX_GRADE}) you'd like this for.`} Reply with e.g. "Grade ${MM_MIN_GRADE} mental maths".`
+      );
+      return;
+    }
+    intent.grade = effGrade;
+    const mentalMathsSet = generateMentalMathsSet({ grade: effGrade, count: 12 });
+    intent.mentalMathsQuestions = mentalMathsSet.questions;
+  }
+
   const quota = checkAndIncrementUsage(from, intent.type);
 
   if (!quota.allowed) {
@@ -167,8 +196,17 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
   // like the generateContent() failure path below does, then re-throw so
   // the existing outer webhook.js catch/fallback-notice behavior is
   // unchanged for every other aspect of this failure.
+  // Mental Maths (V1) gets its own ack wording: it is strand-based mental
+  // fluency practice, not a CAPS-topic-aligned generator (the service
+  // deliberately does not model its six strands as CAPS ATP topics — see
+  // services/mentalMathsService.js) — so the shared "CAPS-aligned ..."
+  // template would overclaim curriculum alignment for this type
+  // specifically. Every other intent type keeps the original wording.
+  const ackMessage = intent.type === 'mentalMaths'
+    ? `⏳ Generating your Mental Maths session${gradeDisplay}... Please wait.`
+    : `⏳ Generating your CAPS-aligned ${intentLabel(intent.type)}${gradeDisplay}${subjectDisplay}... Please wait.`;
   try {
-    await safeSendMessage(from, `⏳ Generating your CAPS-aligned ${intentLabel(intent.type)}${gradeDisplay}${subjectDisplay}... Please wait.`);
+    await safeSendMessage(from, ackMessage);
   } catch (err) {
     rollbackUsage(quota, from);
     throw err;
@@ -376,7 +414,7 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
   // Saveable types: all generation intents that produce a reusable document.
   // quickQuiz, explanation, and assessmentAnalysis are excluded — they are
   // ephemeral or part of a larger workflow that auto-saves via saveReport().
-  const saveableTypes = ['worksheet', 'test', 'lessonPlan', 'atp', 'sbaTask', 'examPaper', 'rubric', 'moderationPack'];
+  const saveableTypes = ['worksheet', 'test', 'lessonPlan', 'atp', 'sbaTask', 'examPaper', 'rubric', 'moderationPack', 'mentalMaths'];
   if (saveableTypes.includes(intent.type)) {
     const phoneHash = hashPhone(from);
     // generationId: unique token minted at storage time.

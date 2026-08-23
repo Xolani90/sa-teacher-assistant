@@ -48,6 +48,7 @@ const CREATE_MENU_OPTIONS = {
   '3': 'Lesson plan',
   '4': 'Annual Teaching Plan (ATP)',
   '5': 'Explain a topic',
+  '6': 'Mental Maths (Grades 7-9)',
   '0': 'Back to main menu',
 };
 
@@ -252,6 +253,7 @@ async function handleMainMenuFlow(from, text, deps) {
       'Lesson plan': 'lessonPlan',
       'Annual Teaching Plan (ATP)': 'atp',
       'Explain a topic': 'explanation',
+      'Mental Maths (Grades 7-9)': 'mentalMaths',
     };
     const type = typeByLabel[value];
     if (!type) return false;
@@ -264,6 +266,26 @@ async function handleMainMenuFlow(from, text, deps) {
     if (type === 'atp') {
       // ATP never needs a topic (subject + grade is enough) — go straight
       // to generation, exactly like the existing ATP path.
+      await deps.triggerGeneration({
+        from,
+        intent: { type, grade, subject, topic: null },
+        deps: deps.buildGenerationDeps(),
+      });
+      return true;
+    }
+
+    if (type === 'mentalMaths') {
+      // Mental Maths is strand-based, not topic-based — same shape as ATP
+      // above (no topic to collect). Deliberately does NOT reuse
+      // pendingIntentState for a "which grade?" follow-up: that mechanism
+      // always writes the next reply into intent.topic (see
+      // core/messageProcessor.js), which would silently corrupt a grade
+      // reply into a bogus topic string. Instead go straight to
+      // triggerGeneration with whatever grade the profile has (or null);
+      // the grade-gate inside generationPipeline.js (Grades 7-9 only)
+      // already sends a clear "which grade?" message itself when the
+      // profile grade is missing or out of range — no separate prompt
+      // needed here.
       await deps.triggerGeneration({
         from,
         intent: { type, grade, subject, topic: null },

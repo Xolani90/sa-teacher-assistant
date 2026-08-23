@@ -12,6 +12,7 @@ const INTENT_TYPES = {
   PARENT_MESSAGE: 'parentMessage',
   QUICK_QUIZ: 'quickQuiz',
   ATP: 'atp',
+  MENTAL_MATHS: 'mentalMaths',
   ASSESSMENT_ANALYSIS: 'assessmentAnalysis',
   DATA_ASSESSMENT: 'dataAssessment',
   INTERVENTION_PLAN: 'interventionPlan',
@@ -182,6 +183,12 @@ function parseIntent(text) {
   } else if (/\b(annual\s+teaching\s+plan|atp|year\s+plan|yearly\s+plan|annual\s+plan)\b/i.test(lower) ||
       /\bterm\s+plan\b/i.test(lower)) {
     type = INTENT_TYPES.ATP;
+  // MENTAL_MATHS detection (checked before WORKSHEET/TEST — "mental maths worksheet"
+  // or "mental maths quiz" must resolve here, not fall into the generic
+  // worksheet/test branches below, since Mental Maths is strand-based fluency
+  // practice with its own deterministic generator, not a CAPS-topic worksheet/test)
+  } else if (/\b(mental\s+maths?|mental\s+math|maths?\s+mentals?|mental\s+fluency|number\s+facts?\s+practice)\b/i.test(lower)) {
+    type = INTENT_TYPES.MENTAL_MATHS;
   // Assessment analysis / diagnostics (checked before EMOTIONAL_SUPPORT and the generic
   // "test"/"assessment" regex — both would otherwise wrongly intercept phrases like
   // "where are my learners struggling")
@@ -303,6 +310,13 @@ function parseIntent(text) {
 
   // For ATP, topic is not meaningful — scope is the full year curriculum
   if (type === INTENT_TYPES.ATP) {
+    topic = null;
+  }
+
+  // Mental Maths is strand-based (six fixed strands cycled per session),
+  // not topic-based — clear any free-text "topic" cleanTopic() extracted
+  // so it never leaks into the ack message or a saved-resource title.
+  if (type === INTENT_TYPES.MENTAL_MATHS) {
     topic = null;
   }
 

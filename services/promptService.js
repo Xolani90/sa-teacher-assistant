@@ -15,6 +15,7 @@ const atpPrompt = require('../prompts/atp');
 const assessmentAnalysisPrompt = require('../prompts/assessmentAnalysis');
 const interventionPlanPrompt = require('../prompts/interventionPlan');
 const moderationPackPrompt = require('../prompts/moderationPack');
+const mentalMathsPrompt = require('../prompts/mentalMaths');
 
 // curriculumQuery is handled entirely by curriculumIntelligenceService — no prompt file needed here
 
@@ -65,6 +66,18 @@ function buildPrompt(intent, profile = {}) {
       return interventionPlanPrompt(enriched);
     case INTENT_TYPES.MODERATION_PACK:
       return moderationPackPrompt(enriched);
+    case INTENT_TYPES.MENTAL_MATHS:
+      // mentalMathsQuestions is attached by generationPipeline.js BEFORE
+      // buildPrompt() is called — the deterministic question/answer set
+      // must exist first, since this prompt only wraps it in wording and
+      // never computes it. grade here is already resolved (generationPipeline
+      // sets intent.grade to the effective grade before this call), so no
+      // profile fallback is needed for grade specifically.
+      return mentalMathsPrompt({
+        grade: enriched.grade,
+        questions: enriched.mentalMathsQuestions || [],
+        language: enriched.language,
+      });
     case INTENT_TYPES.EXPLANATION:
     default:
       return explanationPrompt(enriched);

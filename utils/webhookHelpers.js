@@ -157,6 +157,7 @@ function intentLabel(type) {
     dataAssessment:     'data-driven assessment analysis',
     interventionPlan:   'intervention plan',
     moderationPack:     'moderation pack',
+    mentalMaths:        'Mental Maths session',
     curriculumQuery:    'curriculum intelligence query',
   };
   return labels[type] || 'content';
