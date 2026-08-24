@@ -64,6 +64,11 @@ const {
 const reportCommentState = new SessionStore('reportComment',  30 * 60 * 1000);
 const profileUpdateState = new SessionStore('profileUpdate',  10 * 60 * 1000);
 const pendingIntentState = new SessionStore('pendingIntent',  10 * 60 * 1000);
+// Grade 7/8 Mental Maths: holds { grade, subject } between "which family?"
+// being asked (core/generationPipeline.js) and answered (flows/mainMenuFlow.js)
+// — same TTL as pendingIntentState, kept separate so a stray digit reply
+// can never be misrouted into a generic pending-intent topic.
+const mentalMathsFamilyPendingState = new SessionStore('mentalMathsFamilyPending', 10 * 60 * 1000);
 const lastWorksheetState = new SessionStore('lastWorksheet',  30 * 60 * 1000);
 const parentMessageState = new SessionStore('parentMessage',  30 * 60 * 1000);
 const assessmentAnalysisState = new SessionStore('assessmentAnalysis', 30 * 60 * 1000);
@@ -414,6 +419,7 @@ function buildGenerationDeps() {
     isAiRateLimited,
     FREE_LIMIT_DISPLAY,
     pendingIntentState,
+    mentalMathsFamilyPendingState,
     lastGeneratedState,
     recordWorksheetGeneration,
     buildWorksheetDeps,
@@ -697,6 +703,7 @@ function buildMainMenuDeps() {
     getTeacherByPhone,
     safeSendMessage,
     pendingIntentState,
+    mentalMathsFamilyPendingState,
     triggerGeneration,
     buildGenerationDeps,
     sendLegacyHelpText: (fromArg) => sendLegacyHelpText(fromArg, buildCommandDeps()),

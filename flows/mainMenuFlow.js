@@ -25,6 +25,7 @@
 'use strict';
 
 const { openMenu, consumeNumericReply, closeMenu } = require('../services/navigationService');
+const { MENTAL_MATHS_FAMILY_MENU_ID, FAMILY_MENU_LABEL_TO_FAMILY } = require('../core/generationPipeline');
 
 // ── Menu definitions ────────────────────────────────────────────────────
 // Each menu is a flat { '1': 'label', '2': 'label', ... } map, matching
@@ -207,7 +208,49 @@ async function handleMainMenuFlow(from, text, deps) {
 
   // ── "Back to main menu" is universal across every sub-menu ───────────
   if (value === 'Back to main menu') {
+    // The family menu is the one sub-menu carrying pending request state
+    // outside itself (mentalMathsFamilyPendingState) — every other
+    // sub-menu is stateless, so only this one needs explicit cleanup here.
+    if (menuId === MENTAL_MATHS_FAMILY_MENU_ID) {
+      deps.mentalMathsFamilyPendingState.delete(phoneHash);
+    }
     await sendMainMenu(from, deps);
+    return true;
+  }
+
+  // ── Mental Maths family selection (Grade 7/8) ─────────────────────────
+  // Opened directly by core/generationPipeline.js (not via sendSubMenu —
+  // its options are grade-dependent, unlike every other static sub-menu
+  // here), so this is the one branch that doesn't have a matching
+  // sendSubMenu() call site above. Reads back the original grade/subject
+  // saved before the menu opened, consumes it exactly once, and re-enters
+  // generation with the original grade + the family the teacher just
+  // picked.
+  if (menuId === MENTAL_MATHS_FAMILY_MENU_ID) {
+    const pending = deps.mentalMathsFamilyPendingState.get(phoneHash);
+    const family = FAMILY_MENU_LABEL_TO_FAMILY[value];
+
+    if (!pending || !family) {
+      // Expired/missing pending state, or an unrecognized option — fail
+      // safely with no generation, same as any other stale-menu reply.
+      // Deliberately does NOT delete pending state here: an invalid/
+      // unrecognized reply shouldn't consume otherwise-valid pending
+      // context (navigationService's own menu/option validation should
+      // normally prevent this path entirely, but this handler stays
+      // correct defensively regardless).
+      await deps.safeSendMessage(from,
+        `That Mental Maths menu has expired. Reply MENU to start again.`
+      );
+      return true;
+    }
+
+    deps.mentalMathsFamilyPendingState.delete(phoneHash);
+
+    await deps.triggerGeneration({
+      from,
+      intent: { type: 'mentalMaths', grade: pending.grade, subject: pending.subject, family, topic: null },
+      deps: deps.buildGenerationDeps(),
+    });
     return true;
   }
 

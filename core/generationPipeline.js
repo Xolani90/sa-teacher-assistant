@@ -15,8 +15,60 @@
 
 const { validateAtpWeeks } = require('../utils/atpWeekValidator');
 const { resolveCurrentTopic, topicMatchesCurrentATP } = require('../services/curriculumIntelligenceService');
-const { generateMentalMathsSet, isSupportedGrade: isMentalMathsGrade, MIN_GRADE: MM_MIN_GRADE, MAX_GRADE: MM_MAX_GRADE } = require('../services/mentalMathsService');
+// generateMentalMathsSet/isSupportedGrade (the legacy six-strand path) are
+// deliberately not imported here anymore — after this commit, Grades 7-8
+// only ever reach generateFamilySession() (via the family menu), and Grade
+// 9 is gated with no generation path at all. Both remain exported from
+// mentalMathsService.js untouched for anything else that still calls them.
+const { MIN_GRADE: MM_MIN_GRADE, MAX_GRADE: MM_MAX_GRADE, AUTHORIZED_FAMILIES, FAMILY_GRADE_AUTHORIZATION, generateFamilySession } = require('../services/mentalMathsService');
 const { generateGrade5MentalMathsSet, isSupportedGrade: isMentalMathsGrade5, MIN_GRADE: MM5_MIN_GRADE, MAX_GRADE: MM5_MAX_GRADE } = require('../services/mentalMathsGrade5Service');
+const { openMenu } = require('../services/navigationService');
+
+// ── Mental Maths (Grades 7-8) family-selection menu ─────────────────────
+// Grade 9 has no authorized families (FAMILY_GRADE_AUTHORIZATION has no
+// grade-9 entries anywhere) and is gated separately below, before this
+// menu is ever considered. Menu id/options follow the exact contract
+// flows/mainMenuFlow.js's other sub-menus use (openMenu/consumeNumericReply),
+// but — unlike those — this menu's option set is grade-dependent (2 options
+// for Grade 8, 3 for Grade 7), so it's opened here rather than from
+// mainMenuFlow.js's static MENUS_BY_ID table. mainMenuFlow.js still owns
+// *consuming* the reply (see MENTAL_MATHS_FAMILY_MENU_ID export below) —
+// this module only ever opens the menu, never reads a reply off it.
+const MENTAL_MATHS_FAMILY_MENU_ID = 'mainMenu.mentalMathsFamily';
+
+const FAMILY_LABELS = {
+  mulDivFluency: 'Multiplication & Division',
+  powersRootsFluency: 'Powers & Roots',
+  ratioSharing: 'Ratio & Sharing',
+};
+
+// Reverse lookup (label -> family key) so mainMenuFlow.js can turn the
+// teacher's menu selection back into the family key generateFamilySession()
+// expects, without duplicating FAMILY_LABELS.
+const FAMILY_MENU_LABEL_TO_FAMILY = Object.fromEntries(
+  Object.entries(FAMILY_LABELS).map(([family, label]) => [label, family])
+);
+
+function familiesForGrade(grade) {
+  return AUTHORIZED_FAMILIES.filter((family) => FAMILY_GRADE_AUTHORIZATION[family].includes(grade));
+}
+
+async function openMentalMathsFamilyMenu(from, grade, { hashPhone, safeSendMessage }) {
+  const phoneHash = hashPhone(from);
+  const families = familiesForGrade(grade);
+  const options = {};
+  families.forEach((family, i) => {
+    options[String(i + 1)] = FAMILY_LABELS[family];
+  });
+  options['0'] = 'Back to main menu';
+
+  openMenu(phoneHash, { id: MENTAL_MATHS_FAMILY_MENU_ID, options, expiresAfterReply: false });
+
+  const lines = families.map((family, i) => `${i + 1}. ${FAMILY_LABELS[family]}`);
+  await safeSendMessage(from,
+    `🔢 *Grade ${grade} Mental Maths — choose a focus:*\n\n${lines.join('\n')}\n0. Back to main menu`
+  );
+}
 
 // Types whose content is tied to a specific CAPS topic and should be
 // grounded against the ATP (rather than left to the AI to free-associate
@@ -76,6 +128,7 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
     isAiRateLimited,
     FREE_LIMIT_DISPLAY,
     pendingIntentState,
+    mentalMathsFamilyPendingState,
     lastGeneratedState,
     recordWorksheetGeneration,
     buildWorksheetDeps,
@@ -168,13 +221,46 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
     // its own generator/session-builder. Neither generator's internals
     // are touched by this dispatch — this block only routes.
     if (isMentalMathsGrade5(effGrade)) {
+      // Grade 5 path — completely unchanged by family selection.
       intent.grade = effGrade;
       const grade5Set = generateGrade5MentalMathsSet({ count: 12 });
       intent.mentalMathsQuestions = grade5Set.questions;
-    } else if (isMentalMathsGrade(effGrade)) {
+    } else if (intent.family) {
+      // Round-trip from the family menu (flows/mainMenuFlow.js reconstructs
+      // the intent with the original grade + selected family after reading
+      // and deleting mentalMathsFamilyPendingState) — generate directly,
+      // no further gating. AUTHORIZED_FAMILIES/FAMILY_GRADE_AUTHORIZATION
+      // are enforced independently inside generateFamilySession() itself
+      // (see services/mentalMathsService.js), so a bad family/grade pair
+      // reaching here still fails safely rather than silently generating.
       intent.grade = effGrade;
-      const mentalMathsSet = generateMentalMathsSet({ grade: effGrade, count: 12 });
-      intent.mentalMathsQuestions = mentalMathsSet.questions;
+      const familySession = generateFamilySession({ grade: effGrade, family: intent.family, count: 12 });
+      intent.mentalMathsQuestions = familySession.questions;
+    } else if (effGrade === 7 || effGrade === 8) {
+      // Grade 7/8 without a family choice yet — save the original request
+      // (Option B: the grade travels in pending state, not re-derived from
+      // the profile after the round trip) and open the family menu instead
+      // of generating anything. mainMenuFlow.js reads this state back on
+      // the reply and deletes it exactly once, whether the teacher picks a
+      // family or hits Back.
+      const phoneHash = hashPhone(from);
+      mentalMathsFamilyPendingState.set(phoneHash, {
+        grade: effGrade,
+        subject: intent.subject,
+        lastActivity: Date.now(),
+      });
+      await openMentalMathsFamilyMenu(from, effGrade, { hashPhone, safeSendMessage });
+      return;
+    } else if (effGrade === 9) {
+      // Grade 9 has no authorized families under Senior Generation Policy
+      // v1.0 — gate explicitly, with no legacy generateMentalMathsSet()
+      // fallback (that six-strand legacy path is no longer reachable for
+      // any Senior Phase grade after this commit).
+      await safeSendMessage(from,
+        `🔢 *Mental Maths for Grade 9 is not available yet.*\n\n` +
+        `It's currently available for Grade ${MM5_MIN_GRADE} and Grades 7-8. Reply with e.g. "Grade 7 mental maths".`
+      );
+      return;
     } else {
       await safeSendMessage(from,
         `🔢 *Mental Maths is available for Grade ${MM5_MIN_GRADE} and Grades ${MM_MIN_GRADE}-${MM_MAX_GRADE}*\n\n` +
@@ -473,4 +559,10 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
   console.log(`[WEBHOOK] Response delivered to ...${String(from || '').slice(-4)}`);
 }
 
-module.exports = { triggerGeneration, buildPdfUrl };
+module.exports = {
+  triggerGeneration,
+  buildPdfUrl,
+  // Mental Maths family-selection menu — consumed by flows/mainMenuFlow.js
+  MENTAL_MATHS_FAMILY_MENU_ID,
+  FAMILY_MENU_LABEL_TO_FAMILY,
+};
