@@ -247,12 +247,192 @@ function generateMentalMathsSet({ grade, count = 12, seed } = {}) {
   return { grade, questions };
 }
 
+// ── Senior Generation Policy v1.0 (frozen) — authorized family path ────
+//
+// Governance chain: ADR-022 -> Senior Taxonomy v1.0 (frozen) -> Senior
+// Generation Policy v1.0 (frozen) -> this implementation.
+//
+// Deliberately separate from the six-strand legacy path above:
+//  - Legacy STRANDS/GENERATORS/generateMentalMathsSet are left completely
+//    unmodified (still exported, still callable, still cycle all six
+//    strands including addSub/fracDecPercent/roundEstimate).
+//  - The three functions/maps below give the frozen policy's three
+//    authorized families (flat domains, no grade-scaling, single-family
+//    sessions, genuine ratio-sharing) their own entry point that has no
+//    code path to the three unauthorized strands at all — this is a
+//    structural exclusion, not a runtime guard.
+//  - addSub, fracDecPercent, and roundEstimate remain OPEN in the
+//    taxonomy (not rejected, not yet authorized) — their generators and
+//    tests are untouched; they are simply unreachable from here.
+
+const AUTHORIZED_FAMILIES = ['mulDivFluency', 'powersRootsFluency', 'ratioSharing'];
+
+// Frozen family x grade authorization matrix (Senior Generation Policy
+// v1.0). Enforced here, at the service boundary, not left to the caller
+// (generationPipeline.js) — see reviewer requirement: relying solely on
+// dispatch-layer enforcement would make the specification boundary
+// caller-dependent. generateFamilySession() below independently rejects
+// any combination not listed here, regardless of what any caller passes.
+const FAMILY_GRADE_AUTHORIZATION = {
+  mulDivFluency: [7, 8],
+  powersRootsFluency: [7, 8],
+  ratioSharing: [7],
+};
+
+function isAuthorizedFamilyGrade(family, grade) {
+  const grades = FAMILY_GRADE_AUTHORIZATION[family];
+  return Array.isArray(grades) && grades.includes(grade);
+}
+
+// Flat, grade-independent domains (frozen policy §0/§2 — no per-grade
+// scaling for any of the three authorized families). Kept separate from
+// rangeFor() above, which remains the grade-scaled legacy source used by
+// genMulDiv/genSquareRoot via GENERATORS (the legacy six-strand path).
+const FLAT_RANGES = {
+  mulDiv: { min: 1, max: 12 },
+  squareRoot: { min: 1, max: 12 }, // square / square-root component
+  cube: { min: 1, max: 6 },        // cube / cube-root component
+};
+
+function genMulDivFlat(rand) {
+  const { min, max } = FLAT_RANGES.mulDiv;
+  const op = pick(rand, ['×', '÷']);
+  if (op === '×') {
+    const a = randInt(rand, min, max);
+    const b = randInt(rand, min, max);
+    return { prompt: `${a} × ${b}`, canonicalAnswer: a * b };
+  }
+  // Exact construction, same technique as legacy genMulDiv: pick
+  // quotient/divisor first, derive the dividend, so division is always
+  // exact.
+  const divisor = randInt(rand, min, max);
+  const quotient = randInt(rand, min, max);
+  const dividend = divisor * quotient;
+  return { prompt: `${dividend} ÷ ${divisor}`, canonicalAnswer: quotient };
+}
+
+function genPowersRootsUniform(rand) {
+  // Single-stage uniform selection across all four forms (frozen policy
+  // requirement) — replaces legacy genSquareRoot's two-stage biased
+  // selection (30% cube gate at grade>=8, then 50/50 root-vs-power).
+  const form = pick(rand, ['square', 'squareRoot', 'cube', 'cubeRoot']);
+  if (form === 'square') {
+    const n = randInt(rand, FLAT_RANGES.squareRoot.min, FLAT_RANGES.squareRoot.max);
+    return { prompt: `${n}²`, canonicalAnswer: n * n };
+  }
+  if (form === 'squareRoot') {
+    const n = randInt(rand, FLAT_RANGES.squareRoot.min, FLAT_RANGES.squareRoot.max);
+    return { prompt: `√${n * n}`, canonicalAnswer: n };
+  }
+  if (form === 'cube') {
+    const n = randInt(rand, FLAT_RANGES.cube.min, FLAT_RANGES.cube.max);
+    return { prompt: `${n}³`, canonicalAnswer: n * n * n };
+  }
+  // cubeRoot
+  const n = randInt(rand, FLAT_RANGES.cube.min, FLAT_RANGES.cube.max);
+  return { prompt: `∛${n * n * n}`, canonicalAnswer: n };
+}
+
+/**
+ * Greatest common divisor — Euclidean algorithm. Used to deterministically
+ * enforce the frozen policy's gcd(a,b)=1 ratio-canonicalization invariant
+ * (direct construction, not rejection sampling): draw a raw pair and
+ * reduce it by its gcd. 1:1 is an explicitly valid canonical ratio under
+ * the frozen policy (gcd(1,1)=1) and is never rejected — this is the one
+ * explicit, testable method for guaranteeing every generated ratio is
+ * coprime with two genuine (non-zero) parts.
+ */
+function gcd(a, b) {
+  while (b !== 0) {
+    [a, b] = [b, a % b];
+  }
+  return a;
+}
+
+function genRatioSharing(rand) {
+  // Draw a raw pair in 1-6 and reduce to lowest terms. 1:1 is a valid,
+  // explicitly-permitted canonical ratio under the frozen policy
+  // (gcd(1,1)=1) and is NOT rejected — a raw equal draw (e.g. 3,3)
+  // correctly reduces to 1:1 rather than being redrawn.
+  let a = randInt(rand, 1, 6);
+  let b = randInt(rand, 1, 6);
+  const divisor = gcd(a, b);
+  a = a / divisor;
+  b = b / divisor;
+
+  const multiplier = randInt(rand, 1, 10);
+  const total = (a + b) * multiplier;
+  const shareA = a * multiplier;
+  const shareB = b * multiplier;
+
+  return {
+    prompt: `Share ${total} in the ratio ${a}:${b}`,
+    canonicalAnswer: [shareA, shareB],
+  };
+}
+
+const GENERATORS_FAMILY = {
+  mulDivFluency: genMulDivFlat,
+  powersRootsFluency: genPowersRootsUniform,
+  ratioSharing: genRatioSharing,
+};
+
+/**
+ * Builds a single-family Mental Maths session under the frozen Senior
+ * Generation Policy v1.0 — every question drawn from exactly one
+ * authorized family, no cross-family mixing (policy §4, Option A).
+ *
+ * Distinct from generateMentalMathsSet() above, which is left completely
+ * unchanged and continues to cycle all six legacy strands evenly.
+ *
+ * @param {Object} opts
+ * @param {number} opts.grade
+ * @param {string} opts.family - one of AUTHORIZED_FAMILIES
+ * @param {number} [opts.count=12]
+ * @param {number} [opts.seed]
+ * @returns {{ grade: number, family: string, questions: Array<{strand:string, prompt:string, canonicalAnswer:*}> }}
+ */
+function generateFamilySession({ grade, family, count = 12, seed } = {}) {
+  if (!AUTHORIZED_FAMILIES.includes(family)) {
+    throw new Error(`generateFamilySession: unknown or unauthorized family "${family}" — must be one of ${AUTHORIZED_FAMILIES.join(', ')}`);
+  }
+  if (!isAuthorizedFamilyGrade(family, grade)) {
+    throw new Error(`generateFamilySession: family "${family}" is not authorized for grade "${grade}" under Senior Generation Policy v1.0 — authorized grades are ${FAMILY_GRADE_AUTHORIZATION[family].join(', ')}`);
+  }
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error(`generateFamilySession: count must be a positive integer, got "${count}"`);
+  }
+
+  const gen = GENERATORS_FAMILY[family];
+  const rand = mulberry32(seed != null ? seed : Date.now() ^ (grade * 2654435761));
+  const seenPrompts = new Set();
+  const questions = [];
+
+  for (let i = 0; i < count; i++) {
+    let attempt = 0;
+    let question;
+    do {
+      const { prompt, canonicalAnswer } = gen(rand);
+      question = { strand: family, prompt, canonicalAnswer };
+      attempt++;
+    } while (seenPrompts.has(question.prompt) && attempt < 25);
+    seenPrompts.add(question.prompt);
+    questions.push(question);
+  }
+
+  return { grade, family, questions };
+}
+
 module.exports = {
   STRANDS,
   MIN_GRADE,
   MAX_GRADE,
   isSupportedGrade,
   generateMentalMathsSet,
+  // Senior Generation Policy v1.0 (frozen) authorized-family path
+  AUTHORIZED_FAMILIES,
+  FAMILY_GRADE_AUTHORIZATION,
+  generateFamilySession,
   // exported for direct/unit testing of individual strand generators
-  _internal: { mulberry32, randInt, generateQuestion, GENERATORS, NICE_FRACTIONS },
+  _internal: { mulberry32, randInt, generateQuestion, GENERATORS, NICE_FRACTIONS, GENERATORS_FAMILY, gcd },
 };
