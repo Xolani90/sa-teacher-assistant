@@ -5,7 +5,6 @@
 // This module implements ONLY what is frozen in the specification chain:
 //   Grade5_Arithmetic_Fluency_Draft_v0.1_Consolidated.md (Sections 3 & 4 —
 //     C12/C13 generation policy)
-//   stage5_difficulty_bands.md (Support/Core/Extension band criteria)
 //
 // It is deliberately isolated from services/mentalMathsService.js (the
 // existing, frozen Senior Phase Grades 7-9 implementation) — that file is
@@ -29,11 +28,14 @@
 //        structurally unreachable at this envelope, confirmed here too
 //        since the two ranges are disjoint).
 //
-// Difficulty bands (Stage 5, specification thresholds only — NOT
-// learner-validated):
-//   C12: band = operand digit tier itself (Support=2, Core=3, Extension=4).
-//   C13: band = tertile of (a_value * b_value), cut at products <=177
-//        (Support), <=365 (Core), else Extension.
+// Difficulty banding (Support/Core/Extension) was previously implemented
+// here (c12Band/c13Band, C13_BAND_CUT_1/2) but has been removed. It cited
+// a "stage5_difficulty_bands.md" source that does not exist in the spec
+// chain, and Stage 4 explicitly records difficulty banding as not started
+// / deferred, pending its own authorization. The thresholds therefore had
+// no legitimate provenance. If adaptive difficulty banding is wanted for
+// Grade 5, that stage should be opened deliberately, as new work, rather
+// than reconstructed from this removal.
 
 'use strict';
 
@@ -41,8 +43,6 @@ const TIER_RANGES = { 2: [10, 99], 3: [100, 999], 4: [1000, 9999] };
 
 const C13_A_MIN = 10, C13_A_MAX = 99;
 const C13_B_MIN = 2, C13_B_MAX = 9;
-const C13_BAND_CUT_1 = 177; // Support upper bound (inclusive)
-const C13_BAND_CUT_2 = 365; // Core upper bound (inclusive)
 
 /**
  * Simple seeded PRNG (mulberry32) — same choice as the existing Senior
@@ -70,36 +70,13 @@ function digits(n) {
 }
 
 /**
- * C12 band: operand digit tier itself (Stage 5, Section 2).
- * @param {number} tier - 2, 3, or 4
- * @returns {'Support'|'Core'|'Extension'}
- */
-function c12Band(tier) {
-  if (tier === 2) return 'Support';
-  if (tier === 3) return 'Core';
-  if (tier === 4) return 'Extension';
-  throw new Error(`c12Band: unexpected tier "${tier}"`);
-}
-
-/**
- * C13 band: tertile of a*b (Stage 5, Section 3).
- * @param {number} product
- * @returns {'Support'|'Core'|'Extension'}
- */
-function c13Band(product) {
-  if (product <= C13_BAND_CUT_1) return 'Support';
-  if (product <= C13_BAND_CUT_2) return 'Core';
-  return 'Extension';
-}
-
-/**
  * Generates one C12 item (Block B paired addition/subtraction sentence).
  * Frozen policy: matched-length tiers, constructive subtraction ordering,
  * equal-operand subtraction discarded, result in [10,9999].
  *
  * @param {() => number} rand
  * @returns {{candidate:'C12', op:'add'|'sub', tier:number, a:number, b:number,
- *   result:number, band:string, prompt:string, canonicalAnswer:number}}
+ *   result:number, prompt:string, canonicalAnswer:number}}
  */
 function generateC12(rand) {
   const MAX_ATTEMPTS = 500;
@@ -124,12 +101,11 @@ function generateC12(rand) {
       if (result < 10 || result > 9999) continue;
     }
 
-    const band = c12Band(tier);
     const prompt = op === 'add'
       ? `${a} + ${b} = □ therefore □ = ${result} - ${b}`
       : `${a} - ${b} = □ therefore □ = ${result} + ${b}`;
 
-    return { candidate: 'C12', op, tier, a, b, result, band, prompt, canonicalAnswer: result };
+    return { candidate: 'C12', op, tier, a, b, result, prompt, canonicalAnswer: result };
   }
   throw new Error('generateC12: exceeded max attempts without a valid item');
 }
@@ -141,7 +117,7 @@ function generateC12(rand) {
  * defensively anyway).
  *
  * @param {() => number} rand
- * @returns {{candidate:'C13', a:number, b:number, product:number, band:string,
+ * @returns {{candidate:'C13', a:number, b:number, product:number,
  *   prompt:string, canonicalAnswer:number}}
  */
 function generateC13(rand) {
@@ -155,10 +131,9 @@ function generateC13(rand) {
     if (product % d !== 0) continue; // exact division mandatory
     if (d === 1 || d === product) continue;
 
-    const band = c13Band(product);
     const prompt = `${a} × ${b} = □ therefore □ = ${product} ÷ ${d}`;
 
-    return { candidate: 'C13', a, b, product, d, quotient: a, band, prompt, canonicalAnswer: a };
+    return { candidate: 'C13', a, b, product, d, quotient: a, prompt, canonicalAnswer: a };
   }
   throw new Error('generateC13: exceeded max attempts without a valid item');
 }
@@ -206,7 +181,7 @@ function isSupportedGrade(grade) {
  *   value so unseeded calls vary, but a fixed seed reproduces the same
  *   session (used by tests).
  * @returns {{ grade: 5, questions: Array<{strand:string, prompt:string,
- *   canonicalAnswer:number, band:string, candidate:string}> }}
+ *   canonicalAnswer:number, candidate:string}> }}
  */
 function generateGrade5MentalMathsSet({ count = 12, seed } = {}) {
   if (!Number.isInteger(count) || count < 1) {
@@ -229,7 +204,6 @@ function generateGrade5MentalMathsSet({ count = 12, seed } = {}) {
     questions.push({
       strand: item.candidate,
       candidate: item.candidate,
-      band: item.band,
       prompt: item.prompt,
       canonicalAnswer: item.canonicalAnswer,
     });
@@ -241,12 +215,9 @@ function generateGrade5MentalMathsSet({ count = 12, seed } = {}) {
 module.exports = {
   TIER_RANGES,
   C13_A_MIN, C13_A_MAX, C13_B_MIN, C13_B_MAX,
-  C13_BAND_CUT_1, C13_BAND_CUT_2,
   MIN_GRADE,
   MAX_GRADE,
   isSupportedGrade,
-  c12Band,
-  c13Band,
   generateC12,
   generateC13,
   generateGrade5MentalMathsSet,

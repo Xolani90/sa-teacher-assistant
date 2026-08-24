@@ -4,8 +4,6 @@
 const {
   TIER_RANGES,
   C13_A_MIN, C13_A_MAX, C13_B_MIN, C13_B_MAX,
-  C13_BAND_CUT_1, C13_BAND_CUT_2,
-  c12Band, c13Band,
   generateC12, generateC13,
   _internal,
 } = require('../services/mentalMathsGrade5Service');
@@ -45,25 +43,6 @@ console.log('C12 — frozen invariants (bulk generation)');
   ok('all three tiers populated (no empty tier)', tierCounts[2] > 0 && tierCounts[3] > 0 && tierCounts[4] > 0);
 }
 
-console.log('\nC12 — band assignment');
-{
-  ok('c12Band(2) === Support', c12Band(2) === 'Support');
-  ok('c12Band(3) === Core', c12Band(3) === 'Core');
-  ok('c12Band(4) === Extension', c12Band(4) === 'Extension');
-  let threw = false;
-  try { c12Band(5); } catch (e) { threw = true; }
-  ok('c12Band rejects an invalid tier', threw);
-
-  const rand = mulberry32(7);
-  const items = [];
-  for (let i = 0; i < 2000; i++) items.push(generateC12(rand));
-  ok('band always matches tier (Support<->2, Core<->3, Extension<->4)',
-    items.every(it =>
-      (it.tier === 2 && it.band === 'Support') ||
-      (it.tier === 3 && it.band === 'Core') ||
-      (it.tier === 4 && it.band === 'Extension')));
-}
-
 console.log('\nC13 — frozen invariants (bulk generation)');
 {
   const rand = mulberry32(99);
@@ -83,28 +62,6 @@ console.log('\nC13 — frozen invariants (bulk generation)');
   const bCoverage = new Set(items.map(it => it.b)).size;
   ok('full a coverage over enough draws (90 possible values)', aCoverage === 90);
   ok('full b coverage over enough draws (8 possible values)', bCoverage === 8);
-}
-
-console.log('\nC13 — band assignment');
-{
-  ok(`c13Band(${C13_BAND_CUT_1}) === Support (inclusive boundary)`, c13Band(C13_BAND_CUT_1) === 'Support');
-  ok(`c13Band(${C13_BAND_CUT_1 + 1}) === Core`, c13Band(C13_BAND_CUT_1 + 1) === 'Core');
-  ok(`c13Band(${C13_BAND_CUT_2}) === Core (inclusive boundary)`, c13Band(C13_BAND_CUT_2) === 'Core');
-  ok(`c13Band(${C13_BAND_CUT_2 + 1}) === Extension`, c13Band(C13_BAND_CUT_2 + 1) === 'Extension');
-  ok('c13Band(20) === Support (domain floor)', c13Band(20) === 'Support');
-  ok('c13Band(891) === Extension (domain ceiling)', c13Band(891) === 'Extension');
-
-  const rand = mulberry32(123);
-  const items = [];
-  for (let i = 0; i < 3000; i++) items.push(generateC13(rand));
-  const bandCounts = { Support: 0, Core: 0, Extension: 0 };
-  items.forEach(it => bandCounts[it.band]++);
-  ok('all three bands populated (no empty band)', bandCounts.Support > 0 && bandCounts.Core > 0 && bandCounts.Extension > 0);
-  ok('band assignment consistent with product thresholds',
-    items.every(it =>
-      (it.product <= C13_BAND_CUT_1 && it.band === 'Support') ||
-      (it.product > C13_BAND_CUT_1 && it.product <= C13_BAND_CUT_2 && it.band === 'Core') ||
-      (it.product > C13_BAND_CUT_2 && it.band === 'Extension')));
 }
 
 console.log('\nDeterminism / reproducibility');
