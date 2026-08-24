@@ -130,6 +130,32 @@ be verified independently.
 | CANCEL pending save | `cancel-pending-save.test.js` | ☑ | ☐ | PASS — RC1-H-008 Resolved (2026-08-14). Live-verified on WhatsApp: with a genuinely active assessment session (mid marks-capture) and a stale, unrelated "reply SAVE to keep this" prompt from an earlier generation both present at once, `CANCEL` correctly returned "Assessment session cancelled. No marks were saved." — not the generic pending-resource message — and the session was actually cleared: a follow-up `hi` returned the normal menu, not another marks-capture prompt. Confirms `cancel-pending-save.test.js`'s existing no-active-flow scenario (13/13) and the new active-flow collision case both hold against the real production dispatch chain. See Defect Log. |
 | MY RESOURCES | `workspace.test.js`, `rc1-h-006-save-roster-collision.test.js` (scenario 4) | ☑ | ☐ | PASS — see SAVE generated content row above; same 2026-08-14 verification covers listing/retrieval directly (correct title, id, and "(1 saved)" count through the real dispatch chain, both after a normal save and after a WhatsApp-failure/retry save). |
 
+### Out-of-Scope Feature Work — Mental Maths
+
+**Not an RC1 PASS/FAIL item.** Mental Maths v1 (Senior Phase Grades 7–9)
+was implemented during the RC1 cycle but was never part of RC1's
+declared feature scope, has no Defect Log ID, and was not introduced to
+fix a blocker discovered during RC1 validation — the sole exception the
+Feature Freeze rule (see Goal, above) allows for new feature work during
+RC1. It therefore does not satisfy that exception, is not scored PASS or
+FAIL, and is excluded from the RC1 acceptance determination (see Release
+Criteria / Go-No-Go below).
+
+Subsequent Grade 5 (C12/C13) work extends this same out-of-scope
+feature and likewise does not alter, and should not be read as
+satisfying, any RC1 acceptance criterion.
+
+**Provenance preserved, not scored:**
+- Senior Phase (Grades 7–9) generator — `0f067e0`
+- Grade 5 (C12/C13) generator — `0e1e385`
+- Grade 5 dispatch integration — `22e020d`
+- C12/C13 specification chain (`docs/specs/mental-maths/`) — `e02bb2a`
+
+The Grade 5 C12/C13 generation policy is frozen and the implementation
+is live and dispatch-tested (see commit messages for suite counts).
+Learner-validation of the Stage 4 difficulty bands (Support/Core/
+Extension) remains outstanding and is not claimed here.
+
 ### Assessment
 | Item | Automated ref | Pass | Fail | Notes |
 |---|---|---|---|---|
