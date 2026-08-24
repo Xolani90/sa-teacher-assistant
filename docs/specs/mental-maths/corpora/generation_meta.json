@@ -1,0 +1,10 @@
+{
+  "c12_n": 3000,
+  "c12_attempts": 3482,
+  "c12_add_count": 1384,
+  "c12_sub_count": 1616,
+  "c13_n": 5000,
+  "c13_attempts": 5000,
+  "seed": 20260824,
+  "policy_source": "Grade5_Arithmetic_Fluency_Draft_v0.1_Consolidated.md Sections 3 & 4"
+}
