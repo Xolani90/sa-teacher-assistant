@@ -48,7 +48,7 @@ const CREATE_MENU_OPTIONS = {
   '3': 'Lesson plan',
   '4': 'Annual Teaching Plan (ATP)',
   '5': 'Explain a topic',
-  '6': 'Mental Maths (Grades 7-9)',
+  '6': 'Mental Maths (Grade 5, 7-9)',
   '0': 'Back to main menu',
 };
 
@@ -253,7 +253,7 @@ async function handleMainMenuFlow(from, text, deps) {
       'Lesson plan': 'lessonPlan',
       'Annual Teaching Plan (ATP)': 'atp',
       'Explain a topic': 'explanation',
-      'Mental Maths (Grades 7-9)': 'mentalMaths',
+      'Mental Maths (Grade 5, 7-9)': 'mentalMaths',
     };
     const type = typeByLabel[value];
     if (!type) return false;
@@ -282,7 +282,7 @@ async function handleMainMenuFlow(from, text, deps) {
       // core/messageProcessor.js), which would silently corrupt a grade
       // reply into a bogus topic string. Instead go straight to
       // triggerGeneration with whatever grade the profile has (or null);
-      // the grade-gate inside generationPipeline.js (Grades 7-9 only)
+      // the grade-gate inside generationPipeline.js (Grade 5, or 7-9)
       // already sends a clear "which grade?" message itself when the
       // profile grade is missing or out of range — no separate prompt
       // needed here.

@@ -16,6 +16,7 @@
 const { validateAtpWeeks } = require('../utils/atpWeekValidator');
 const { resolveCurrentTopic, topicMatchesCurrentATP } = require('../services/curriculumIntelligenceService');
 const { generateMentalMathsSet, isSupportedGrade: isMentalMathsGrade, MIN_GRADE: MM_MIN_GRADE, MAX_GRADE: MM_MAX_GRADE } = require('../services/mentalMathsService');
+const { generateGrade5MentalMathsSet, isSupportedGrade: isMentalMathsGrade5, MIN_GRADE: MM5_MIN_GRADE, MAX_GRADE: MM5_MAX_GRADE } = require('../services/mentalMathsGrade5Service');
 
 // Types whose content is tied to a specific CAPS topic and should be
 // grounded against the ATP (rather than left to the AI to free-associate
@@ -162,16 +163,25 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
     // intentParser) is already a number or null and needs no conversion.
     const rawGrade = intent.grade != null ? intent.grade : teacherForGrade?.grade;
     const effGrade = rawGrade != null && rawGrade !== '' ? parseInt(rawGrade, 10) : null;
-    if (!isMentalMathsGrade(effGrade)) {
+    // Grade 5 (C12/C13) is a separate supported grade from Senior Phase
+    // 7-9 — checked first since the two ranges are disjoint and each has
+    // its own generator/session-builder. Neither generator's internals
+    // are touched by this dispatch — this block only routes.
+    if (isMentalMathsGrade5(effGrade)) {
+      intent.grade = effGrade;
+      const grade5Set = generateGrade5MentalMathsSet({ count: 12 });
+      intent.mentalMathsQuestions = grade5Set.questions;
+    } else if (isMentalMathsGrade(effGrade)) {
+      intent.grade = effGrade;
+      const mentalMathsSet = generateMentalMathsSet({ grade: effGrade, count: 12 });
+      intent.mentalMathsQuestions = mentalMathsSet.questions;
+    } else {
       await safeSendMessage(from,
-        `🔢 *Mental Maths is available for Grades ${MM_MIN_GRADE}-${MM_MAX_GRADE}*\n\n` +
-        `${effGrade != null && !Number.isNaN(effGrade) ? `Grade ${effGrade} isn't in that range yet.` : `Let me know which grade (${MM_MIN_GRADE}-${MM_MAX_GRADE}) you'd like this for.`} Reply with e.g. "Grade ${MM_MIN_GRADE} mental maths".`
+        `🔢 *Mental Maths is available for Grade ${MM5_MIN_GRADE} and Grades ${MM_MIN_GRADE}-${MM_MAX_GRADE}*\n\n` +
+        `${effGrade != null && !Number.isNaN(effGrade) ? `Grade ${effGrade} isn't in that range yet.` : `Let me know which grade you'd like this for.`} Reply with e.g. "Grade ${MM5_MIN_GRADE} mental maths" or "Grade ${MM_MIN_GRADE} mental maths".`
       );
       return;
     }
-    intent.grade = effGrade;
-    const mentalMathsSet = generateMentalMathsSet({ grade: effGrade, count: 12 });
-    intent.mentalMathsQuestions = mentalMathsSet.questions;
   }
 
   const quota = checkAndIncrementUsage(from, intent.type);

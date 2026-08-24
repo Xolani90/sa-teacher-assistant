@@ -167,13 +167,88 @@ function pick(rand, arr) {
   return arr[Math.floor(rand() * arr.length)];
 }
 
+// ── Integration surface (Stage 2) ───────────────────────────────────
+//
+// Grade 5 is its own supported grade, separate from the Senior Phase
+// MIN_GRADE/MAX_GRADE=7-9 range in mentalMathsService.js — per the
+// architecture decision recorded above (no shared range/fork).
+const MIN_GRADE = 5;
+const MAX_GRADE = 5;
+const CANDIDATES = ['C12', 'C13'];
+
+/**
+ * @param {number} grade
+ * @returns {boolean}
+ */
+function isSupportedGrade(grade) {
+  return Number.isInteger(grade) && grade >= MIN_GRADE && grade <= MAX_GRADE;
+}
+
+/**
+ * Builds a full Grade 5 Mental Maths session: an ordered list of items
+ * alternating evenly between C12 and C13, with exact duplicate prompts
+ * within the same session discarded (retries with a fresh draw, capped
+ * to avoid an infinite loop). Mirrors the session-builder contract of
+ * services/mentalMathsService.js#generateMentalMathsSet exactly — same
+ * return shape ({grade, questions: [{strand, prompt, canonicalAnswer}]}) —
+ * so generationPipeline.js and prompts/mentalMaths.js can consume either
+ * service's output identically without a shape check.
+ *
+ * `strand` here carries the candidate id (C12/C13) rather than a Senior
+ * Phase strand name — prompts/mentalMaths.js never reads `strand` for
+ * anything other than display context, so this is a safe reuse of the
+ * field rather than a new one, and keeps the two services' output
+ * interchangeable at the pipeline boundary.
+ *
+ * @param {Object} opts
+ * @param {number} [opts.count=12] - number of items to generate
+ * @param {number} [opts.seed] - RNG seed; defaults to Date.now()-derived
+ *   value so unseeded calls vary, but a fixed seed reproduces the same
+ *   session (used by tests).
+ * @returns {{ grade: 5, questions: Array<{strand:string, prompt:string,
+ *   canonicalAnswer:number, band:string, candidate:string}> }}
+ */
+function generateGrade5MentalMathsSet({ count = 12, seed } = {}) {
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error(`generateGrade5MentalMathsSet: count must be a positive integer, got "${count}"`);
+  }
+
+  const rand = mulberry32(seed != null ? seed : Date.now() ^ 0x47523500 /* "GR5\0" */);
+  const seenPrompts = new Set();
+  const questions = [];
+
+  for (let i = 0; i < count; i++) {
+    const candidate = CANDIDATES[i % CANDIDATES.length];
+    let attempt = 0;
+    let item;
+    do {
+      item = candidate === 'C12' ? generateC12(rand) : generateC13(rand);
+      attempt++;
+    } while (seenPrompts.has(item.prompt) && attempt < 25);
+    seenPrompts.add(item.prompt);
+    questions.push({
+      strand: item.candidate,
+      candidate: item.candidate,
+      band: item.band,
+      prompt: item.prompt,
+      canonicalAnswer: item.canonicalAnswer,
+    });
+  }
+
+  return { grade: MIN_GRADE, questions };
+}
+
 module.exports = {
   TIER_RANGES,
   C13_A_MIN, C13_A_MAX, C13_B_MIN, C13_B_MAX,
   C13_BAND_CUT_1, C13_BAND_CUT_2,
+  MIN_GRADE,
+  MAX_GRADE,
+  isSupportedGrade,
   c12Band,
   c13Band,
   generateC12,
   generateC13,
+  generateGrade5MentalMathsSet,
   _internal: { mulberry32, randInt, digits, pick },
 };
