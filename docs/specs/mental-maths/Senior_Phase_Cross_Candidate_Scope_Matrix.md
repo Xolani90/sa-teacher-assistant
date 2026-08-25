@@ -12,22 +12,22 @@
 
 ## Repository-record caveat — read before using this matrix
 
-At the time of writing, **only two of the five candidates' scope-
-decision reviews are actually committed to `origin/main`**:
+*(Updated by documentary reconciliation — see note below.)* As of
+this reconciliation, **all five candidates' scope-decision reviews are
+committed to `origin/main`**:
 
 | Candidate | Scope-decision review committed to repo? |
 |---|---|
 | mulDivFluency | **Yes** — `mulDivFluency_Scope_Decision_Review.md`, on record |
 | fracDecPercent | **Yes** — `fracDecPercent_Scope_Decision_Review.md` (`0416ac8`) + `fracDecPercent_Deeper_Evidence_Review_Checkpoint.md` (`cb0ee56`) |
-| powersRootsFluency | **No** — produced earlier in the working session as chat output only; not present in the repository. This matrix's powersRootsFluency row is sourced instead from the committed `powersRootsFluency_Evidence_Review_Checkpoint.md`, which is first-hand CAPS evidence but does not itself contain a scope/bundle-split analysis. |
-| ratioSharing | **No** — produced as an uploaded file in the working session, not committed. This matrix's row is sourced from that file's content plus the committed `ratioSharing_Evidence_Review_Checkpoint.md`. |
-| addSub | **No** — same situation as ratioSharing. Sourced from the uploaded file's content plus the committed `addSub_Evidence_Review_Checkpoint.md`. |
+| powersRootsFluency | **Yes** — `powersRootsFluency_Scope_Decision_Review__RECONSTRUCTION.md` (`2015a10`), committed after this matrix was first written |
+| ratioSharing | **Yes** — `ratioSharing_Scope_Decision_Review.md` (`63a1beb`), committed after this matrix was first written |
+| addSub | **Yes** — `addSub_Scope_Decision_Review.md` (`76d6f4a`), committed after this matrix was first written |
 
-This matrix does not resolve that gap. It is flagged here so that a
-future reader does not mistake this consolidation for confirmation
-that all five scope reviews are on record — three are not, and should
-be committed in their own right if they are to be relied upon as
-repository evidence going forward.
+The gap this caveat originally flagged is now closed at the commit
+level. This does **not** mean all five scope questions are resolved —
+see "Cross-cutting patterns" §2 below for which two now have proposed
+(not frozen) outcomes, and which three remain OPEN or unstatused.
 
 ## The matrix
 
@@ -55,21 +55,34 @@ repository evidence going forward.
    pattern across all five, and may itself be worth naming as a
    standing finding before any individual decisions are made.
 
-2. **Two distinct kinds of unresolved overlap exist**, and they should
-   not be treated the same way:
+2. **Two distinct kinds of overlap were identified**, and were
+   resolved differently, though both remain proposed rather than
+   frozen:
    - **Shared-sentence overlaps** (addSub ↔ mulDivFluency): the exact
      same CAPS worked material is cited as evidence for two different
-     candidates.
+     candidates. **A proposed scope decision now exists** (`b6dba51`):
+     a proposed single inverse-operations candidate combining the two
+     inverse-operation constructs. This is a **proposed, not frozen**
+     outcome — no ADR-023 §6 freeze act has occurred.
    - **Shared-mechanism-family overlaps** (fracDecPercent ↔
      powersRootsFluency): different CAPS material, evidencing the same
      underlying mathematical mechanism (squares/cubes/roots) applied to
      different number types (integers vs. common/decimal fractions).
-   
-   These may warrant different resolutions — a shared sentence might
-   argue for merging two candidates into one; a shared mechanism-family
-   applied to different number types might instead argue for a
-   deliberate "extends to" relationship between two candidates that
-   remain separate. This matrix does not resolve either.
+     **A proposed scope decision now exists** (`5b4c964`): the
+     rational-number squares/cubes/roots material is proposed to
+     remain within `powersRootsFluency`, as representations of one
+     candidate, rather than as a separate "extends to" relationship or
+     a representation-level split. This is also a **proposed, not
+     frozen** outcome.
+
+   The distinction this matrix originally drew — a shared sentence
+   tending to argue for merging, a shared mechanism-family instead
+   leaving an "extends to" relationship as a live option — is
+   preserved as background reasoning; in both cases here the Project
+   Owner's proposed resolution was to merge rather than retain an
+   "extends to" relationship. Neither resolution constitutes a
+   taxonomy freeze, and this matrix does not itself adopt or ratify
+   either decision record — it only reports that they exist.
 
 3. **Only one candidate (`ratioSharing`) involves an *already-existing*
    split with no located justification**, as opposed to an *unmade*
@@ -112,30 +125,47 @@ repository evidence going forward.
 ## What can now be checkpointed
 
 This cross-candidate matrix is ready to checkpoint as a consolidation
-artifact. It does not resolve any of the five scope questions, all of
-which remain **C — explicitly OPEN**. It also does not resolve the
-repository-record gap for powersRootsFluency, ratioSharing, and
-addSub's own scope-decision reviews — that gap is flagged, not closed,
-by this document.
+artifact. It does not itself resolve any scope question to a frozen
+taxonomy outcome. The five scope reviews now have differing
+substantive states: two cross-candidate relationships have proposed,
+not frozen outcomes recorded in dedicated decision records;
+`ratioSharing` remains **C — explicitly OPEN**; and the five remaining
+whole-number-properties siblings remain unresolved/unstatused. This
+matrix does not itself adopt, ratify, freeze, or authorize any of
+those outcomes. The repository-record gap for the
+`powersRootsFluency`, `ratioSharing`, and `addSub` scope-decision
+reviews is now closed at the commit level. This documentary
+reconciliation does not, however, resolve the substantive scope
+questions themselves beyond the proposed outcomes explicitly recorded
+in the dedicated decision records.
 
 ## Suggested next governance step (not authorized by this document)
 
-Before any bundle/split decision is made on any individual candidate,
-two housekeeping items would put the record on equal footing:
+1. ~~Commit the powersRootsFluency, ratioSharing, and addSub
+   scope-decision reviews~~ — **done**; all five candidates'
+   scope-decision reviews are now committed (see the repository-record
+   caveat above).
+2. Two of the overlaps this matrix identified now have proposed (not
+   frozen) scope decisions on record (`b6dba51`, `5b4c964`).
+   `ratioSharing`'s external split-vs-`ratioRate` question remains
+   explicitly OPEN, and the five other sibling whole-number properties
+   remain unresolved/unstatused. Any further consolidated governance
+   pass, and any eventual freeze act for either proposed decision,
+   remains a separate, explicit Project Owner act under ADR-023 §6 —
+   not implied or performed by this documentary update.
 
-1. Commit the powersRootsFluency, ratioSharing, and addSub
-   scope-decision reviews (already drafted in this working session) to
-   the repository, so all five candidates have the same evidentiary
-   standing this matrix currently only partially has.
-2. Then use this matrix as the basis for a single consolidated
-   governance pass across all five candidates together, rather than
-   five sequential local decisions — per the reasoning in the
-   "Cross-cutting patterns" section above.
-
-Both remain the user's choice; neither is undertaken by this document.
+Neither a freeze act nor a taxonomy/`AUTHORIZED_FAMILIES` update is
+undertaken by this document.
 
 ---
 
-End of cross-candidate scope matrix. All five candidates remain
-**C — explicitly OPEN**. No taxonomy edits. No Generation Policy. No
-implementation or test changes.
+End of cross-candidate scope matrix. The five candidate scope reviews
+are now committed to the repository. Their substantive governance
+states are not uniform: `ratioSharing` remains **C — explicitly
+OPEN**; the `fracDecPercent` ↔ `powersRootsFluency` relationship and
+the `addSub` ↔ `mulDivFluency` relationship each now have **proposed,
+not frozen** scope outcomes recorded in dedicated decision records;
+and the five remaining whole-number-properties siblings remain
+unresolved and unstatused. No taxonomy freeze has occurred. No
+taxonomy edits. No Generation Policy. No implementation or test
+changes.
