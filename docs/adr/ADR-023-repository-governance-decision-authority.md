@@ -1,6 +1,6 @@
 # ADR-023: Repository Governance — Decision Authority, Acceptance, and Freeze Mechanism
 
-**Status:** Proposed (not yet accepted — see §11 Bootstrap Provision)
+**Status:** Accepted (bootstrap acceptance under §11 — see acceptance commit for act details)
 **Depends On:** —
 **Related:** ADR-022 (Mental Maths R–12 Product Scope & Specification Governance), `docs/specs/mental-maths/Senior_Phase_Scope_Resolution_Framework__PROPOSED.md`
 
