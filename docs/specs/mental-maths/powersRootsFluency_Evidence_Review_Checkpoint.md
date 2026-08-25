@@ -58,15 +58,15 @@ relayed or secondhand quotation.
   = 3³ and NOT 7³ – 4³"; "√16 + 9 = √25, and NOT √16 + √9" — order-of-
   operations misconceptions specific to this construct.
 
-**Extraction-fidelity note:** the line rendered as "√81 = 9 because 9²
-= 81" is very likely an OCR/layout artifact of `pdftotext` — the
-surrounding examples all use small integer bases and this is almost
-certainly "³√81 = ... because ...³ = 81" or "√81 = 9 because 9² = 81"
-with a garbled cube-root symbol, i.e. some formatting corruption
-occurred during extraction. This is flagged rather than silently
-corrected: **do not treat the numeric content of this specific line as
-reliable** without visual confirmation against the PDF page image.
-Every other worked example on this page is unambiguous.
+**Extraction-fidelity note — RESOLVED:** the `pdftotext` line rendered
+as "√81 = 9 because 9² = 81" was flagged as a possible extraction
+artifact in an earlier pass of this checkpoint. Visual confirmation
+against the rendered PDF page image (p. 43) now confirms this line is
+correct as extracted: "√81 = 9 because 9² = 81" (verified: 9² = 81 ✓)
+is a distinct bullet from the cube-root example "³√27 = 3 because 3³ =
+27" (verified: 3³ = 27 ✓), both genuinely present on the page as
+separate misconception-guard examples. No extraction error occurred;
+this note is retained only as a record that the check was performed.
 
 ### Grade 8 ("What is different to Grade 7?", p. 81–84)
 
@@ -125,8 +125,9 @@ exponents) without repeating a numeric exponent ceiling.
 
 ## Non-inference constraints in force
 
-1. Do not treat the flagged √81 line as reliable without visual
-   page-image confirmation.
+1. (Resolved — see extraction-fidelity note above.) The √81/³√27
+   examples are both confirmed correct; no remaining caution needed
+   for this specific line.
 2. Do not assume a numeric ceiling exists at G8/G9 for general
    exponent calculations merely because one exists at G7 — none was
    located in the G8/G9 pages reviewed.
@@ -143,7 +144,8 @@ exponents) without repeating a numeric exponent ceiling.
   by this document.
 - G8/G9 numeric ceiling for general exponent calculations (if any) —
   not located in the pages reviewed.
-- Visual confirmation of the flagged extraction artifact (√81 line).
+- ~~Visual confirmation of the flagged extraction artifact (√81
+  line).~~ Resolved — see extraction-fidelity note above.
 
 ---
 
