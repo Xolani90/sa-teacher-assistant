@@ -1,13 +1,16 @@
-# Senior Phase Candidate-Scope Resolution Framework (PROPOSED)
+# Senior Phase Candidate-Scope Resolution Framework (ACCEPTED — methodology only)
 
-> **PROPOSED. NOT TAXONOMY AUTHORITY. NOT IMPLEMENTATION AUTHORIZATION.**
-> This document does not resolve any candidate's scope question, assign
-> any taxonomy status, or authorize any implementation. It does not
-> become effective by being written, and does not become effective by
-> being approved as methodology — approving this framework's reasoning
-> rules is a distinct act from authorizing anyone to apply them and
-> declare a result frozen (see §13). It supersedes no existing
-> document.
+> **ACCEPTED AS METHODOLOGY under ADR-023 §5. NOT TAXONOMY AUTHORITY. NOT IMPLEMENTATION AUTHORIZATION.**
+> Acceptance establishes this document's reasoning rules (§2–§12) as the
+> methodology this project uses to reason about Senior Phase candidate
+> scope. It does not resolve any candidate's scope question, assign any
+> taxonomy status, or authorize any implementation. Approving this
+> framework's reasoning rules is a distinct act from authorizing anyone
+> to apply them and declare a result frozen (see §13) — that authority
+> now exists under ADR-023's Project Owner role, but its exercise for
+> any specific candidate is a separate, later governance act, not a
+> consequence of this acceptance. This document supersedes no existing
+> document. See acceptance commit for the act's details.
 
 ## 1. Purpose and status
 
