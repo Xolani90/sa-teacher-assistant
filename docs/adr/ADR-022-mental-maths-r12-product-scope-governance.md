@@ -1,6 +1,6 @@
 # ADR-022: Mental Maths R–12 Product Scope & Specification Governance
 
-**Status:** Proposed
+**Status:** Accepted
 **Depends On:** —
 **Related:** `docs/specs/mental-maths/Grade5_Arithmetic_Fluency_Draft_v0.1_Consolidated.md`, `docs/specs/mental-maths/stage3b_findings.md`, `docs/specs/mental-maths/stage4_difficulty_spec.md`, `utils/capsPhase.js`, `RC1-MILESTONE.md` ("Out-of-Scope Feature Work — Mental Maths")
 
