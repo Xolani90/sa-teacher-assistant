@@ -1,6 +1,6 @@
 # Grade 5 C12/C13 — ADR-023 §6 Freeze Act
 
-**STATUS: DRAFT — FREEZE NOT YET PERFORMED**
+**STATUS: FROZEN — ADR-023 §6 FREEZE ACT EXECUTED**
 
 **Subject:** The C12 and C13 generation-policy content specified in
 `Grade5_Arithmetic_Fluency_Draft_v0.1_Consolidated.md` §§3–4, as
@@ -197,11 +197,11 @@ written back into the specification file.
 
 ## 9. Freeze act
 
-**Project Owner freeze act: ☐ NOT YET PERFORMED.**
+**Project Owner freeze act: ☑ PERFORMED.**
 
 Execution requires the Project Owner's explicit freeze statement as a
 separate governance act from drafting this record.
 
 ---
 
-*End of draft. STATUS: DRAFT — FREEZE NOT YET PERFORMED.*
+*End of Freeze Act. STATUS: FROZEN — ADR-023 §6 FREEZE ACT EXECUTED.*
