@@ -156,6 +156,14 @@ function insertTeacher(phoneHash, { grade = null, subject = 'mathematics' } = {}
   }
 
   // ── Scenario 3: menu dispatch, profile grade 8 (Senior Phase, unaffected) ──
+  // Under Senior Generation Policy v1.0 (frozen), G7/G8 first select a
+  // family from the sub-menu opened by generationPipeline.js, then the
+  // reply is round-tripped through mentalMathsFamilyPendingState back into
+  // triggerGeneration with intent.family set. This scenario proves that
+  // (a) MENU/1/6 for G8 opens the family menu without generating, (b) the
+  // family reply then generates via the frozen family path, and (c) the
+  // Grade 5 branch has not been reached at any point — no C12/C13-shaped
+  // sentence appears in the Senior Phase prompt.
   console.log('\n── Scenario 3: menu dispatch, profile grade 8 (Senior Phase, unaffected) ──');
   {
     const from = '27821110053';
@@ -165,9 +173,13 @@ function insertTeacher(phoneHash, { grade = null, subject = 'mathematics' } = {}
     await send(from, '1');
     await send(from, '6');
 
-    check(aiCallCount === 1, 'S3: exactly one AI wording call made', `got ${aiCallCount}`);
+    check(aiCallCount === 0, 'S3: family menu opens without generating for G8', `got ${aiCallCount}`);
+    check(sentMessages.some(m => /Grade 8 Mental Maths/i.test(m.text)), 'S3: G8 family-selection menu is shown', JSON.stringify(sentMessages.map(m => m.text)));
+
+    await send(from, '1'); // pick the first authorized family for G8 (mulDivFluency)
+    check(aiCallCount === 1, 'S3: exactly one AI wording call after family selection', `got ${aiCallCount}`);
     check(!!lastPrompt && lastPrompt.includes('Grade 8'), 'S3: prompt references Grade 8');
-    check(!!lastPrompt && !/□\s*=\s*\d+\s*÷\s*\d+/.test(lastPrompt), 'S3: prompt contains NO C13-shaped sentence (Senior Phase strands only, generator untouched)');
+    check(!!lastPrompt && !/□\s*=\s*\d+\s*÷\s*\d+/.test(lastPrompt), 'S3: prompt contains NO C13-shaped sentence (Senior Phase family path, Grade 5 branch never reached)');
     check(sentMessages.some(m => /mental maths/i.test(m.text)), 'S3: Senior Phase content still delivered', JSON.stringify(sentMessages.map(m => m.text)));
   }
 
