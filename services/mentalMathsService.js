@@ -247,28 +247,61 @@ function generateMentalMathsSet({ grade, count = 12, seed } = {}) {
   return { grade, questions };
 }
 
-// ── Senior Generation Policy v1.0 (frozen) — authorized family path ────
+// ── Senior Phase family path ───────────────────────────────────────────
 //
-// Governance chain: ADR-022 -> Senior Taxonomy v1.0 (frozen) -> Senior
-// Generation Policy v1.0 (frozen) -> this implementation.
+// ⚠ PROVENANCE NOTICE — factual correction, no behaviour change.
+//
+// This block previously described itself as implementing a frozen
+// "Senior Generation Policy v1.0", via a governance chain
+// "ADR-022 -> Senior Taxonomy v1.0 (frozen) -> Senior Generation Policy
+// v1.0 (frozen) -> this implementation". That chain is not what this
+// repository contains. Verified against repository history:
+//
+//  * The only Senior Phase generation policy present is
+//    docs/specs/mental-maths/Senior_Phase_Generation_Policy_v1_0_PROPOSED.md
+//    (added d8bf605), whose own header reads "PROPOSED FRAMEWORK — NOT YET
+//    FROZEN — NOT IMPLEMENTATION-AUTHORITATIVE", whose §4 states no
+//    candidate is generation-eligible, and whose §8 states implementation
+//    is "Not authorized; existing AUTHORIZED_FAMILIES entries are not
+//    retroactively validated by this policy".
+//  * The only Senior taxonomy present is
+//    Senior_Taxonomy_v1.0_Working_Skeleton.md (a033921), headed "NOT
+//    AUTHORITATIVE / NOT FROZEN".
+//  * The Senior Phase policy/methodology/approval commits cited by
+//    docs/governance/Grade5_C12_C13_ADR023_Section6_Freeze_Act.md §6
+//    (4a1367f, 54dfef2, 676155e) are not present in this repository.
+//  * ADR-022 §6 records this Senior Phase service as legacy, built before
+//    the specification discipline, and §5 Governance Rule 2 states that
+//    existing code is not specification authority.
+//
+// The constants and generators below are therefore left EXACTLY as they
+// shipped — not widened, not narrowed, not removed. Whether Grades 7-8
+// generation should remain live, be re-scoped to match the proposed
+// policy's §2 table (which authorizes ratioSharing at G7-G8, and splits
+// powersRootsFluency into integer G7-G8 / rational G8-only), or be gated
+// pending an ADR-023 §6 freeze act is a Project Owner decision. Nothing
+// here decides it; this comment only stops the code from asserting an
+// authorization the repository does not evidence.
 //
 // Deliberately separate from the six-strand legacy path above:
 //  - Legacy STRANDS/GENERATORS/generateMentalMathsSet are left completely
 //    unmodified (still exported, still callable, still cycle all six
 //    strands including addSub/fracDecPercent/roundEstimate).
-//  - The three functions/maps below give the frozen policy's three
-//    authorized families (flat domains, no grade-scaling, single-family
+//  - The three functions/maps below give the three families listed in
+//    AUTHORIZED_FAMILIES (flat domains, no grade-scaling, single-family
 //    sessions, genuine ratio-sharing) their own entry point that has no
-//    code path to the three unauthorized strands at all — this is a
-//    structural exclusion, not a runtime guard.
+//    code path to the three other strands at all — this is a structural
+//    exclusion, not a runtime guard.
 //  - addSub, fracDecPercent, and roundEstimate remain OPEN in the
 //    taxonomy (not rejected, not yet authorized) — their generators and
 //    tests are untouched; they are simply unreachable from here.
 
 const AUTHORIZED_FAMILIES = ['mulDivFluency', 'powersRootsFluency', 'ratioSharing'];
 
-// Frozen family x grade authorization matrix (Senior Generation Policy
-// v1.0). Enforced here, at the service boundary, not left to the caller
+// Family x grade matrix as shipped. See the PROVENANCE NOTICE above: this
+// is the live, as-built matrix, not a matrix traceable to a frozen policy
+// in this repository, and it does not match the proposed policy's §2 table.
+// Enforced here, at the service boundary, not left to the caller
 // (generationPipeline.js) — see reviewer requirement: relying solely on
 // dispatch-layer enforcement would make the specification boundary
 // caller-dependent. generateFamilySession() below independently rejects
@@ -284,8 +317,12 @@ function isAuthorizedFamilyGrade(family, grade) {
   return Array.isArray(grades) && grades.includes(grade);
 }
 
-// Flat, grade-independent domains (frozen policy §0/§2 — no per-grade
-// scaling for any of the three authorized families). Kept separate from
+// Flat, grade-independent domains as built — no per-grade scaling for any
+// of the three families. Per the PROVENANCE NOTICE above, these values have
+// no traceable specification source in this repository; the proposed Senior
+// Phase policy's §10 item 2 explicitly records numeric/operand ranges as
+// "not specified for any candidate" and states that existing code values
+// carry no evidentiary weight. Left unchanged. Kept separate from
 // rangeFor() above, which remains the grade-scaled legacy source used by
 // genMulDiv/genSquareRoot via GENERATORS (the legacy six-strand path).
 const FLAT_RANGES = {
@@ -312,8 +349,8 @@ function genMulDivFlat(rand) {
 }
 
 function genPowersRootsUniform(rand) {
-  // Single-stage uniform selection across all four forms (frozen policy
-  // requirement) — replaces legacy genSquareRoot's two-stage biased
+  // Single-stage uniform selection across all four forms, as built —
+  // replaces legacy genSquareRoot's two-stage biased
   // selection (30% cube gate at grade>=8, then 50/50 root-vs-power).
   const form = pick(rand, ['square', 'squareRoot', 'cube', 'cubeRoot']);
   if (form === 'square') {
@@ -335,10 +372,10 @@ function genPowersRootsUniform(rand) {
 
 /**
  * Greatest common divisor — Euclidean algorithm. Used to deterministically
- * enforce the frozen policy's gcd(a,b)=1 ratio-canonicalization invariant
+ * enforce the as-built gcd(a,b)=1 ratio-canonicalization invariant
  * (direct construction, not rejection sampling): draw a raw pair and
- * reduce it by its gcd. 1:1 is an explicitly valid canonical ratio under
- * the frozen policy (gcd(1,1)=1) and is never rejected — this is the one
+ * reduce it by its gcd. 1:1 is a valid canonical ratio here
+ * (gcd(1,1)=1) and is never rejected — this is the one
  * explicit, testable method for guaranteeing every generated ratio is
  * coprime with two genuine (non-zero) parts.
  */
@@ -351,8 +388,8 @@ function gcd(a, b) {
 
 function genRatioSharing(rand) {
   // Draw a raw pair in 1-6 and reduce to lowest terms. 1:1 is a valid,
-  // explicitly-permitted canonical ratio under the frozen policy
-  // (gcd(1,1)=1) and is NOT rejected — a raw equal draw (e.g. 3,3)
+  // permitted canonical ratio here (gcd(1,1)=1) and is NOT rejected —
+  // a raw equal draw (e.g. 3,3)
   // correctly reduces to 1:1 rather than being redrawn.
   let a = randInt(rand, 1, 6);
   let b = randInt(rand, 1, 6);
@@ -378,9 +415,9 @@ const GENERATORS_FAMILY = {
 };
 
 /**
- * Builds a single-family Mental Maths session under the frozen Senior
- * Generation Policy v1.0 — every question drawn from exactly one
- * authorized family, no cross-family mixing (policy §4, Option A).
+ * Builds a single-family Mental Maths session — every question drawn from
+ * exactly one family in AUTHORIZED_FAMILIES, no cross-family mixing.
+ * See the PROVENANCE NOTICE above for this path's specification status.
  *
  * Distinct from generateMentalMathsSet() above, which is left completely
  * unchanged and continues to cycle all six legacy strands evenly.
@@ -397,7 +434,7 @@ function generateFamilySession({ grade, family, count = 12, seed } = {}) {
     throw new Error(`generateFamilySession: unknown or unauthorized family "${family}" — must be one of ${AUTHORIZED_FAMILIES.join(', ')}`);
   }
   if (!isAuthorizedFamilyGrade(family, grade)) {
-    throw new Error(`generateFamilySession: family "${family}" is not authorized for grade "${grade}" under Senior Generation Policy v1.0 — authorized grades are ${FAMILY_GRADE_AUTHORIZATION[family].join(', ')}`);
+    throw new Error(`generateFamilySession: family "${family}" is not authorized for grade "${grade}" — grades listed for it are ${FAMILY_GRADE_AUTHORIZATION[family].join(', ')}`);
   }
   if (!Number.isInteger(count) || count < 1) {
     throw new Error(`generateFamilySession: count must be a positive integer, got "${count}"`);
@@ -429,7 +466,7 @@ module.exports = {
   MAX_GRADE,
   isSupportedGrade,
   generateMentalMathsSet,
-  // Senior Generation Policy v1.0 (frozen) authorized-family path
+  // Senior Phase family path — see the PROVENANCE NOTICE in this file
   AUTHORIZED_FAMILIES,
   FAMILY_GRADE_AUTHORIZATION,
   generateFamilySession,
