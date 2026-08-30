@@ -76,6 +76,12 @@ function buildPrompt(intent, profile = {}) {
       return mentalMathsPrompt({
         grade: enriched.grade,
         questions: enriched.mentalMathsQuestions || [],
+        // Delivery mode and topic label are resolved by
+        // mentalMathsSessionService and attached alongside the question set
+        // by generationPipeline.js — presentation context only, never
+        // mathematical content.
+        mentalMathsMode: enriched.mentalMathsMode,
+        mentalMathsTopicLabel: enriched.mentalMathsTopicLabel,
         language: enriched.language,
       });
     case INTENT_TYPES.EXPLANATION:

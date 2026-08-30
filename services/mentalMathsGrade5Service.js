@@ -180,12 +180,26 @@ function isSupportedGrade(grade) {
  * @param {number} [opts.seed] - RNG seed; defaults to Date.now()-derived
  *   value so unseeded calls vary, but a fixed seed reproduces the same
  *   session (used by tests).
+ * @param {string[]} [opts.candidates=CANDIDATES] - which of the frozen
+ *   candidates to draw from, cycled in the given order. Defaults to the
+ *   full CANDIDATES list, so an omitted/undefined value reproduces the
+ *   original alternating C12/C13 behaviour byte-for-byte for a given seed.
+ *   This selects between the two ALREADY-frozen candidates only — it adds
+ *   no candidate, changes no generation rule, and introduces no difficulty
+ *   or magnitude concept. See the ADR-023 §6 freeze act: C12 and C13 are
+ *   each independently frozen, so generating either alone is exactly as
+ *   authorized as generating both.
  * @returns {{ grade: 5, questions: Array<{strand:string, prompt:string,
  *   canonicalAnswer:number, candidate:string}> }}
  */
-function generateGrade5MentalMathsSet({ count = 12, seed } = {}) {
+function generateGrade5MentalMathsSet({ count = 12, seed, candidates } = {}) {
   if (!Number.isInteger(count) || count < 1) {
     throw new Error(`generateGrade5MentalMathsSet: count must be a positive integer, got "${count}"`);
+  }
+
+  const selected = candidates === undefined ? CANDIDATES : candidates;
+  if (!Array.isArray(selected) || selected.length === 0 || selected.some((c) => !CANDIDATES.includes(c))) {
+    throw new Error(`generateGrade5MentalMathsSet: candidates must be a non-empty subset of ${CANDIDATES.join(', ')}, got "${JSON.stringify(candidates)}"`);
   }
 
   const rand = mulberry32(seed != null ? seed : Date.now() ^ 0x47523500 /* "GR5\0" */);
@@ -193,7 +207,7 @@ function generateGrade5MentalMathsSet({ count = 12, seed } = {}) {
   const questions = [];
 
   for (let i = 0; i < count; i++) {
-    const candidate = CANDIDATES[i % CANDIDATES.length];
+    const candidate = selected[i % selected.length];
     let attempt = 0;
     let item;
     do {
@@ -217,6 +231,7 @@ module.exports = {
   C13_A_MIN, C13_A_MAX, C13_B_MIN, C13_B_MAX,
   MIN_GRADE,
   MAX_GRADE,
+  CANDIDATES,
   isSupportedGrade,
   generateC12,
   generateC13,

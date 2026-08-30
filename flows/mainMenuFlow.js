@@ -25,7 +25,15 @@
 'use strict';
 
 const { openMenu, consumeNumericReply, closeMenu } = require('../services/navigationService');
-const { MENTAL_MATHS_FAMILY_MENU_ID, FAMILY_MENU_LABEL_TO_FAMILY } = require('../core/generationPipeline');
+const {
+  MENTAL_MATHS_GRADE_MENU_ID,
+  MENTAL_MATHS_FAMILY_MENU_ID,
+  MENTAL_MATHS_DELIVERY_MENU_ID,
+  MENTAL_MATHS_MENU_IDS,
+  topicKeyForLabel,
+  DELIVERY_MENU_LABEL_TO_MODE,
+  GRADE_MENU_LABEL_TO_GRADE,
+} = require('../core/generationPipeline');
 
 // ── Menu definitions ────────────────────────────────────────────────────
 // Each menu is a flat { '1': 'label', '2': 'label', ... } map, matching
@@ -49,7 +57,7 @@ const CREATE_MENU_OPTIONS = {
   '3': 'Lesson plan',
   '4': 'Annual Teaching Plan (ATP)',
   '5': 'Explain a topic',
-  '6': 'Mental Maths (Grade 5, 7-9)',
+  '6': 'Mental Maths',
   '0': 'Back to main menu',
 };
 
@@ -208,29 +216,46 @@ async function handleMainMenuFlow(from, text, deps) {
 
   // ── "Back to main menu" is universal across every sub-menu ───────────
   if (value === 'Back to main menu') {
-    // The family menu is the one sub-menu carrying pending request state
-    // outside itself (mentalMathsFamilyPendingState) — every other
-    // sub-menu is stateless, so only this one needs explicit cleanup here.
-    if (menuId === MENTAL_MATHS_FAMILY_MENU_ID) {
+    // The Mental Maths wizard menus are the only sub-menus carrying pending
+    // request state outside themselves (mentalMathsFamilyPendingState) —
+    // every other sub-menu is stateless, so only these need explicit
+    // cleanup here. Backing out of ANY wizard step abandons the whole
+    // request, exactly as backing out of the topic step always has.
+    if (MENTAL_MATHS_MENU_IDS.includes(menuId)) {
       deps.mentalMathsFamilyPendingState.delete(phoneHash);
     }
     await sendMainMenu(from, deps);
     return true;
   }
 
-  // ── Mental Maths family selection (Grade 7/8) ─────────────────────────
-  // Opened directly by core/generationPipeline.js (not via sendSubMenu —
-  // its options are grade-dependent, unlike every other static sub-menu
-  // here), so this is the one branch that doesn't have a matching
-  // sendSubMenu() call site above. Reads back the original grade/subject
-  // saved before the menu opened, consumes it exactly once, and re-enters
-  // generation with the original grade + the family the teacher just
-  // picked.
-  if (menuId === MENTAL_MATHS_FAMILY_MENU_ID) {
+  // ── Mental Maths session wizard (grade -> topic -> delivery) ──────────
+  // All three menus are opened directly by core/generationPipeline.js (not
+  // via sendSubMenu — their options are derived at runtime from the
+  // authorized grades/topics, unlike every other static sub-menu here), so
+  // this is the one branch that doesn't have a matching sendSubMenu() call
+  // site above.
+  //
+  // Each step reads back the request saved before its menu opened, folds in
+  // the answer the teacher just gave, and re-enters triggerGeneration().
+  // generationPipeline.js then either asks the next unanswered question or
+  // generates — this flow never decides which step comes next, so the step
+  // order lives in exactly one place.
+  if (MENTAL_MATHS_MENU_IDS.includes(menuId)) {
     const pending = deps.mentalMathsFamilyPendingState.get(phoneHash);
-    const family = FAMILY_MENU_LABEL_TO_FAMILY[value];
 
-    if (!pending || !family) {
+    // Translate the chosen label back into the field it answers. Exactly
+    // one of these is non-null for a given menu.
+    const chosenGrade = menuId === MENTAL_MATHS_GRADE_MENU_ID ? GRADE_MENU_LABEL_TO_GRADE[value] : null;
+    // Topic labels are only unique within a grade, so the label is resolved
+    // against the grade this request is actually for — never against a
+    // global label table.
+    const chosenFamily = menuId === MENTAL_MATHS_FAMILY_MENU_ID
+      ? topicKeyForLabel(pending?.grade, value)
+      : null;
+    const chosenMode = menuId === MENTAL_MATHS_DELIVERY_MENU_ID ? DELIVERY_MENU_LABEL_TO_MODE[value] : null;
+    const recognized = chosenGrade != null || chosenFamily != null || chosenMode != null;
+
+    if (!pending || !recognized) {
       // Expired/missing pending state, or an unrecognized option — fail
       // safely with no generation, same as any other stale-menu reply.
       // Deliberately does NOT delete pending state here: an invalid/
@@ -244,11 +269,21 @@ async function handleMainMenuFlow(from, text, deps) {
       return true;
     }
 
+    // Consumed exactly once. generationPipeline.js re-saves the (now more
+    // complete) request itself if it still needs to ask something.
     deps.mentalMathsFamilyPendingState.delete(phoneHash);
 
     await deps.triggerGeneration({
       from,
-      intent: { type: 'mentalMaths', grade: pending.grade, subject: pending.subject, family, topic: null },
+      intent: {
+        type: 'mentalMaths',
+        grade: chosenGrade != null ? chosenGrade : (pending.grade ?? null),
+        subject: pending.subject,
+        family: chosenFamily != null ? chosenFamily : (pending.family ?? null),
+        mentalMathsMode: chosenMode != null ? chosenMode : (pending.mode ?? null),
+        mentalMathsCount: pending.count ?? null,
+        topic: null,
+      },
       deps: deps.buildGenerationDeps(),
     });
     return true;
@@ -296,7 +331,7 @@ async function handleMainMenuFlow(from, text, deps) {
       'Lesson plan': 'lessonPlan',
       'Annual Teaching Plan (ATP)': 'atp',
       'Explain a topic': 'explanation',
-      'Mental Maths (Grade 5, 7-9)': 'mentalMaths',
+      'Mental Maths': 'mentalMaths',
     };
     const type = typeByLabel[value];
     if (!type) return false;
@@ -318,17 +353,17 @@ async function handleMainMenuFlow(from, text, deps) {
     }
 
     if (type === 'mentalMaths') {
-      // Mental Maths is strand-based, not topic-based — same shape as ATP
-      // above (no topic to collect). Deliberately does NOT reuse
+      // Mental Maths collects its own grade/topic/delivery choices through
+      // the wizard menus generationPipeline.js opens — same shape as ATP
+      // above (no free-text topic to collect). Deliberately does NOT reuse
       // pendingIntentState for a "which grade?" follow-up: that mechanism
       // always writes the next reply into intent.topic (see
       // core/messageProcessor.js), which would silently corrupt a grade
       // reply into a bogus topic string. Instead go straight to
       // triggerGeneration with whatever grade the profile has (or null);
-      // the grade-gate inside generationPipeline.js (Grade 5, or 7-9)
-      // already sends a clear "which grade?" message itself when the
-      // profile grade is missing or out of range — no separate prompt
-      // needed here.
+      // the wizard inside generationPipeline.js opens a numbered grade menu
+      // itself when the profile grade is missing or has no authorized
+      // Mental Maths generator — no separate prompt needed here.
       await deps.triggerGeneration({
         from,
         intent: { type, grade, subject, topic: null },

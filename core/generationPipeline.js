@@ -15,59 +15,119 @@
 
 const { validateAtpWeeks } = require('../utils/atpWeekValidator');
 const { resolveCurrentTopic, topicMatchesCurrentATP } = require('../services/curriculumIntelligenceService');
-// generateMentalMathsSet/isSupportedGrade (the legacy six-strand path) are
-// deliberately not imported here anymore — after this commit, Grades 7-8
-// only ever reach generateFamilySession() (via the family menu), and Grade
-// 9 is gated with no generation path at all. Both remain exported from
-// mentalMathsService.js untouched for anything else that still calls them.
-const { MIN_GRADE: MM_MIN_GRADE, MAX_GRADE: MM_MAX_GRADE, AUTHORIZED_FAMILIES, FAMILY_GRADE_AUTHORIZATION, generateFamilySession } = require('../services/mentalMathsService');
-const { generateGrade5MentalMathsSet, isSupportedGrade: isMentalMathsGrade5, MIN_GRADE: MM5_MIN_GRADE, MAX_GRADE: MM5_MAX_GRADE } = require('../services/mentalMathsGrade5Service');
-const { openMenu } = require('../services/navigationService');
+// Mental Maths goes through services/mentalMathsSessionService.js, which is
+// the single entry point to the two governed generators (Grade 5 C12/C13 and
+// the Senior Phase authorized families). The legacy six-strand path
+// (generateMentalMathsSet) is deliberately NOT imported here and has no code
+// path from this module at all — it remains exported from
+// mentalMathsService.js untouched for anything else that still calls it.
+const mentalMaths = require('../services/mentalMathsSessionService');
+const { openMenu, closeMenu } = require('../services/navigationService');
 
-// ── Mental Maths (Grades 7-8) family-selection menu ─────────────────────
-// Grade 9 has no authorized families (FAMILY_GRADE_AUTHORIZATION has no
-// grade-9 entries anywhere) and is gated separately below, before this
-// menu is ever considered. Menu id/options follow the exact contract
-// flows/mainMenuFlow.js's other sub-menus use (openMenu/consumeNumericReply),
-// but — unlike those — this menu's option set is grade-dependent (2 options
-// for Grade 8, 3 for Grade 7), so it's opened here rather than from
-// mainMenuFlow.js's static MENUS_BY_ID table. mainMenuFlow.js still owns
-// *consuming* the reply (see MENTAL_MATHS_FAMILY_MENU_ID export below) —
-// this module only ever opens the menu, never reads a reply off it.
+// ── Mental Maths session wizard menus ───────────────────────────────────
+//
+// Three grade-agnostic steps, each built on the exact contract
+// flows/mainMenuFlow.js's other sub-menus use (openMenu /
+// consumeNumericReply). Unlike those, every option set here is derived at
+// runtime (from SUPPORTED_GRADES / topicsForGrade), so the menus are
+// opened here rather than from mainMenuFlow.js's static MENUS_BY_ID
+// table. mainMenuFlow.js still owns *consuming* every reply — this module
+// only ever opens a menu, never reads a reply off one.
+//
+//   1. Grade    — only grades with an authorized generator are offered.
+//   2. Topic    — only topics authorized for the chosen grade.
+//   3. Delivery — oral or written (presentation only; skipped when the
+//                 teacher already said which they wanted).
+//
+// There is deliberately NO difficulty step. Difficulty modelling has no
+// authorization for any grade (ADR-022 §5 Governance Rule 3; the Grade 5
+// ADR-023 §6 freeze act §6; Senior Phase Generation Policy v1.0 §10
+// item 4), so offering Support/Core/Extension here would invent it.
+const MENTAL_MATHS_GRADE_MENU_ID = 'mainMenu.mentalMathsGrade';
+// Retains its historical id/name: this is the same menu, now carrying the
+// grade's authorized topics rather than only the Senior Phase families.
 const MENTAL_MATHS_FAMILY_MENU_ID = 'mainMenu.mentalMathsFamily';
+const MENTAL_MATHS_DELIVERY_MENU_ID = 'mainMenu.mentalMathsDelivery';
 
-const FAMILY_LABELS = {
-  mulDivFluency: 'Multiplication & Division',
-  powersRootsFluency: 'Powers & Roots',
-  ratioSharing: 'Ratio & Sharing',
-};
+const MENTAL_MATHS_MENU_IDS = [
+  MENTAL_MATHS_GRADE_MENU_ID,
+  MENTAL_MATHS_FAMILY_MENU_ID,
+  MENTAL_MATHS_DELIVERY_MENU_ID,
+];
 
-// Reverse lookup (label -> family key) so mainMenuFlow.js can turn the
-// teacher's menu selection back into the family key generateFamilySession()
-// expects, without duplicating FAMILY_LABELS.
+// Re-exported from mentalMathsSessionService so the label map has a single
+// home while flows/mainMenuFlow.js's existing import keeps working.
+const FAMILY_LABELS = mentalMaths.FAMILY_LABELS;
+
+// Reverse lookup (Senior Phase family label -> family key), unchanged in
+// meaning and still exported for compatibility. NOT used to resolve a topic
+// menu reply: topic labels are only unique WITHIN a grade (Grade 5's
+// "Multiplication & Division" is the frozen C13 candidate, Grade 7/8's is
+// the mulDivFluency family), so flows/mainMenuFlow.js resolves a topic reply
+// through the grade-scoped topicKeyForLabel() below instead.
 const FAMILY_MENU_LABEL_TO_FAMILY = Object.fromEntries(
   Object.entries(FAMILY_LABELS).map(([family, label]) => [label, family])
 );
 
-function familiesForGrade(grade) {
-  return AUTHORIZED_FAMILIES.filter((family) => FAMILY_GRADE_AUTHORIZATION[family].includes(grade));
-}
+// Grade-scoped topic-label resolver, re-exported so flows/mainMenuFlow.js
+// has one import site for the whole wizard.
+const topicKeyForLabel = mentalMaths.topicKeyForLabel;
 
-async function openMentalMathsFamilyMenu(from, grade, { hashPhone, safeSendMessage }) {
+// Reverse lookup for the delivery menu, same mechanism.
+const DELIVERY_MENU_LABEL_TO_MODE = Object.fromEntries(
+  Object.entries(mentalMaths.DELIVERY_MODE_LABELS).map(([mode, label]) => [label, mode])
+);
+
+const GRADE_MENU_LABEL_TO_GRADE = Object.fromEntries(
+  mentalMaths.SUPPORTED_GRADES.map((grade) => [`Grade ${grade}`, grade])
+);
+
+/**
+ * Opens one numbered wizard menu. Options are always the given labels in
+ * order, plus the universal "0. Back to main menu" every other sub-menu
+ * in flows/mainMenuFlow.js uses.
+ */
+async function openMentalMathsMenu(from, { menuId, heading, labels, expiresAfterReply = false, footer = null }, { hashPhone, safeSendMessage }) {
   const phoneHash = hashPhone(from);
-  const families = familiesForGrade(grade);
   const options = {};
-  families.forEach((family, i) => {
-    options[String(i + 1)] = FAMILY_LABELS[family];
-  });
+  labels.forEach((label, i) => { options[String(i + 1)] = label; });
   options['0'] = 'Back to main menu';
 
-  openMenu(phoneHash, { id: MENTAL_MATHS_FAMILY_MENU_ID, options, expiresAfterReply: false });
+  openMenu(phoneHash, { id: menuId, options, expiresAfterReply });
 
-  const lines = families.map((family, i) => `${i + 1}. ${FAMILY_LABELS[family]}`);
+  const lines = labels.map((label, i) => `${i + 1}. ${label}`);
   await safeSendMessage(from,
-    `🔢 *Grade ${grade} Mental Maths — choose a focus:*\n\n${lines.join('\n')}\n0. Back to main menu`
+    `${heading}\n\n${lines.join('\n')}\n0. Back to main menu${footer ? `\n\n${footer}` : ''}`
   );
+}
+
+async function openMentalMathsGradeMenu(from, { unsupportedGrade = null } = {}, deps) {
+  const prefix = unsupportedGrade != null
+    ? `🔢 *Mental Maths isn't available for ${mentalMaths.gradeMenuLabel(unsupportedGrade)} yet.*\n\nIt's ready for these grades:`
+    : `🔢 *Mental Maths — which grade?*`;
+  await openMentalMathsMenu(from, {
+    menuId: MENTAL_MATHS_GRADE_MENU_ID,
+    heading: prefix,
+    labels: mentalMaths.SUPPORTED_GRADES.map((g) => mentalMaths.gradeMenuLabel(g)),
+  }, deps);
+}
+
+async function openMentalMathsTopicMenu(from, grade, deps) {
+  await openMentalMathsMenu(from, {
+    menuId: MENTAL_MATHS_FAMILY_MENU_ID,
+    heading: `🔢 *${mentalMaths.gradeMenuLabel(grade)} Mental Maths — choose a focus:*`,
+    labels: mentalMaths.topicsForGrade(grade).map((t) => t.label),
+  }, deps);
+}
+
+async function openMentalMathsDeliveryMenu(from, { grade, topicLabel, count }, deps) {
+  await openMentalMathsMenu(from, {
+    menuId: MENTAL_MATHS_DELIVERY_MENU_ID,
+    heading: `🔢 *${mentalMaths.gradeMenuLabel(grade)} Mental Maths — ${topicLabel}*\n\nHow will learners do it?`,
+    labels: mentalMaths.DELIVERY_MODE_VALUES.map((m) => mentalMaths.DELIVERY_MODE_LABELS[m]),
+    expiresAfterReply: true,
+    footer: `_${count} questions. For a different length, ask for e.g. "${mentalMaths.gradeMenuLabel(grade)} mental maths, 20 questions"._`,
+  }, deps);
 }
 
 // Types whose content is tied to a specific CAPS topic and should be
@@ -135,13 +195,31 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
     updateTeacherProfile,
   } = deps;
 
-  // Per-phone burst rate limit — prevents rapid-fire AI calls
-  if (isAiRateLimited(from)) {
+  // Per-phone burst rate limit — prevents rapid-fire AI calls.
+  //
+  // isAiRateLimited() is check-AND-record (utils/webhookHelpers.js): every
+  // call that isn't already over the limit consumes one of the 5 slots per
+  // 60s for a full minute. So it must be consumed once per actual AI call,
+  // never once per entry into this function.
+  //
+  // Mental Maths is the only type that re-enters triggerGeneration() without
+  // reaching the AI: its wizard asks grade -> topic -> delivery, one menu
+  // round-trip each, and only the final step generates. Checking here charged
+  // 4 slots for 1 AI call, so a teacher was throttled — and told they were
+  // "sending requests too quickly" — for nothing but tapping menu options.
+  // For that type the identical check is therefore deferred until the wizard
+  // has fully resolved (see the deferred call below, immediately before quota
+  // and generation). Same limiter, same limit, same message: one slot per AI
+  // call, exactly like every other type. No other type's behaviour changes.
+  async function burstRateLimited() {
+    if (!isAiRateLimited(from)) return false;
     await safeSendMessage(from,
       `⏱️ You're sending requests too quickly. Please wait a moment before trying again.`
     );
-    return;
+    return true;
   }
+
+  if (intent.type !== 'mentalMaths' && await burstRateLimited()) return;
 
   // Persist the generation intent for RETRY, exactly once, regardless of
   // which caller (disambiguation follow-up, clarified-topic reply, or the
@@ -200,75 +278,150 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
     }
   }
 
-  // Mental Maths V1 supports Grades 7-9 only — gate before quota deduction,
-  // same pattern as the atp/moderationPack Pro-gates above. Also compute
-  // the deterministic question set here (not inside buildPrompt/promptService)
-  // because it needs the resolved effective grade, and because the set must
-  // exist before the AI wording call is ever made — the AI never authors
-  // or alters the arithmetic, only wraps this pre-computed set in wording.
+  // ── Mental Maths session wizard ───────────────────────────────────
+  //
+  // Gated before quota deduction, same pattern as the atp/moderationPack
+  // Pro-gates above. The deterministic question set is also computed here
+  // (not inside buildPrompt/promptService) because it needs the fully
+  // resolved grade/topic/count/mode, and because the set must exist before
+  // the AI wording call is ever made — the AI never authors or alters the
+  // arithmetic, only wraps this pre-computed set in wording.
+  //
+  // Every grade goes through the same three-step resolution, in the same
+  // order, so the teacher experience is identical across grades:
+  //   grade -> topic -> delivery mode -> generate.
+  // Any step already answered (from the message, the profile, or a menu
+  // round-trip) is skipped. Question count comes from the teacher's own
+  // wording via the existing intent.questionCount field, defaulting to the
+  // previously hard-coded 12.
+  //
+  // Which grades and topics exist is decided entirely by
+  // services/mentalMathsSessionService.js, which derives them from the two
+  // governed generators — nothing is hard-coded here, so a grade with no
+  // frozen specification has no path through this block at all.
   if (intent.type === 'mentalMaths') {
     const teacherForGrade = getTeacherByPhone(from);
     // teachers.grade is a TEXT column (see the ROOT CAUSE FIX comment in
     // utils/usageTracker.js#updateTeacherProfile) — it comes back from the
     // DB as a clean numeric string (e.g. "8"), never a JS number, so it
-    // must be parsed before isMentalMathsGrade()'s Number.isInteger()
-    // check ever sees it. intent.grade (parsed fresh from the message by
-    // intentParser) is already a number or null and needs no conversion.
+    // must be parsed before any Number.isInteger() check ever sees it.
+    // intent.grade (parsed fresh from the message by intentParser) is
+    // already a number or null and needs no conversion.
     const rawGrade = intent.grade != null ? intent.grade : teacherForGrade?.grade;
-    const effGrade = rawGrade != null && rawGrade !== '' ? parseInt(rawGrade, 10) : null;
-    // Grade 5 (C12/C13) is a separate supported grade from Senior Phase
-    // 7-9 — checked first since the two ranges are disjoint and each has
-    // its own generator/session-builder. Neither generator's internals
-    // are touched by this dispatch — this block only routes.
-    if (isMentalMathsGrade5(effGrade)) {
-      // Grade 5 path — completely unchanged by family selection.
-      intent.grade = effGrade;
-      const grade5Set = generateGrade5MentalMathsSet({ count: 12 });
-      intent.mentalMathsQuestions = grade5Set.questions;
-    } else if (intent.family) {
-      // Round-trip from the family menu (flows/mainMenuFlow.js reconstructs
-      // the intent with the original grade + selected family after reading
-      // and deleting mentalMathsFamilyPendingState) — generate directly,
-      // no further gating. AUTHORIZED_FAMILIES/FAMILY_GRADE_AUTHORIZATION
-      // are enforced independently inside generateFamilySession() itself
-      // (see services/mentalMathsService.js), so a bad family/grade pair
-      // reaching here still fails safely rather than silently generating.
-      intent.grade = effGrade;
-      const familySession = generateFamilySession({ grade: effGrade, family: intent.family, count: 12 });
-      intent.mentalMathsQuestions = familySession.questions;
-    } else if (effGrade === 7 || effGrade === 8) {
-      // Grade 7/8 without a family choice yet — save the original request
-      // (Option B: the grade travels in pending state, not re-derived from
-      // the profile after the round trip) and open the family menu instead
-      // of generating anything. mainMenuFlow.js reads this state back on
-      // the reply and deletes it exactly once, whether the teacher picks a
-      // family or hits Back.
-      const phoneHash = hashPhone(from);
+    const parsedGrade = rawGrade != null && rawGrade !== '' ? parseInt(rawGrade, 10) : null;
+    const effGrade = Number.isInteger(parsedGrade) ? parsedGrade : null;
+    const phoneHash = hashPhone(from);
+
+    // Question count: reuses the existing intent.questionCount field that
+    // utils/intentParser.js already extracts and clamps from "N questions"
+    // phrasing — no new parser field, no new clamp.
+    const count = intent.mentalMathsCount != null
+      ? mentalMaths.normaliseCount(intent.mentalMathsCount)
+      : (intent.questionCount != null ? mentalMaths.normaliseCount(intent.questionCount) : mentalMaths.DEFAULT_COUNT);
+
+    // Delivery mode: an explicit menu answer wins; otherwise the teacher's
+    // own wording ("oral", "written", "in their books") is honoured so
+    // they are not asked something they already answered.
+    const mode = mentalMaths.normaliseDeliveryMode(intent.mentalMathsMode)
+      || mentalMaths.parseDeliveryMode(originalText || '');
+
+    // ── Step 1: grade ────────────────────────────────────────────────
+    if (!mentalMaths.isSupportedGrade(effGrade)) {
+      // No authorized generator for this grade (or no grade known at all).
+      // Offer only the grades that genuinely have one — never fall back to
+      // generating something for an unauthorized grade.
+      mentalMathsFamilyPendingState.set(phoneHash, {
+        subject: intent.subject,
+        count,
+        mode,
+        lastActivity: Date.now(),
+      });
+      await openMentalMathsGradeMenu(from, { unsupportedGrade: effGrade }, { hashPhone, safeSendMessage });
+      return;
+    }
+
+    // ── Step 2: topic ────────────────────────────────────────────────
+    // intent.family is the historical field name for the chosen topic and
+    // is kept as-is so the family-menu round-trip contract is unchanged.
+    // Every supported grade is asked, including Grade 5 — the grade's own
+    // authorized topics are the only options offered, and no topic is ever
+    // assumed on the teacher's behalf here. (generateSession() still has a
+    // programmatic default for direct callers; the teacher-facing flow
+    // deliberately does not use it.)
+    const topic = intent.family != null && mentalMaths.findTopic(effGrade, intent.family)
+      ? intent.family
+      : null;
+    if (topic == null) {
       mentalMathsFamilyPendingState.set(phoneHash, {
         grade: effGrade,
         subject: intent.subject,
+        count,
+        mode,
         lastActivity: Date.now(),
       });
-      await openMentalMathsFamilyMenu(from, effGrade, { hashPhone, safeSendMessage });
+      await openMentalMathsTopicMenu(from, effGrade, { hashPhone, safeSendMessage });
       return;
-    } else if (effGrade === 9) {
-      // Grade 9 has no authorized families under Senior Generation Policy
-      // v1.0 — gate explicitly, with no legacy generateMentalMathsSet()
-      // fallback (that six-strand legacy path is no longer reachable for
-      // any Senior Phase grade after this commit).
-      await safeSendMessage(from,
-        `🔢 *Mental Maths for Grade 9 is not available yet.*\n\n` +
-        `It's currently available for Grade ${MM5_MIN_GRADE} and Grades 7-8. Reply with e.g. "Grade 7 mental maths".`
-      );
+    }
+
+    // ── Step 3: delivery mode ────────────────────────────────────────
+    if (!mode) {
+      mentalMathsFamilyPendingState.set(phoneHash, {
+        grade: effGrade,
+        subject: intent.subject,
+        family: topic,
+        count,
+        lastActivity: Date.now(),
+      });
+      await openMentalMathsDeliveryMenu(from, {
+        grade: effGrade,
+        topicLabel: mentalMaths.findTopic(effGrade, topic).label,
+        count,
+      }, { hashPhone, safeSendMessage });
       return;
-    } else {
+    }
+
+    // ── Generate ─────────────────────────────────────────────────────
+    // generateSession() independently re-validates grade/topic/count/mode
+    // and delegates to the grade's own governed generator, so a bad
+    // combination reaching here fails loudly rather than generating.
+    let session;
+    try {
+      session = mentalMaths.generateSession({ grade: effGrade, topic, count, mode });
+    } catch (mmErr) {
+      console.error('[WEBHOOK] Mental Maths session generation rejected:', mmErr.message);
       await safeSendMessage(from,
-        `🔢 *Mental Maths is available for Grade ${MM5_MIN_GRADE} and Grades ${MM_MIN_GRADE}-${MM_MAX_GRADE}*\n\n` +
-        `${effGrade != null && !Number.isNaN(effGrade) ? `Grade ${effGrade} isn't in that range yet.` : `Let me know which grade you'd like this for.`} Reply with e.g. "Grade ${MM5_MIN_GRADE} mental maths" or "Grade ${MM_MIN_GRADE} mental maths".`
+        `🔢 I couldn't put that Mental Maths session together. Reply *MENU* and pick Mental Maths again, and I'll walk you through it.`
       );
       return;
     }
+
+    // Every menu step is answered — close any wizard menu still open so a
+    // stray digit afterwards can't re-enter the flow, and clear the
+    // pending request now that it has been fully consumed.
+    closeMenu(phoneHash);
+    mentalMathsFamilyPendingState.delete(phoneHash);
+
+    intent.grade = effGrade;
+    intent.mentalMathsQuestions = session.questions;
+    intent.mentalMathsSession = session;
+    intent.mentalMathsMode = session.mode;
+    intent.mentalMathsCount = session.count;
+    intent.mentalMathsTopicLabel = session.topicLabel;
+    intent.family = session.topic;
+    // Gives the session a real name in the SAVE title and the MY RESOURCES
+    // listing, which previously showed every Mental Maths session as
+    // "Untitled — Mental Maths session". Set only after the gate, so it can
+    // never be mistaken for a CAPS topic by the topic-clarifier or the
+    // ATP grounding (mentalMaths is excluded from both).
+    intent.topic = session.topicLabel;
   }
+
+  // Deferred burst rate limit for Mental Maths — see burstRateLimited() at
+  // the top of this function for why. Every wizard step above has already
+  // returned, so reaching here means this request WILL make an AI call, and
+  // consuming exactly one slot for it matches every other type. Placed
+  // before checkAndIncrementUsage() so a throttled request costs no quota.
+  if (intent.type === 'mentalMaths' && await burstRateLimited()) return;
 
   const quota = checkAndIncrementUsage(from, intent.type);
 
@@ -361,8 +514,26 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
     name:    teacher?.name    || null,
   };
   const prompt  = buildPrompt(intent, profile);
+
+  // Mental Maths is the one type that can survive a total AI failure: its
+  // questions and canonicalAnswers are already computed deterministically
+  // (services/mentalMathsSessionService.js), and the AI was only ever asked
+  // for wording. When a session exists, an AI outage must NOT cost the
+  // teacher their content — the deterministic rendering below is a complete,
+  // correct response on its own. Every other type has no content without the
+  // AI and keeps the original rollback-and-apologise behaviour untouched.
+  const mentalMathsFallbackAvailable = intent.type === 'mentalMaths' && !!intent.mentalMathsSession;
+
   const content = await generateContent(prompt, intent.type).catch(async (err) => {
     console.error('[WEBHOOK] AI generation failed:', err.message);
+    if (mentalMathsFallbackAvailable) {
+      // Deliberately no rollback and no error message: the teacher still
+      // receives the full session (questions + answer key), so the quota was
+      // genuinely spent and there is nothing to apologise for. The Mental
+      // Maths block below turns this null into the deterministic rendering.
+      console.warn(`[WEBHOOK] Mental Maths wording call failed — falling back to deterministic rendering for ...${String(from).slice(-4)}`);
+      return null;
+    }
     // Roll back usage increment for free-tier teachers
     rollbackUsage(quota, from);
     await safeSendMessage(from,
@@ -371,7 +542,9 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
     return null;
   });
 
-  if (!content) return; // Error already sent to teacher
+  // Error already sent to teacher — except for Mental Maths with a
+  // deterministic session in hand, which continues to delivery below.
+  if (!content && !mentalMathsFallbackAvailable) return;
 
   // ── ATP-only safety net: verify week ranges are sequential and
   // non-overlapping. The prompt (prompts/atp.js) instructs the AI not to
@@ -409,6 +582,35 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
         finalContent = `⚠️ *Note: please double-check the week numbers in this ATP* — our automatic check found possible overlapping weeks between topics. Everything else should be accurate, but review the week ranges before submitting this as your official plan.\n\n${finalContent}`;
       }
     }
+  }
+
+  // ── Mental Maths: deterministic answer key + faithfulness gate ──
+  // The wording call was asked for phrasing only, and was explicitly told
+  // not to produce an answer key. Here that is enforced rather than
+  // trusted: every generated question must still appear verbatim in the
+  // AI's output and the output must carry no answer section of its own.
+  //
+  //  * Verified  -> keep the AI's wording, append the answer key built in
+  //                 code from canonicalAnswer.
+  //  * Not verified -> discard the AI's wording entirely and send the fully
+  //                 deterministic rendering.
+  //
+  // Either way, the questions and the answer key the teacher receives are
+  // exactly the ones the deterministic generator produced — the AI is
+  // structurally unable to affect any mathematical value.
+  //
+  // finalContent is null here when the wording call failed outright (see
+  // mentalMathsFallbackAvailable above); finaliseSessionContent() treats that
+  // exactly like unfaithful wording and renders deterministically, so the
+  // outage path and the unfaithful-wording path converge on one code path.
+  if (intent.type === 'mentalMaths' && intent.mentalMathsSession) {
+    const finalised = mentalMaths.finaliseSessionContent(finalContent, intent.mentalMathsSession);
+    if (finalised.source === 'deterministic' && finalContent) {
+      // Only log the faithfulness miss when there was actually wording to
+      // check — an outright failure has already been logged above.
+      console.warn(`[WEBHOOK] Mental Maths wording call not verifiably faithful — using deterministic rendering for ...${String(from).slice(-4)}`);
+    }
+    finalContent = finalised.content;
   }
 
   // ── Send text response ────────────────────────────────────────
@@ -547,7 +749,11 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
         atpTopic:       intent.atpTopic       || null,
         differentiation: intent.differentiation || null,
       },
-      content,
+      // Mental Maths stores the delivered content (verified questions +
+      // the code-built answer key), not the raw AI wording — a saved
+      // session without its answer key would be useless to the teacher.
+      // Every other type keeps storing `content` exactly as before.
+      content: intent.type === 'mentalMaths' ? finalContent : content,
       lastActivity: Date.now(),
     });
     // Append SAVE nudge as a follow-up (1.5 s delay — after any differentiation prompt)
@@ -562,7 +768,14 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
 module.exports = {
   triggerGeneration,
   buildPdfUrl,
-  // Mental Maths family-selection menu — consumed by flows/mainMenuFlow.js
+  // Mental Maths session-wizard menus — consumed by flows/mainMenuFlow.js
+  MENTAL_MATHS_GRADE_MENU_ID,
   MENTAL_MATHS_FAMILY_MENU_ID,
+  MENTAL_MATHS_DELIVERY_MENU_ID,
+  MENTAL_MATHS_MENU_IDS,
+  FAMILY_LABELS,
   FAMILY_MENU_LABEL_TO_FAMILY,
+  topicKeyForLabel,
+  DELIVERY_MENU_LABEL_TO_MODE,
+  GRADE_MENU_LABEL_TO_GRADE,
 };
