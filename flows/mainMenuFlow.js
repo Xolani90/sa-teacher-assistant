@@ -360,13 +360,19 @@ async function handleMainMenuFlow(from, text, deps) {
       // always writes the next reply into intent.topic (see
       // core/messageProcessor.js), which would silently corrupt a grade
       // reply into a bogus topic string. Instead go straight to
-      // triggerGeneration with whatever grade the profile has (or null);
-      // the wizard inside generationPipeline.js opens a numbered grade menu
-      // itself when the profile grade is missing or has no authorized
-      // Mental Maths generator — no separate prompt needed here.
+      // triggerGeneration with grade always null here: the saved profile
+      // grade is useful context elsewhere, but using it for this
+      // menu-driven entry point would silently skip the wizard's first
+      // step (see core/generationPipeline.js's own comment on this same
+      // point). triggerGeneration's wizard always opens a numbered grade
+      // menu when intent.grade is null — no separate prompt needed here.
+      // An explicit grade stated in the teacher's own message (e.g.
+      // "Grade 6 mental maths") does not go through this menu path at
+      // all — the intent parser already resolves intent.grade for that
+      // route, so this null has no effect on it.
       await deps.triggerGeneration({
         from,
-        intent: { type, grade, subject, topic: null },
+        intent: { type, grade: null, subject, topic: null },
         deps: deps.buildGenerationDeps(),
       });
       return true;

@@ -152,8 +152,8 @@ const C13_SHAPE = /□\s*=\s*\d+\s*÷\s*\d+/;
 
   console.log('\n── Mental Maths Grade 5: dispatch integration audit ──\n');
 
-  // ── Scenario 1: menu dispatch, profile grade 5, C12 topic ──
-  console.log('── Scenario 1: menu dispatch, profile grade 5, topic C12 ──');
+  // ── Scenario 1: menu dispatch ignores profile grade, then selects Grade 5 ──
+  console.log('── Scenario 1: menu dispatch asks for grade, then Grade 5 C12 ──');
   {
     const from = '27821110051';
     insertTeacher(hashPhone(from), { grade: 5 });
@@ -162,7 +162,9 @@ const C13_SHAPE = /□\s*=\s*\d+\s*÷\s*\d+/;
     await send(from, '1'); // "Create a resource"
     await send(from, '6'); // "Mental Maths"
 
-    check(aiCallCount === 0, 'S1: topic menu opens without generating', `got ${aiCallCount}`);
+    check(aiCallCount === 0, 'S1: grade menu opens without generating', `got ${aiCallCount}`);
+    check(/which grade/i.test(allText()), 'S1: saved profile grade does not bypass grade selection', allText());
+    await send(from, '5'); // Grade 5 is fifth in the Grade 1-8 menu
     check(/Grade 5 Mental Maths/.test(allText()), 'S1: Grade 5 topic menu is shown', allText());
     check(/Addition & Subtraction/.test(allText()) && /Mixed/.test(allText()),
       'S1: Grade 5 topic menu offers its own frozen candidates, not Senior Phase families', allText());
@@ -200,8 +202,8 @@ const C13_SHAPE = /□\s*=\s*\d+\s*÷\s*\d+/;
     check(!!lastPrompt && C13_SHAPE.test(lastPrompt), 'S2: prompt contains a C13-shaped paired multiplication/division sentence');
   }
 
-  // ── Scenario 3: menu dispatch, profile grade 8 (Senior Phase, unaffected) ──
-  console.log('\n── Scenario 3: menu dispatch, profile grade 8 (Senior Phase, unaffected) ──');
+  // ── Scenario 3: menu dispatch selects Grade 8 after grade prompt ──
+  console.log('\n── Scenario 3: menu dispatch selects Grade 8 ──');
   {
     const from = '27821110053';
     insertTeacher(hashPhone(from), { grade: 8 });
@@ -210,7 +212,9 @@ const C13_SHAPE = /□\s*=\s*\d+\s*÷\s*\d+/;
     await send(from, '1');
     await send(from, '6');
 
-    check(aiCallCount === 0, 'S3: topic menu opens without generating for G8', `got ${aiCallCount}`);
+    check(aiCallCount === 0, 'S3: grade menu opens without generating for G8', `got ${aiCallCount}`);
+    check(/which grade/i.test(allText()), 'S3: saved Grade 8 profile does not bypass grade selection', allText());
+    await send(from, '8');
     check(/Grade 8 Mental Maths/i.test(allText()), 'S3: G8 topic menu is shown', allText());
 
     await send(from, '1'); // topic: first authorized G8 family (mulDivFluency)
@@ -222,8 +226,8 @@ const C13_SHAPE = /□\s*=\s*\d+\s*÷\s*\d+/;
     check(/mental maths/i.test(allText()), 'S3: Senior Phase content still delivered', allText());
   }
 
-  // ── Scenario 4: unsupported profile grade (6) — grade menu, no generation ──
-  console.log('\n── Scenario 4: menu dispatch, unsupported profile grade (6) ──');
+  // ── Scenario 4: profile grade never changes the grade-menu options ──
+  console.log('\n── Scenario 4: menu dispatch ignores saved Grade 6 ──');
   {
     const from = '27821110054';
     insertTeacher(hashPhone(from), { grade: 6 });
@@ -233,9 +237,9 @@ const C13_SHAPE = /□\s*=\s*\d+\s*÷\s*\d+/;
     await send(from, '6');
 
     check(aiCallCount === 0, 'S4: AI never invoked for an out-of-range grade', `got ${aiCallCount}`);
-    check(/Grade 6/.test(allText()), 'S4: message names the actual unsupported grade', allText());
-    check(/1\. Grade 5/.test(allText()) && /Grade 7/.test(allText()) && /Grade 8/.test(allText()),
-      'S4: grade menu offers every grade that has an authorized generator', allText());
+    check(/which grade/i.test(allText()), 'S4: grade menu is shown', allText());
+    check(/1\. Grade 1/.test(allText()) && /Grade 6/.test(allText()) && /Grade 8/.test(allText()),
+      'S4: grade menu offers every supported grade', allText());
     check(!/Grade 9/.test(allText()),
       'S4: Grade 9 is NOT offered — it has no authorized family and no generation path', allText());
   }
@@ -317,9 +321,9 @@ const C13_SHAPE = /□\s*=\s*\d+\s*÷\s*\d+/;
     await send(from, '1');
     await send(from, '6');
     check(aiCallCount === 0, 'S8: grade menu opens without generating', `got ${aiCallCount}`);
-    check(/1\. Grade 5/.test(allText()), 'S8: Grade 5 is the first grade offered', allText());
+    check(/5\. Grade 5/.test(allText()), 'S8: Grade 5 appears in the full grade menu', allText());
 
-    await send(from, '1'); // grade: Grade 5
+    await send(from, '5'); // grade: Grade 5
     check(aiCallCount === 0, 'S8: picking a grade advances to the topic step, not generation', `got ${aiCallCount}`);
     check(/Grade 5 Mental Maths/.test(allText()),
       'S8: the grade chosen from the menu is the grade carried forward', allText());
@@ -368,7 +372,7 @@ const C13_SHAPE = /□\s*=\s*\d+\s*÷\s*\d+/;
     check(aiCallCount === 0, 'S10: no generation for Grade R (no Foundation Phase generator)', `got ${aiCallCount}`);
     check(/Grade R/.test(out), 'S10: the message names Grade R', out);
     check(!/Grade 0/.test(out), 'S10: the message never says "Grade 0"', out);
-    check(/1\. Grade 5/.test(out), 'S10: the grades that do work are offered instead', out);
+    check(/1\. Grade 1/.test(out) && /Grade 5/.test(out), 'S10: the grades that do work are offered instead', out);
   }
 
   console.log('\n─────────────────────────────────');

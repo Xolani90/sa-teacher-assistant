@@ -300,14 +300,12 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
   // governed generators — nothing is hard-coded here, so a grade with no
   // frozen specification has no path through this block at all.
   if (intent.type === 'mentalMaths') {
-    const teacherForGrade = getTeacherByPhone(from);
-    // teachers.grade is a TEXT column (see the ROOT CAUSE FIX comment in
-    // utils/usageTracker.js#updateTeacherProfile) — it comes back from the
-    // DB as a clean numeric string (e.g. "8"), never a JS number, so it
-    // must be parsed before any Number.isInteger() check ever sees it.
-    // intent.grade (parsed fresh from the message by intentParser) is
-    // already a number or null and needs no conversion.
-    const rawGrade = intent.grade != null ? intent.grade : teacherForGrade?.grade;
+    // A Mental Maths request made from the menu must always begin with a
+    // grade choice. A saved profile grade is useful context elsewhere, but
+    // using it here silently skipped the first wizard step and made the
+    // feature appear to offer only that one grade. An explicit grade in the
+    // teacher's message still skips this menu as intended.
+    const rawGrade = intent.grade;
     const parsedGrade = rawGrade != null && rawGrade !== '' ? parseInt(rawGrade, 10) : null;
     const effGrade = Number.isInteger(parsedGrade) ? parsedGrade : null;
     const phoneHash = hashPhone(from);

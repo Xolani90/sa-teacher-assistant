@@ -249,7 +249,8 @@ const C12_SHAPE = /□\s*=\s*\d+\s*[-+]\s*\d+/;
     for (let round = 1; round <= 2; round++) {
       await send(from, 'MENU');
       await send(from, '1');
-      await send(from, '6'); // Grade 5 profile -> straight to topic menu
+      await send(from, '6'); // Mental Maths -> grade menu (profile grade is not used here)
+      await send(from, '5'); // grade: Grade 5
       await send(from, '1'); // topic
       await send(from, '1'); // delivery: Oral -> generate
       generations += aiCallCount;

@@ -180,14 +180,14 @@ function isMentalMathsGeneration(prompt) {
 
   const allText = () => sentMessages.map(m => m.text).join('\n');
 
-  // Navigates a fresh teacher to the point of having just opened the
-  // Mental Maths topic menu via the main menu (MENU -> Create a resource ->
-  // Mental Maths). Returns nothing; caller sends the next numeric reply to
-  // pick a topic.
-  async function openTopicMenuViaMainMenu(from) {
+  // Menu-driven Mental Maths always asks for a grade before it asks for a
+  // topic. The profile grade is deliberately not used as an implicit choice.
+  async function openTopicMenuViaMainMenu(from, grade) {
     await send(from, 'MENU');
     await send(from, '1');   // "Create a resource"
     await send(from, '6');   // "Mental Maths"
+    check(/which grade/i.test(allText()), `Grade ${grade}: grade menu opens before topic selection`, allText());
+    await send(from, String(mentalMathsSession.SUPPORTED_GRADES.indexOf(grade) + 1));
   }
 
   console.log('\n── Mental Maths: session-wizard dispatch audit ──\n');
@@ -211,7 +211,7 @@ function isMentalMathsGeneration(prompt) {
     {
       const from = '27822220001';
       insertTeacher(hashPhone(from), { grade: 7 });
-      await openTopicMenuViaMainMenu(from);
+      await openTopicMenuViaMainMenu(from, 7);
       check(aiCallCount === 0, 'G7 pre-selection: no generation before topic chosen', `got ${aiCallCount}`);
 
       await send(from, '1');
@@ -228,7 +228,7 @@ function isMentalMathsGeneration(prompt) {
     {
       const from = '27822220002';
       insertTeacher(hashPhone(from), { grade: 7 });
-      await openTopicMenuViaMainMenu(from);
+      await openTopicMenuViaMainMenu(from, 7);
 
       await send(from, '2');
       await send(from, '1'); // delivery: Oral
@@ -242,7 +242,7 @@ function isMentalMathsGeneration(prompt) {
     {
       const from = '27822220003';
       insertTeacher(hashPhone(from), { grade: 7 });
-      await openTopicMenuViaMainMenu(from);
+      await openTopicMenuViaMainMenu(from, 7);
 
       await send(from, '3');
       await send(from, '2'); // delivery: Written
@@ -267,7 +267,7 @@ function isMentalMathsGeneration(prompt) {
     {
       const from = '27822220004';
       insertTeacher(hashPhone(from), { grade: 8 });
-      await openTopicMenuViaMainMenu(from);
+      await openTopicMenuViaMainMenu(from, 8);
 
       await send(from, '1');
       await send(from, '1'); // delivery: Oral
@@ -281,7 +281,7 @@ function isMentalMathsGeneration(prompt) {
     {
       const from = '27822220005';
       insertTeacher(hashPhone(from), { grade: 8 });
-      await openTopicMenuViaMainMenu(from);
+      await openTopicMenuViaMainMenu(from, 8);
 
       await send(from, '2');
       await send(from, '1'); // delivery: Oral
@@ -299,7 +299,7 @@ function isMentalMathsGeneration(prompt) {
     {
       const from = '27822220006';
       insertTeacher(hashPhone(from), { grade: 8 });
-      await openTopicMenuViaMainMenu(from);
+      await openTopicMenuViaMainMenu(from, 8);
       const menuText = allText();
       check(!/ratio/i.test(menuText), 'G8: topic menu text does not mention Ratio Sharing', menuText);
 
@@ -321,15 +321,20 @@ function isMentalMathsGeneration(prompt) {
     await send(from, '6');
 
     check(aiCallCount === 0, 'G9: zero generation calls on menu dispatch', `got ${aiCallCount}`);
-    check(/Grade 9/.test(allText()), 'G9: response references the unsupported grade', allText());
+    // Menu-driven Mental Maths no longer consults the saved profile grade
+    // at all, so a profile grade of 9 has no special effect here — the
+    // teacher just sees the ordinary generic grade menu, not a message
+    // about grade 9 specifically (that only happens on the explicit,
+    // grade-stated route exercised below).
+    check(/which grade/i.test(allText()), 'G9: menu dispatch shows the ordinary grade menu', allText());
     check(!mentalMathsSession.SUPPORTED_GRADES.includes(9), 'G9: never appears in SUPPORTED_GRADES', JSON.stringify(mentalMathsSession.SUPPORTED_GRADES));
     check(mentalMathsSession.topicsForGrade(9).length === 0, 'G9: has no authorized topics at all', JSON.stringify(mentalMathsSession.topicsForGrade(9)));
 
-    // The grade menu opened for G9 offers only authorized grades — answering
+    // The grade menu opened here offers only authorized grades — answering
     // it must switch the teacher to one of those, never generate for 9.
-    await send(from, '1'); // "Grade 5" — the first authorized grade
+    await send(from, '1'); // "Grade 1" — the first authorized grade in the menu
     check(!isMentalMathsGeneration(lastPrompt), 'G9: answering the grade menu does not generate immediately (topic still needed)', `aiCallCount=${aiCallCount}, prompt=${(lastPrompt || '').slice(0, 120)}`);
-    check(/Grade 5 Mental Maths/.test(allText()), 'G9: grade menu redirects to an authorized grade', allText());
+    check(/Grade 1 Mental Maths/.test(allText()), 'G9: grade menu redirects to an authorized grade', allText());
 
     // Natural-language entry must be gated identically — no NL bypass.
     const from2 = '27822220008';
@@ -347,7 +352,7 @@ function isMentalMathsGeneration(prompt) {
     const from = '27822220009';
     insertTeacher(hashPhone(from), { grade: 5 });
 
-    await openTopicMenuViaMainMenu(from);
+    await openTopicMenuViaMainMenu(from, 5);
     check(aiCallCount === 0, 'Grade 5: topic menu opens without generating', `got ${aiCallCount}`);
     check(!/Powers & Roots|Ratio & Sharing/i.test(allText()),
       'Grade 5: no Senior Phase family offered', allText());
@@ -368,7 +373,7 @@ function isMentalMathsGeneration(prompt) {
   {
     const from = '27822220011';
     insertTeacher(hashPhone(from), { grade: 7 });
-    await openTopicMenuViaMainMenu(from);
+    await openTopicMenuViaMainMenu(from, 7);
 
     await send(from, '0'); // "Back to main menu" — universal convention
     check(aiCallCount === 0, 'Back: returning to main menu generates nothing', `got ${aiCallCount}`);
@@ -387,7 +392,7 @@ function isMentalMathsGeneration(prompt) {
   {
     const from = '27822220014';
     insertTeacher(hashPhone(from), { grade: 7 });
-    await openTopicMenuViaMainMenu(from);
+    await openTopicMenuViaMainMenu(from, 7);
     await send(from, '1'); // topic chosen, delivery menu now open
 
     await send(from, '0'); // Back
@@ -419,7 +424,7 @@ function isMentalMathsGeneration(prompt) {
   {
     const from = '27822220013';
     insertTeacher(hashPhone(from), { grade: 7 });
-    await openTopicMenuViaMainMenu(from);
+    await openTopicMenuViaMainMenu(from, 7);
 
     await send(from, '1'); // topic
     await send(from, '1'); // delivery -> generates
