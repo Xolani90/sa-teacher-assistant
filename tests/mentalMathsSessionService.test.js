@@ -18,6 +18,14 @@
 const mm = require('../services/mentalMathsSessionService');
 const grade5 = require('../services/mentalMathsGrade5Service');
 const senior = require('../services/mentalMathsService');
+const gradeServices = {
+  1: require('../services/mentalMathsGrade1Service'),
+  2: require('../services/mentalMathsGrade2Service'),
+  3: require('../services/mentalMathsGrade3Service'),
+  4: require('../services/mentalMathsGrade4Service'),
+  5: grade5,
+  6: require('../services/mentalMathsGrade6Service'),
+};
 
 let passed = 0, failed = 0;
 function ok(label, condition) {
@@ -47,6 +55,24 @@ function verifyByReparsing({ prompt, canonicalAnswer }) {
     const expected = op === '+' ? Number(a) + Number(b) : Number(a) - Number(b);
     const inverseOk = invOp === (op === '+' ? '-' : '+') && Number(invB) === Number(b);
     return expected === Number(r) && inverseOk && canonicalAnswer === expected;
+  }
+
+  // Foundation and Intermediate Phase addition/subtraction facts.
+  m = prompt.match(/^(\d+) ([+−-]) (\d+) = \?$/);
+  if (m) return canonicalAnswer === (m[2] === '+' ? Number(m[1]) + Number(m[3]) : Number(m[1]) - Number(m[3]));
+
+  // Foundation and Intermediate Phase multiplication/division facts.
+  m = prompt.match(/^(\d+) × (\d+) = \?$/);
+  if (m) return canonicalAnswer === Number(m[1]) * Number(m[2]);
+  m = prompt.match(/^(\d+) ÷ (\d+) = \?$/);
+  if (m) return Number(m[1]) % Number(m[2]) === 0 && canonicalAnswer === Number(m[1]) / Number(m[2]);
+
+  // Grade 6 prime recognition.
+  m = prompt.match(/^Is (\d+) a prime number\?$/);
+  if (m) {
+    const n = Number(m[1]);
+    const prime = n >= 2 && !Array.from({ length: Math.floor(Math.sqrt(n)) - 1 }, (_, i) => i + 2).some(d => n % d === 0);
+    return canonicalAnswer === (prime ? 'Yes' : 'No');
   }
 
   // Grade 5 C13 — "a × b = □ therefore □ = p ÷ d"
@@ -101,11 +127,7 @@ function verifyByReparsing({ prompt, canonicalAnswer }) {
 // authorization data — while still failing loudly if that data changes.
 console.log('Grades R-12 availability sweep');
 {
-  const expectedAvailable = new Set();
-  for (let g = grade5.MIN_GRADE; g <= grade5.MAX_GRADE; g++) expectedAvailable.add(g);
-  for (const family of senior.AUTHORIZED_FAMILIES) {
-    for (const g of senior.FAMILY_GRADE_AUTHORIZATION[family]) expectedAvailable.add(g);
-  }
+  const expectedAvailable = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
 
   // Grade R is 0 in this codebase (utils/capsPhase.js).
   const ALL_GRADES = Array.from({ length: 13 }, (_, i) => i);
@@ -166,12 +188,15 @@ console.log('\nTopic catalogue (grade-appropriate, grade-scoped)');
 
   for (const g of mm.SUPPORTED_GRADES.filter(x => x !== 5)) {
     const keys = mm.topicsForGrade(g).map(t => t.key);
-    const authorized = senior.AUTHORIZED_FAMILIES
-      .filter(f => senior.FAMILY_GRADE_AUTHORIZATION[f].includes(g));
-    ok(`Grade ${g} topics are exactly its authorized families (${authorized.join(', ')})`,
-      JSON.stringify(keys) === JSON.stringify(authorized));
-    ok(`Grade ${g} has no topic default (must be chosen explicitly)`,
-      mm.defaultTopicForGrade(g) === null);
+    const serviceTopics = gradeServices[g]?.TOPICS;
+    const expected = serviceTopics
+      ? serviceTopics.map(t => t.key)
+      : senior.AUTHORIZED_FAMILIES.filter(f => senior.FAMILY_GRADE_AUTHORIZATION[f].includes(g));
+    ok(`Grade ${g} topics match its grade-specific generator (${expected.join(', ')})`,
+      JSON.stringify(keys) === JSON.stringify(expected));
+    const expectedDefault = g >= 1 && g <= 6 ? gradeServices[g].DEFAULT_TOPIC : null;
+    ok(`Grade ${g} has the correct default-topic policy`,
+      mm.defaultTopicForGrade(g) === expectedDefault);
     ok(`Grade ${g} rejects a Grade 5 candidate as a topic`, mm.findTopic(g, 'C12') === null);
   }
 
@@ -364,7 +389,7 @@ console.log('\nValidation and error handling');
   // Error messages must name the supported grades / available topics so the
   // dispatch layer's fallback message can never be silently wrong.
   let msg = '';
-  try { mm.generateSession({ grade: 3, count: 4 }); } catch (e) { msg = e.message; }
+  try { mm.generateSession({ grade: 9, count: 4 }); } catch (e) { msg = e.message; }
   ok('unsupported-grade error lists the supported grades', msg.includes(mm.SUPPORTED_GRADES.join(', ')));
   try { mm.generateSession({ grade: 5, topic: 'zzz', count: 4 }); } catch (e) { msg = e.message; }
   ok('unknown-topic error lists the grade\'s available topics', msg.includes('C12') && msg.includes('C13'));

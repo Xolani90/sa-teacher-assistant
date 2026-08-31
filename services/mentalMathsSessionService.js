@@ -50,6 +50,16 @@
 
 const grade5 = require('./mentalMathsGrade5Service');
 const senior = require('./mentalMathsService');
+const gradeServices = {
+  1: require('./mentalMathsGrade1Service'),
+  2: require('./mentalMathsGrade2Service'),
+  3: require('./mentalMathsGrade3Service'),
+  4: require('./mentalMathsGrade4Service'),
+  5: grade5,
+  6: require('./mentalMathsGrade6Service'),
+  7: require('./mentalMathsGrade7Service'),
+  8: require('./mentalMathsGrade8Service'),
+};
 const { gradeLabel } = require('../utils/capsPhase');
 
 // ── Session dimensions this module is allowed to own ──────────────────
@@ -112,12 +122,7 @@ const FAMILY_LABELS = {
  * @returns {number[]} ascending, de-duplicated
  */
 function computeSupportedGrades() {
-  const grades = new Set();
-  for (let g = grade5.MIN_GRADE; g <= grade5.MAX_GRADE; g++) grades.add(g);
-  for (const family of senior.AUTHORIZED_FAMILIES) {
-    for (const g of senior.FAMILY_GRADE_AUTHORIZATION[family] || []) grades.add(g);
-  }
-  return [...grades].sort((a, b) => a - b);
+  return Object.keys(gradeServices).map(Number).sort((a, b) => a - b);
 }
 
 const SUPPORTED_GRADES = computeSupportedGrades();
@@ -162,9 +167,12 @@ function topicsForGrade(grade) {
   if (grade5.isSupportedGrade(grade)) {
     return GRADE5_TOPICS.map(({ key, label }) => ({ key, label }));
   }
-  return senior.AUTHORIZED_FAMILIES
-    .filter((family) => (senior.FAMILY_GRADE_AUTHORIZATION[family] || []).includes(grade))
-    .map((family) => ({ key: family, label: FAMILY_LABELS[family] || family }));
+  const service = gradeServices[grade];
+  if (!service) return [];
+  const rawTopics = service.TOPICS || {};
+  return Array.isArray(rawTopics)
+    ? rawTopics.map(({ key, label }) => ({ key, label: FAMILY_LABELS[key] || label }))
+    : Object.entries(rawTopics).map(([key, label]) => ({ key, label: FAMILY_LABELS[key] || label }));
 }
 
 /**
@@ -206,7 +214,11 @@ function topicKeyForLabel(grade, label) {
  * @returns {string|null}
  */
 function defaultTopicForGrade(grade) {
-  return grade5.isSupportedGrade(grade) ? GRADE5_DEFAULT_TOPIC : null;
+  if (grade5.isSupportedGrade(grade)) return GRADE5_DEFAULT_TOPIC;
+  // Lower-grade services have a safe first curriculum topic for direct
+  // callers. Senior Phase deliberately retains its explicit family choice.
+  if (grade >= 1 && grade <= 6) return gradeServices[grade].DEFAULT_TOPIC || Object.keys(gradeServices[grade].TOPICS)[0];
+  return null;
 }
 
 // ── Validation helpers ────────────────────────────────────────────────
@@ -316,12 +328,9 @@ function generateSession({ grade, topic, count, mode, seed } = {}) {
     const candidates = GRADE5_TOPICS.find((t) => t.key === resolvedTopic.key).candidates;
     questions = grade5.generateGrade5MentalMathsSet({ count: resolvedCount, seed, candidates }).questions;
   } else {
-    // Family/grade authorization is enforced independently inside
-    // generateFamilySession() itself — an unauthorized pair reaching here
-    // still fails loudly rather than generating.
-    questions = senior.generateFamilySession({
-      grade, family: resolvedTopic.key, count: resolvedCount, seed,
-    }).questions;
+    const service = gradeServices[grade];
+    const generator = service.generate || service[`generateGrade${grade}MentalMathsSet`];
+    questions = generator({ count: resolvedCount, seed, topic: resolvedTopic.key }).questions;
   }
 
   return {
