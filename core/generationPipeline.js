@@ -22,6 +22,7 @@ const { resolveCurrentTopic, topicMatchesCurrentATP } = require('../services/cur
 // path from this module at all — it remains exported from
 // mentalMathsService.js untouched for anything else that still calls it.
 const mentalMaths = require('../services/mentalMathsSessionService');
+const lessonPlanHomework = require('../utils/lessonPlanHomework');
 const { openMenu, closeMenu } = require('../services/navigationService');
 
 // ── Mental Maths session wizard menus ───────────────────────────────────
@@ -582,6 +583,46 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
     }
   }
 
+  // ── Lesson plan: homework section is required, not optional (Feature 2) ──
+  // prompts/lessonPlan.js already instructs the model to include a
+  // *HOMEWORK* (or, Foundation Phase, *OPTIONAL HOME ACTIVITY*) section
+  // grounded in the same topic/grade/term as the lesson — but that's a
+  // probabilistic instruction, not a guarantee, exactly like the ATP
+  // week-range case above. This is the deterministic backstop: verify the
+  // section actually landed with real content and, if not, retry once with
+  // an explicit correction before falling back to a visible warning. Never
+  // blocks delivery — a lesson plan without a perfect homework section is
+  // still far more useful to a teacher than no lesson plan at all.
+  if (intent.type === 'lessonPlan' && finalContent) {
+    if (!lessonPlanHomework.hasUsableHomework(finalContent)) {
+      console.warn(`[WEBHOOK] Lesson plan missing usable homework section on first attempt for ...${String(from).slice(-4)}`);
+
+      const homeworkCorrectionPrompt = prompt +
+        `\n\nIMPORTANT CORRECTION: Your previous attempt did not include a real, usable homework section (it was missing, empty, or left as a placeholder). ` +
+        `Regenerate the FULL lesson plan from scratch, and make sure the *HOMEWORK* section (or, for Foundation Phase, *OPTIONAL HOME ACTIVITY*) contains an actual, specific, complete task on the same topic — not a placeholder, not a restatement of the instructions.`;
+
+      const retryContent = await generateContent(homeworkCorrectionPrompt, intent.type).catch((err) => {
+        console.error('[WEBHOOK] Lesson plan homework correction retry failed:', err.message);
+        return null;
+      });
+
+      if (retryContent && lessonPlanHomework.hasUsableHomework(retryContent)) {
+        console.log(`[WEBHOOK] Lesson plan homework section corrected successfully on retry for ...${String(from).slice(-4)}`);
+        finalContent = retryContent;
+      } else {
+        console.warn(`[WEBHOOK] Lesson plan homework section still missing after retry for ...${String(from).slice(-4)}`);
+        finalContent = `⚠️ *Note: please double-check this lesson plan includes proper homework* — our automatic check couldn't verify a complete homework section. Everything else should be accurate.\n\n${finalContent}`;
+      }
+    }
+
+    const homeworkSection = lessonPlanHomework.extractHomeworkSection(finalContent);
+    // Persisted/delivered verbatim as part of finalContent either way — this
+    // is additionally captured on the intent so SAVE (core/commandHandler.js)
+    // can store it as its own metadata field, not just buried in the content
+    // blob, without generating (or persisting) a second, different version.
+    intent.homework = homeworkSection ? homeworkSection.text : null;
+  }
+
   // ── Mental Maths: deterministic answer key + faithfulness gate ──
   // The wording call was asked for phrasing only, and was explicitly told
   // not to produce an answer key. Here that is enforced rather than
@@ -746,6 +787,12 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
         term:           intent.term           || null,
         atpTopic:       intent.atpTopic       || null,
         differentiation: intent.differentiation || null,
+        // Feature 2: lesson-plan homework, extracted deterministically
+        // above. null for every other intent type, and null for a lesson
+        // plan whose homework section still couldn't be verified after
+        // the retry (the visible warning already prepended to content
+        // covers that case for the teacher).
+        homework:       intent.homework        || null,
       },
       // Mental Maths stores the delivered content (verified questions +
       // the code-built answer key), not the raw AI wording — a saved

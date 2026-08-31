@@ -88,7 +88,9 @@ require.cache[aiServicePath] = {
         `*MAIN ACTIVITY (35 min)*\n` +
         `Guided practice with worked examples, followed by independent practice questions.\n\n` +
         `*CONCLUSION (10 min)*\n` +
-        `Exit-ticket question to check understanding, homework assigned.\n\n` +
+        `Exit-ticket question to check understanding.\n\n` +
+        `*HOMEWORK*\n` +
+        `Complete practice questions 1-10 on today's topic from the textbook and bring corrections tomorrow.\n\n` +
         `*RESOURCES NEEDED*\n` +
         `Chalkboard, worksheets, textbook.\n` +
         `(Generation #${genCounter})`

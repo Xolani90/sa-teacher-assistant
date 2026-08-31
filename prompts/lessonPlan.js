@@ -8,7 +8,7 @@ const { getPhase, gradeLabel } = require('../utils/capsPhase');
  * @param {{ grade: number|null, subject: string, topic: string, language: string }} intent
  * @returns {string}
  */
-function lessonPlanPrompt({ grade, subject, topic, language }) {
+function lessonPlanPrompt({ grade, subject, topic, language, term, atpTopic }) {
   const gradeStr = gradeLabel(grade);
   const subjectStr = subject && subject !== 'general' ? subject.charAt(0).toUpperCase() + subject.slice(1) : 'General';
   const phase = getPhase(grade);
@@ -17,11 +17,23 @@ function lessonPlanPrompt({ grade, subject, topic, language }) {
     ? `\n\nGenerate this entire response in ${language.charAt(0).toUpperCase() + language.slice(1)}. Use natural, teacher-appropriate ${language} for South African schools.`
     : '';
 
+  // Feature 2 (homework): when core/generationPipeline.js has already
+  // grounded this topic against the ATP (intent.atpTopic / intent.term —
+  // see resolveCurrentTopic()/topicMatchesCurrentATP() in
+  // services/curriculumIntelligenceService.js), tell the model which CAPS
+  // term that topic belongs to, so the homework instruction below can ask
+  // for term-appropriate content rather than just "this topic" in the
+  // abstract. Absent for a topic the teacher typed with no ATP match —
+  // homework is still required, just without a term reference.
+  const termInstruction = (term != null && atpTopic)
+    ? ` This topic is scheduled in Term ${term} of the CAPS Annual Teaching Plan for ${gradeStr} ${subjectStr} — keep the homework within that term's expected content and cognitive demand.`
+    : '';
+
   if (phase === 'foundation') {
-    return foundationPhaseLessonPlan({ gradeStr, subjectStr, topic, languageInstruction });
+    return foundationPhaseLessonPlan({ gradeStr, subjectStr, topic, languageInstruction, termInstruction });
   }
 
-  return intermediateAndUpLessonPlan({ gradeStr, subjectStr, topic, languageInstruction });
+  return intermediateAndUpLessonPlan({ gradeStr, subjectStr, topic, languageInstruction, termInstruction });
 }
 
 /**
@@ -31,7 +43,7 @@ function lessonPlanPrompt({ grade, subject, topic, language }) {
  * subject period, observation-based assessment instead of written checks,
  * and no formal homework (not CAPS practice at this phase).
  */
-function foundationPhaseLessonPlan({ gradeStr, subjectStr, topic, languageInstruction }) {
+function foundationPhaseLessonPlan({ gradeStr, subjectStr, topic, languageInstruction, termInstruction }) {
   return `You are a qualified South African Foundation Phase teacher producing classroom-ready material strictly aligned to CAPS Foundation Phase methodology.
 
 TASK: Generate a complete, structured Foundation Phase lesson plan.
@@ -85,12 +97,12 @@ By the end of this lesson, learners will be able to:
 • Extension: [Add complexity — more objects, a small independent challenge]
 
 *OPTIONAL HOME ACTIVITY*
-[One simple, playful activity a parent/caregiver could do at home — not written homework]
+[One simple, playful, concrete activity a parent/caregiver could do at home that practises the SAME skill as today's ${topic} lesson — not written homework, appropriate for ${gradeStr}. Write the actual activity, not a placeholder.${termInstruction}]
 
 Write in warm, simple, encouraging South African English suitable for reading aloud to young children. This must be ready for a Foundation Phase teacher or substitute to use with no further editing.${languageInstruction}`;
 }
 
-function intermediateAndUpLessonPlan({ gradeStr, subjectStr, topic, languageInstruction }) {
+function intermediateAndUpLessonPlan({ gradeStr, subjectStr, topic, languageInstruction, termInstruction }) {
   return `You are a qualified South African teacher producing classroom-ready material strictly aligned to the CAPS (Curriculum and Assessment Policy Statement) curriculum.
 
 TASK: Generate a complete, structured lesson plan.
@@ -144,7 +156,7 @@ By the end of this lesson, learners will be able to:
 [Specify the assessment method: question-and-answer, exit ticket, observation checklist, etc. State what you are looking for]
 
 *HOMEWORK*
-[One practical homework task that reinforces the lesson objective]
+[A homework task is REQUIRED, not optional. It must: (1) practise the SAME topic — ${topic} — taught in this lesson, not a different topic; (2) match ${gradeStr} ${subjectStr} cognitive demand and CAPS assessment guidelines; (3) be a real, complete, specific task a learner could start immediately (e.g. actual numbers/questions/instructions), never a placeholder or a vague restatement of the objective.${termInstruction} Write the actual homework task here, not a description of what it should contain.]
 
 *DIFFERENTIATION*
 • Support: [How to assist struggling learners]

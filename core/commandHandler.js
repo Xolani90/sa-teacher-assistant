@@ -514,6 +514,13 @@ async function handleCommand(from, text, deps) {
         term:            last.intent.term     || null,
         atpTopic:        last.intent.atpTopic || null,
         differentiation: last.intent.differentiation || null,
+        // Feature 2: lesson-plan homework, set in
+        // core/generationPipeline.js. null for every other resource type.
+        // Persisted as its own metadata field (not just inline in
+        // `content`) so the dashboard, or any future consumer, can read it
+        // directly from the same saved row WhatsApp delivery already used
+        // — never a second, independently-generated version.
+        homework:        last.intent.homework  || null,
         savedAt:         new Date().toISOString(),
       };
 
