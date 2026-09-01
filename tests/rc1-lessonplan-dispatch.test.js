@@ -48,6 +48,31 @@ function check(condition, label, extra) {
   }
 }
 
+// ── Clock-freeze helper (test-boundary only, never touches production code) ──
+// resolveCurrentTopic()/getCurrentATPWeek() in
+// services/curriculumIntelligenceService.js already accept an injectable
+// `date` param (default `new Date()`), but Scenario 3 below drives the
+// resolution indirectly through the real dispatch chain
+// (webhook -> commandHandler -> generationPipeline), which never passes an
+// explicit date — so it always resolves off the real system clock. To keep
+// the assertion provably correct on every date (not just "today"), we
+// freeze the global Date constructor for the duration of that one dispatch
+// call only, then restore it immediately after.
+const RealDate = Date;
+function freezeDate(fixedIso) {
+  class FrozenDate extends RealDate {
+    constructor(...args) {
+      if (args.length === 0) return new RealDate(fixedIso);
+      return new RealDate(...args);
+    }
+    static now() { return new RealDate(fixedIso).getTime(); }
+  }
+  global.Date = FrozenDate;
+}
+function unfreezeDate() {
+  global.Date = RealDate;
+}
+
 const { createTestDb } = require('./helpers/createTestDb');
 const testDb = createTestDb(__filename);
 const db = testDb.db;
@@ -257,8 +282,13 @@ function wait(ms) { return new Promise((res) => setTimeout(res, ms)); }
   {
     const phone = '+27821177003';
     const phoneHash = hashPhone(phone);
-    // Grade 7 Mathematics — confirmed real ATP data exists and resolves to
-    // "Geometric constructions" for the current term/week.
+    // Grade 7 Mathematics — confirmed real ATP data resolves to
+    // "Geometric constructions" for 2026-08-05 (Term 3, week 3), a date
+    // deliberately pinned below (NOT "today") so this assertion cannot
+    // silently drift as ATP pacing advances week to week. Verified via
+    // direct resolveCurrentTopic() inspection: this date sits comfortably
+    // inside the ~2-week window where that topic is provably correct
+    // (2026-08-03 through 2026-08-16), not right at either edge.
     insertTeacher(phoneHash, { isPro: 0, grade: '7', subject: 'Mathematics' });
 
     pendingIntentState.set(phoneHash, {
@@ -267,10 +297,18 @@ function wait(ms) { return new Promise((res) => setTimeout(res, ms)); }
     });
 
     const startIdx = sentMessages.length;
-    let threw = false, thrownErr = null;
+    let threw = false, thrownErr = null, saved;
+    // Frozen for the whole block, not just the dispatch call: SessionStore
+    // (lastGeneratedState) stamps entries with Date.now() and expires them
+    // by comparing against Date.now() again on read, so unfreezing before
+    // the read below would compare a frozen-past write timestamp against
+    // the real (much later) system clock and make the entry look expired.
+    freezeDate('2026-08-05T09:00:00');
     try {
       await send(phone, 'LESSONPLAN');
+      saved = lastGeneratedState.get(phoneHash);
     } catch (err) { threw = true; thrownErr = err; }
+    finally { unfreezeDate(); }
     check(!threw, 'S3: no crash in the real dispatch chain', thrownErr?.stack);
 
     const msgs = messagesSince(startIdx);
@@ -282,7 +320,6 @@ function wait(ms) { return new Promise((res) => setTimeout(res, ms)); }
     const mismatchWarning = msgs.find(m => /isn't in this term's ATP/.test(m.text));
     check(!mismatchWarning, 'S3: no ATP mismatch warning when the topic was auto-filled FROM the ATP itself');
 
-    const saved = lastGeneratedState.get(phoneHash);
     check(!!saved && !!saved.intent && !!saved.intent.topic, 'S3: generated/saved intent carries an auto-filled topic (not empty)', JSON.stringify(saved && saved.intent));
     check(!!saved && saved.intent.topic === 'Geometric constructions', 'S3: auto-filled topic matches the real current-term ATP topic for Grade 7 Mathematics', JSON.stringify(saved && saved.intent));
     check(!!saved && saved.intent.atpTopic === true, 'S3: intent.atpTopic flag set true, confirming this went through the ATP auto-fill branch, not a coincidental AI guess', JSON.stringify(saved && saved.intent));
