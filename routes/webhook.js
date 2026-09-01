@@ -137,6 +137,7 @@ require('../services/navigationService').registerFlow({
 const rosterState             = new SessionStore('roster',              30 * 60 * 1000); // ADR-006 PR3 — ROSTER/ADD/REMOVE/CLEAR
 const reflectionState          = new SessionStore('reflection',          30 * 60 * 1000);
 const growthPlanState          = new SessionStore('growthPlan',          30 * 60 * 1000);
+const incidentState            = new SessionStore('incident',            30 * 60 * 1000); // Feature 3 — Teacher Incident Book
 const saveLock = new Set(); // B5-F1: per-phone SAVE in-flight lock (try/finally in SAVE handler)
 
 // RC1-CANCEL: the same 13 stores messageProcessor.js's alreadyMidFlow checks
@@ -160,6 +161,7 @@ const FLOW_STORES = [
   rosterState,
   reflectionState,
   growthPlanState,
+  incidentState,
 ];
 
 /**
@@ -312,6 +314,50 @@ function buildGrowthPlanDeps() {
     hashPhone,
     createGrowthPlan,
     getCurrentTerm,
+  });
+}
+
+// ── Incident Book flow module (Feature 3) ───────────────────────────────────
+const { handleIncidentFlow } = require('../flows/incidentFlow');
+const { createIncident } = require('../services/incidentService');
+
+function describeIncidentStatus(phoneHash) {
+  const state = incidentState.get(phoneHash);
+  if (!state) return null;
+
+  const stepLabels = {
+    awaitingDate: 'waiting for the date',
+    awaitingTime: 'waiting for the time',
+    awaitingType: 'waiting for the incident type',
+    awaitingDescription: 'waiting for the description',
+    awaitingAction: 'waiting for the action taken',
+    reviewSummary: 'reviewing before save',
+  };
+  const stepLabel = stepLabels[state.step] || state.step;
+
+  return (
+    `📋 *Incident Book entry in progress* — ${stepLabel}.\n` +
+    `Reply *CANCEL* to discard, or continue where you left off.`
+  );
+}
+
+require('../services/navigationService').registerFlow({
+  id: 'incident',
+  commands: ['INCIDENT'],
+  capabilities: { status: true, cancel: true, back: false, menus: false },
+  hooks: {
+    cleanup: (phoneHash) => incidentState.delete(phoneHash),
+    describeStatus: describeIncidentStatus,
+  },
+});
+
+function buildIncidentDeps() {
+  return Object.freeze({
+    incidentState,
+    safeSendMessage,
+    parseIntent,
+    hashPhone,
+    createIncident,
   });
 }
 
@@ -653,6 +699,7 @@ function buildProcessMessageDeps() {
     rosterState,
     reflectionState,
     growthPlanState,
+    incidentState,
     handleObservationFlow,
     buildObservationDeps,
     handleObservationHistoryFlow,
@@ -660,6 +707,8 @@ function buildProcessMessageDeps() {
     buildReflectionDeps,
     handleGrowthPlanFlow,
     buildGrowthPlanDeps,
+    handleIncidentFlow,
+    buildIncidentDeps,
     handleAssessmentSessionFlow,
     buildAssessmentSessionDeps,
     handleBlueprintAuthoringFlow,
@@ -775,6 +824,7 @@ function buildCommandDeps() {
     blueprintAuthoringState,
     reflectionState,
     growthPlanState,
+    incidentState,
     // RC1-H-006: SAVE must not be claimed globally (generated-resource save)
     // while a teacher is mid-flow in rosterFlow's PREVIEW step — see the
     // guard in commandHandler.js's SAVE branch for why this is needed here.

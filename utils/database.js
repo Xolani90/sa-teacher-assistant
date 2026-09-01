@@ -1141,6 +1141,35 @@ function runMigrations() {
     db.exec(`ALTER TABLE teachers ADD COLUMN is_pilot_account INTEGER NOT NULL DEFAULT 0`);
   } catch (_) { /* column already exists — additive migration, safe to re-run */ }
 
+  // Migration 043: Teacher Incident Book (Feature 3). Ownership follows
+  // ADR-011 §2 (phone_hash, same as qms_reflections / qms_growth_plans
+  // above) rather than a teachers.id foreign key, matching every other
+  // teacher-scoped table in this schema. incident_type is a plain TEXT
+  // column (no CHECK constraint) — the controlled vocabulary lives in
+  // utils/incidentTypes.js so new categories never require a migration.
+  // updated_at supports edits (dashboard PATCH), mirroring
+  // qms_growth_plans' pattern above.
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS incidents (
+      id             INTEGER PRIMARY KEY AUTOINCREMENT,
+      phone_hash     TEXT    NOT NULL,
+      incident_date  TEXT    NOT NULL,
+      incident_time  TEXT    NOT NULL,
+      incident_type  TEXT    NOT NULL,
+      description    TEXT    NOT NULL,
+      action_taken   TEXT    NOT NULL,
+      created_at     TEXT    NOT NULL DEFAULT (datetime('now')),
+      updated_at     TEXT    NOT NULL DEFAULT (datetime('now'))
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_incidents_phone_hash
+      ON incidents(phone_hash);
+    CREATE INDEX IF NOT EXISTS idx_incidents_date
+      ON incidents(incident_date);
+    CREATE INDEX IF NOT EXISTS idx_incidents_type
+      ON incidents(incident_type);
+  `);
+
   console.log('[DB] Migrations complete');
 }
 

@@ -21,6 +21,7 @@ const INTENT_TYPES = {
   OBSERVATION_HISTORY: 'observationHistory',
   REFLECTION: 'reflection',
   GROWTH_PLAN: 'growth_plan',
+  INCIDENT: 'incident',
   CURRICULUM_QUERY: 'curriculumQuery',
   GREETING: 'greeting',
   SMALL_TALK: 'smallTalk',
@@ -228,6 +229,12 @@ function parseIntent(text) {
   // REFLECTION detection (narrow phrasing only — do not expand yet)
   } else if (/log\s+(a\s+)?reflection|record\s+(a\s+)?reflection|reflect\s+on\s+(my|this)\s+lesson/i.test(lower)) {
     type = INTENT_TYPES.REFLECTION;
+  // INCIDENT — bare shortcut command, alias for the natural-language incident phrases
+  } else if (/^incident\.?$/i.test(lower)) {
+    type = INTENT_TYPES.INCIDENT;
+  // INCIDENT detection (narrow phrasing only, mirrors REFLECTION/GROWTH_PLAN above)
+  } else if (/log\s+(an\s+)?incident|record\s+(an\s+)?incident|report\s+(an\s+)?incident|incident\s+book/i.test(lower)) {
+    type = INTENT_TYPES.INCIDENT;
   // NEW GOAL — bare shortcut command, alias for the natural-language growth-plan phrases
   } else if (/^new\s+goal\.?$/i.test(lower)) {
     type = INTENT_TYPES.GROWTH_PLAN;

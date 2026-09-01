@@ -1009,6 +1009,167 @@ const { getAssessmentDetail } = require('../services/assessmentDetailService');
 const { generateBlueprintAssessmentPdf } = require('../services/pdfService');
 const { buildPdfUrl } = require('../core/generationPipeline');
 const { listTopicsOrdered } = require('../utils/qmsTopics');
+const { createIncident, getIncident, listIncidents, updateIncident } = require('../services/incidentService');
+
+/**
+ * Feature 3 — Teacher Incident Book API. Same shape/conventions as the
+ * reflections handlers above: thin wrappers over incidentService.js,
+ * ownership always taken from req.teacher.phoneHash (never the body/
+ * params), 400 for the service's own `createIncident:`/`updateIncident:`
+ * validation errors, 404 (not 403) for wrong-owner or missing rows so a
+ * teacher can't distinguish "not yours" from "doesn't exist" — same
+ * no-existence-oracle convention as createPatchReflectionHandler above.
+ */
+
+/**
+ * @param {Object} deps
+ * @param {(phoneHash:string, filters?:Object) => Object[]} deps.listIncidents
+ * @returns {(req, res) => void}
+ */
+function createGetIncidentsHandler({ listIncidents }) {
+  /**
+   * GET /api/incidents
+   * Optional query params: incidentType, fromDate, toDate — passed straight
+   * through to incidentService.listIncidents' filters object.
+   *
+   * @returns 200 { incidents: [...] } scoped to req.teacher.phoneHash
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetIncidents(req, res) {
+    const { incidentType, fromDate, toDate } = req.query || {};
+
+    let incidents;
+    try {
+      incidents = listIncidents(req.teacher.phoneHash, { incidentType, fromDate, toDate });
+    } catch (err) {
+      console.error('[API] listIncidents failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+    return res.status(200).json({ incidents: incidents || [] });
+  };
+}
+
+/**
+ * @param {Object} deps
+ * @param {(phoneHash:string, id:number) => Object|null} deps.getIncident
+ * @returns {(req, res) => void}
+ */
+function createGetIncidentDetailHandler({ getIncident }) {
+  /**
+   * GET /api/incidents/:id
+   *
+   * @returns 200 { incident }
+   * @returns 400 for a non-positive-integer :id
+   * @returns 404 if the incident doesn't exist or isn't owned by this teacher
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetIncidentDetail(req, res) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid incident id' });
+    }
+
+    let incident;
+    try {
+      incident = getIncident(req.teacher.phoneHash, id);
+    } catch (err) {
+      console.error('[API] getIncident failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!incident) {
+      return res.status(404).json({ error: 'Incident not found' });
+    }
+    return res.status(200).json({ incident });
+  };
+}
+
+/**
+ * @param {Object} deps
+ * @param {(phoneHash:string, params:Object) => Object} deps.createIncident
+ * @returns {(req, res) => void}
+ */
+function createPostIncidentHandler({ createIncident }) {
+  /**
+   * POST /api/incidents
+   * Body: { incidentDate, incidentTime, incidentType, description, actionTaken }
+   * Any `teacherId`/`phoneHash` supplied in the body is ignored — ownership
+   * always comes from req.teacher.phoneHash (the verified JWT subject).
+   *
+   * @returns 201 { incident } on success
+   * @returns 400 for any of the service's own field-validation failures
+   * @returns 500 if the underlying service throws for any other reason
+   */
+  return function handlePostIncident(req, res) {
+    const { incidentDate, incidentTime, incidentType, description, actionTaken } = req.body || {};
+
+    let incident;
+    try {
+      incident = createIncident(req.teacher.phoneHash, {
+        incidentDate,
+        incidentTime,
+        incidentType,
+        description,
+        actionTaken,
+      });
+    } catch (err) {
+      if (/^createIncident:/.test(err.message)) {
+        return res.status(400).json({ error: err.message });
+      }
+      console.error('[API] createIncident failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    return res.status(201).json({ incident });
+  };
+}
+
+/**
+ * @param {Object} deps
+ * @param {(phoneHash:string, id:number, params:Object) => Object|null} deps.updateIncident
+ * @returns {(req, res) => void}
+ */
+function createPatchIncidentHandler({ updateIncident }) {
+  /**
+   * PATCH /api/incidents/:id
+   * Body: any subset of { incidentDate, incidentTime, incidentType, description, actionTaken }
+   *
+   * @returns 200 { incident } on success
+   * @returns 400 for a non-positive-integer :id, or a field-validation failure
+   * @returns 404 if the incident doesn't exist or isn't owned by this teacher
+   * @returns 500 if the underlying service throws for any other reason
+   */
+  return function handlePatchIncident(req, res) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid incident id' });
+    }
+
+    const { incidentDate, incidentTime, incidentType, description, actionTaken } = req.body || {};
+
+    let incident;
+    try {
+      incident = updateIncident(req.teacher.phoneHash, id, {
+        incidentDate,
+        incidentTime,
+        incidentType,
+        description,
+        actionTaken,
+      });
+    } catch (err) {
+      if (/^updateIncident:/.test(err.message)) {
+        return res.status(400).json({ error: err.message });
+      }
+      console.error('[API] updateIncident failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!incident) {
+      return res.status(404).json({ error: 'Incident not found' });
+    }
+    return res.status(200).json({ incident });
+  };
+}
 
 router.get(
   '/learners/:learnerId/intervention-plan',
@@ -1093,8 +1254,29 @@ router.get(
   createGetQmsTopicsHandler({ listTopicsOrdered })
 );
 
+router.get(
+  '/incidents',
+  createGetIncidentsHandler({ listIncidents })
+);
+router.get(
+  '/incidents/:id',
+  createGetIncidentDetailHandler({ getIncident })
+);
+router.post(
+  '/incidents',
+  createPostIncidentHandler({ createIncident })
+);
+router.patch(
+  '/incidents/:id',
+  createPatchIncidentHandler({ updateIncident })
+);
+
 module.exports = router;
 module.exports.__testExports = {
+  createGetIncidentsHandler,
+  createGetIncidentDetailHandler,
+  createPostIncidentHandler,
+  createPatchIncidentHandler,
   createGetInterventionPlanHandler,
   createGetClassesHandler,
   createGetResourcesHandler,
