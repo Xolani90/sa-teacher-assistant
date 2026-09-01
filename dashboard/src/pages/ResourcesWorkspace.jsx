@@ -115,6 +115,8 @@ export default function ResourcesWorkspace() {
           <option value="examPaper">Exam Papers</option>
           <option value="rubric">Rubrics</option>
           <option value="atp">ATPs</option>
+          <option value="mentalMaths">Mental Maths</option>
+          <option value="moderationPack">Moderation Packs</option>
         </select>
       </div>
 

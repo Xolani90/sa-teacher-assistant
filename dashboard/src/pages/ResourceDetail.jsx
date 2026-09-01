@@ -21,6 +21,22 @@ const RESOURCE_TYPE_LABELS = {
   mentalMaths: 'Mental Maths',
 };
 
+// Content section header, per resource type. Mental Maths content is a
+// session (verified questions + answer key), not "lesson content" — the
+// generic fallback keeps any future saveable type from silently inheriting
+// the lessonPlan-specific label.
+const CONTENT_SECTION_TITLES = {
+  lessonPlan: 'Lesson Content',
+  worksheet: 'Worksheet Content',
+  test: 'Test Content',
+  atp: 'ATP Content',
+  sbaTask: 'SBA Task Content',
+  examPaper: 'Exam Paper Content',
+  rubric: 'Rubric Content',
+  moderationPack: 'Moderation Pack Content',
+  mentalMaths: 'Mental Maths Session',
+};
+
 /**
  * Single saved-resource view, backed by GET /api/resources/:id
  * (routes/api.js -> teacherWorkspaceService.getSavedResource — the
@@ -92,7 +108,7 @@ export default function ResourceDetail() {
 
           {/* Full generated content, verbatim — same text WhatsApp delivered */}
           <Card style={{ padding: 'var(--space-5)', marginBottom: 'var(--space-6)' }}>
-            <SectionHeader title="Lesson Content" />
+            <SectionHeader title={CONTENT_SECTION_TITLES[resource.resourceType] || 'Content'} />
             <pre style={styles.contentBlock}>{resource.content}</pre>
           </Card>
 

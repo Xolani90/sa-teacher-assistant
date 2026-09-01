@@ -132,6 +132,51 @@ function run() {
   detailHandler({ teacher: { id: 2, phoneHash: TEACHER_B_HASH }, params: { id: String(saved.id) } }, bypassAttempt);
   assert(bypassAttempt.statusCode === 404, 'a genuinely authenticated but non-owning session cannot retrieve another teacher\'s resource by id');
 
+  // ── Step 6: Mental Maths mirrors through the SAME path ──────────────
+  // Feature 2's mirroring guarantee isn't lesson-plan-specific — it's the
+  // shared saveResource()/getSavedResources()/getSavedResource() surface.
+  // Mental Maths differs from lesson plans in two real ways worth locking
+  // down here: (a) core/generationPipeline.js's SAVE block stores the
+  // code-built session (questions + answer key), not raw AI wording —
+  // simulated below via a distinct sessionContent string, matching that
+  // convention rather than reusing generatedContent; (b) it has no
+  // `homework` field, so the dashboard must not display a stray Homework
+  // section for it (ResourceDetail.jsx gates that section on
+  // resourceType === 'lessonPlan').
+  console.log('\n── Step 6: Mental Maths session mirrors through the same dashboard path ──');
+  const mentalMathsContent =
+    '*MENTAL MATHS — Grade 4 · Multiplication Facts*\\n' +
+    '1) 6 × 7 = ?\\n2) 9 × 8 = ?\\n3) 4 × 5 = ?\\n\\n' +
+    '*ANSWER KEY*\\n1) 42  2) 72  3) 20';
+  const savedMM = saveResource(
+    TEACHER_A_HASH,
+    'mentalMaths',
+    'Grade 4 Mental Maths — Multiplication Facts',
+    mentalMathsContent,
+    { grade: 4, topic: 'Multiplication Facts' }
+  );
+  assert(savedMM && savedMM.id > 0, 'mental maths session persisted via the same saveResource() WhatsApp uses');
+
+  const mmListRes = mockRes();
+  listHandler({ teacher: { id: 1, phoneHash: TEACHER_A_HASH }, query: { resourceType: 'mentalMaths' }, params: {} }, mmListRes);
+  assert(mmListRes.statusCode === 200, 'mentalMaths-filtered list route returns 200');
+  assert(
+    mmListRes.body.resources.some(r => r.id === savedMM.id) && mmListRes.body.resources.every(r => r.resourceType === 'mentalMaths'),
+    'GET /api/resources?resourceType=mentalMaths returns the saved session, correctly filtered'
+  );
+
+  const mmDetailRes = mockRes();
+  detailHandler(mockReq(TEACHER_A_HASH, { id: String(savedMM.id) }), mmDetailRes);
+  assert(mmDetailRes.statusCode === 200, 'mental maths detail route returns 200');
+  assert(mmDetailRes.body.content === mentalMathsContent, 'dashboard displays the exact persisted session (questions + answer key), not a re-generated version');
+  assert(mmDetailRes.body.grade === 4, 'mental maths grade visible');
+  assert(mmDetailRes.body.topic === 'Multiplication Facts', 'mental maths topic visible');
+  assert(mmDetailRes.body.homework === null || mmDetailRes.body.homework === undefined, 'mental maths has no homework field (not a lesson plan)');
+
+  const mmIntruderRes = mockRes();
+  detailHandler(mockReq(TEACHER_B_HASH, { id: String(savedMM.id) }), mmIntruderRes);
+  assert(mmIntruderRes.statusCode === 404, 'cross-teacher isolation holds for mental maths too, not just lesson plans');
+
   console.log(`\n📊 Total:  ${passed + failed}`);
   console.log(`✅ Passed: ${passed}`);
   console.log(`❌ Failed: ${failed}`);
