@@ -39,13 +39,21 @@
 
 const navigationService = require('../services/navigationService');
 const { parseGrade } = require('../utils/capsPhase');
+const { computeBlueprint } = require('../services/assessmentWeightingEngine');
 
 const STEP = {
   HEADER_TITLE: 'headerTitle',
   HEADER_SUBJECT: 'headerSubject',
   HEADER_GRADE: 'headerGrade',
+  // Only visited for FET-phase (Grade 10-12) requests, where CAPS
+  // weighting is expressed per-paper (see assessmentWeightingEngine).
+  HEADER_PAPER: 'headerPaper',
   HEADER_TERM: 'headerTerm',
   HEADER_TOTAL_MARKS: 'headerTotalMarks',
+  // Only reached when computeBlueprint() returns WEIGHTING_UNVERIFIED —
+  // gives the teacher an explicit choice instead of silently falling
+  // back to freeform question entry with no weighting at all.
+  CUSTOM_WEIGHTING_INPUT: 'customWeightingInput',
   ADD_QUESTION: 'addQuestion',
   REVIEW: 'review',
   // Mirrors assessmentSessionFlow's COMPLETE_MENU: once published, offer
@@ -75,6 +83,48 @@ function parseHeaderGrade(text) {
     return n >= 0 && n <= 12 ? n : null;
   }
   return parseGrade(trimmed);
+}
+
+// FET phase (Grade 10-12) is the only phase where CAPS expresses an
+// explicit per-paper assessment weighting table (see
+// assessmentWeightingEngine's evidence inventory) — so it's the only
+// phase where we ask for a paper at all.
+function gradeRequiresPaper(grade) {
+  return grade >= 10 && grade <= 12;
+}
+
+function parseHeaderPaper(text) {
+  const trimmed = String(text || '').trim();
+  const match = trimmed.match(/^(?:paper\s*)?([12])$/i);
+  return match ? `Paper ${match[1]}` : null;
+}
+
+// Accepts "<topic> <percentage>" pairs, one per line, e.g.
+// "Algebra 40\nGeometry 60". Deliberately strict for the same reason
+// parseQuestionReply is strict — a misparsed percentage would silently
+// corrupt the weighting.
+function parseCustomWeighting(text) {
+  const lines = String(text || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  if (lines.length === 0) return null;
+
+  const weights = [];
+  for (const line of lines) {
+    const match = line.match(/^(.+?)\s+(\d+(?:\.\d+)?)\s*%?$/);
+    if (!match) return null;
+    const topic = match[1].trim();
+    const percentage = Number(match[2]);
+    if (!topic || Number.isNaN(percentage) || percentage <= 0) return null;
+    weights.push({ topic, percentage });
+  }
+  return weights;
+}
+
+function formatWeightingAllocation(result) {
+  const lines = result.allocation.map((a) => `${a.topic} — ${a.marks} marks`);
+  const sourceLabel = result.weightingSource === 'CAPS'
+    ? `CAPS-derived weighting (${result.ruleId})`
+    : 'Your custom weighting';
+  return `${sourceLabel}:\n${lines.join('\n')}\n\nThese are suggested per-topic mark targets — you'll still add each question yourself. Reply with the next question as: <topic> | <max marks>, or DONE.`;
 }
 
 function parseHeaderTerm(text) {
@@ -131,6 +181,10 @@ function formatReview(state) {
   const termLine = state.term != null ? `, Term ${state.term}` : '';
   const header = `${state.title} — Grade ${state.grade} ${state.subject}${termLine}, ${state.totalMarks} marks`;
   const lines = [`📋 Review:`, header, formatQuestionsList(state.questions)];
+
+  if (state.weighting) {
+    lines.push('', formatWeightingAllocation(state.weighting).split('\n\n')[0]);
+  }
 
   if (state.unresolvedTopics && state.unresolvedTopics.length > 0) {
     lines.push('', formatUnresolvedTopics(state.unresolvedTopics));
@@ -323,7 +377,24 @@ async function handleBlueprintAuthoringFlow(from, text, message = null, preClass
       await safeSendMessage(from, 'Please reply with a grade (e.g. "6" or "R").');
       return true;
     }
+    if (gradeRequiresPaper(grade)) {
+      blueprintAuthoringState.set(phoneHash, { ...state, grade, step: STEP.HEADER_PAPER, lastActivity: Date.now() });
+      await safeSendMessage(from, 'Which paper? Reply 1 or 2.');
+      return true;
+    }
     blueprintAuthoringState.set(phoneHash, { ...state, grade, step: STEP.HEADER_TERM, lastActivity: Date.now() });
+    await safeSendMessage(from, 'Term? (or reply SKIP)');
+    return true;
+  }
+
+  // ── HEADER_PAPER ─────────────────────────────────────────────────────
+  if (state.step === STEP.HEADER_PAPER) {
+    const paper = parseHeaderPaper(trimmed);
+    if (paper === null) {
+      await safeSendMessage(from, 'Please reply 1 or 2 for the paper.');
+      return true;
+    }
+    blueprintAuthoringState.set(phoneHash, { ...state, paper, step: STEP.HEADER_TERM, lastActivity: Date.now() });
     await safeSendMessage(from, 'Term? (or reply SKIP)');
     return true;
   }
@@ -347,15 +418,76 @@ async function handleBlueprintAuthoringFlow(from, text, message = null, preClass
       await safeSendMessage(from, 'Please reply with the total marks as a number (e.g. "20").');
       return true;
     }
-    blueprintAuthoringState.set(phoneHash, { ...state, totalMarks, step: STEP.ADD_QUESTION, lastActivity: Date.now() });
+    const weightingResult = computeBlueprint({
+      grade: state.grade,
+      subject: state.subject,
+      paper: state.paper,
+      totalMarks,
+    });
+
+    const nextState = { ...state, totalMarks, step: STEP.ADD_QUESTION, lastActivity: Date.now() };
+
+    if (weightingResult.status === 'OK') {
+      blueprintAuthoringState.set(phoneHash, { ...nextState, weighting: weightingResult });
+      await safeSendMessage(from,
+        `${formatWeightingAllocation(weightingResult)}\n\nQuestion 1 — reply as: <topic> | <max marks>\n(e.g. "Common Fractions | 5")`
+      );
+      return true;
+    }
+
+    // No verified CAPS weighting for this grade/subject/paper — never
+    // invent one. Let the teacher proceed unweighted, or supply their
+    // own via CUSTOM, without blocking the flow either way.
+    blueprintAuthoringState.set(phoneHash, nextState);
     await safeSendMessage(from,
-      'Question 1 — reply as: <topic> | <max marks>\n(e.g. "Common Fractions | 5")'
+      `No verified CAPS weighting found for this grade/subject — you can proceed without one, or reply *CUSTOM* to set your own topic percentages.\n\nQuestion 1 — reply as: <topic> | <max marks>\n(e.g. "Common Fractions | 5")`
+    );
+    return true;
+  }
+
+  // ── CUSTOM_WEIGHTING_INPUT ───────────────────────────────────────────
+  if (state.step === STEP.CUSTOM_WEIGHTING_INPUT) {
+    const weights = parseCustomWeighting(trimmed);
+    if (!weights) {
+      await safeSendMessage(from,
+        'Please reply with one "<topic> <percentage>" pair per line, e.g.\nAlgebra 40\nGeometry 60'
+      );
+      return true;
+    }
+
+    const weightingResult = computeBlueprint({
+      grade: state.grade,
+      subject: state.subject,
+      paper: state.paper,
+      totalMarks: state.totalMarks,
+      customWeighting: weights,
+    });
+
+    if (weightingResult.status !== 'OK') {
+      await safeSendMessage(from,
+        `${weightingResult.reason}\n\nPlease reply again with percentages that sum to exactly 100.`
+      );
+      return true;
+    }
+
+    const nextState = { ...state, weighting: weightingResult, step: STEP.ADD_QUESTION, lastActivity: Date.now() };
+    blueprintAuthoringState.set(phoneHash, nextState);
+    await safeSendMessage(from,
+      `${formatWeightingAllocation(weightingResult)}\n\nQuestion 1 — reply as: <topic> | <max marks>\n(e.g. "Common Fractions | 5")`
     );
     return true;
   }
 
   // ── ADD_QUESTION (loop) ──────────────────────────────────────────────
   if (state.step === STEP.ADD_QUESTION) {
+    if (upper === 'CUSTOM') {
+      blueprintAuthoringState.set(phoneHash, { ...state, step: STEP.CUSTOM_WEIGHTING_INPUT, lastActivity: Date.now() });
+      await safeSendMessage(from,
+        'Reply with one "<topic> <percentage>" pair per line, summing to 100, e.g.\nAlgebra 40\nGeometry 60'
+      );
+      return true;
+    }
+
     if (upper === 'DONE') {
       if (state.questions.length === 0) {
         await safeSendMessage(from,
@@ -501,6 +633,10 @@ function describeStatus(state) {
       return `Session status: *${state.title}* — waiting for the term (or SKIP).`;
     case STEP.HEADER_TOTAL_MARKS:
       return `Session status: *${state.title}* — waiting for total marks.`;
+    case STEP.HEADER_PAPER:
+      return `Session status: *${state.title}* — waiting for the paper (1 or 2).`;
+    case STEP.CUSTOM_WEIGHTING_INPUT:
+      return `Session status: *${state.title}* — waiting for custom topic percentages.`;
     case STEP.ADD_QUESTION:
       return `Session status: *${state.title}* — ${state.questions.length} question${state.questions.length === 1 ? '' : 's'} added so far.\n\n${formatQuestionsList(state.questions)}\n\nReply with the next question, or DONE.`;
     case STEP.REVIEW:
