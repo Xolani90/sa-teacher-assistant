@@ -129,9 +129,34 @@ console.log('='.repeat(75));
     commandFnBody.includes("upper === 'STOP'"),
     'handleCommand() still owns the global STOP opt-out branch'
   );
+
+  // handleAssessmentSessionFlow (the actual flow handler) must never be
+  // invoked from inside handleCommand() -- that would bypass the routing
+  // order this whole file guards and let handleCommand() short-circuit a
+  // message an active assessment session should have owned.
   assert(
-    !commandFnBody.includes('handleAssessmentSessionFlow') && !commandFnBody.includes('assessmentSessionState'),
-    'handleAssessmentSessionFlow / assessmentSessionState are not referenced inside handleCommand() (no STOP collision)'
+    !commandFnBody.includes('handleAssessmentSessionFlow'),
+    'handleAssessmentSessionFlow is never called inside handleCommand() (no routing-order bypass)'
+  );
+
+  // The specific "STOP collision" this test's name refers to: the STOP
+  // opt-out branch itself must not consult assessmentSessionState (or any
+  // other flow state) before opting the teacher out -- STOP is a global,
+  // unconditional command. Isolate just the STOP branch (up to its own
+  // `return true;`) rather than the whole handleCommand() body: as of
+  // RC1-H-004 (STATUS) and RC1-H-010/RC1-QMS-001 (QMS), handleCommand()
+  // legitimately performs read-only assessmentSessionState.get() checks
+  // elsewhere in the function to decide whether to defer (return false)
+  // to an active flow's own STATUS/QMS handling -- that is the sanctioned
+  // pattern those fixes introduced, not a STOP collision, so it must not
+  // fail this test.
+  const stopBranchStart = commandFnBody.indexOf("if (upper === 'STOP')");
+  assert(stopBranchStart !== -1, 'STOP branch located inside handleCommand()');
+  const stopBranchEnd = commandFnBody.indexOf('return true;', stopBranchStart);
+  const stopBranchBody = commandFnBody.slice(stopBranchStart, stopBranchEnd === -1 ? undefined : stopBranchEnd);
+  assert(
+    !stopBranchBody.includes('handleAssessmentSessionFlow') && !stopBranchBody.includes('assessmentSessionState'),
+    'STOP branch itself does not reference handleAssessmentSessionFlow / assessmentSessionState (no STOP collision)'
   );
 
   // handleCommand() must run before either assessment-session dispatch call,
