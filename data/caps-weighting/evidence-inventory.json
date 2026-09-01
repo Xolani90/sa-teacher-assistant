@@ -1,0 +1,154 @@
+{
+  "ruleVersion": "2026-08-31.v1",
+  "generatedBy": "manual-evidence-extraction",
+  "sourceNote": "Evidence extracted directly from uploaded CAPS PDFs. Only FET (Grades 10-12) Mathematics contains an explicit, document-stated percentage weighting table for assessment purposes. Intermediate Phase (4-6) and Senior Phase (7-9) documents were inspected and do not contain an equivalent explicit percentage-per-paper assessment weighting table; they contain teaching-time allocations (hours/week, weeks-per-topic) which are CURRICULUM_CONTENT_WEIGHTING, not EXPLICIT_CAPS_WEIGHTING, and must not be used as assessment mark allocation without further teacher confirmation.",
+  "rules": [
+    {
+      "id": "FET-MATH-G10-P1",
+      "phase": "FET",
+      "grade": 10,
+      "subject": "Mathematics",
+      "assessmentType": "formal_exam",
+      "paper": "Paper 1",
+      "classification": "EXPLICIT_CAPS_WEIGHTING",
+      "capsDocument": "Mathematics CAPS Document Grades 10-12.pdf",
+      "pageSection": "Section 2.5, Weighting of Content Areas table; confirmed again in Section 4.4 end-of-year mark distribution table",
+      "totalMarks": 100,
+      "topicWeights": [
+        { "topic": "Algebra and Equations (and inequalities)", "targetMarks": 30, "tolerance": 3 },
+        { "topic": "Patterns and Sequences", "targetMarks": 15, "tolerance": 3 },
+        { "topic": "Finance and Growth", "targetMarks": 10, "tolerance": 3 },
+        { "topic": "Functions and Graphs", "targetMarks": 30, "tolerance": 3 },
+        { "topic": "Probability", "targetMarks": 15, "tolerance": 3 }
+      ],
+      "evidenceWording": "PAPER 1 ... Algebra and Equations (and inequalities) 30±3; Patterns and Sequences 15±3; Finance and Growth 10±3; Functions and Graphs 30±3; Probability 15±3; TOTAL 100",
+      "status": "verified"
+    },
+    {
+      "id": "FET-MATH-G10-P2",
+      "phase": "FET",
+      "grade": 10,
+      "subject": "Mathematics",
+      "assessmentType": "formal_exam",
+      "paper": "Paper 2",
+      "classification": "EXPLICIT_CAPS_WEIGHTING",
+      "capsDocument": "Mathematics CAPS Document Grades 10-12.pdf",
+      "pageSection": "Section 2.5, Weighting of Content Areas table",
+      "totalMarks": 100,
+      "topicWeights": [
+        { "topic": "Statistics", "targetMarks": 15, "tolerance": 3 },
+        { "topic": "Analytical Geometry", "targetMarks": 15, "tolerance": 3 },
+        { "topic": "Trigonometry", "targetMarks": 40, "tolerance": 3 },
+        { "topic": "Euclidean Geometry and Measurement", "targetMarks": 30, "tolerance": 3 }
+      ],
+      "evidenceWording": "PAPER 2 ... Statistics 15±3; Analytical Geometry 15±3; Trigonometry 40±3; Euclidean Geometry and Measurement 30±3; TOTAL 100",
+      "status": "verified"
+    },
+    {
+      "id": "FET-MATH-G11-P1",
+      "phase": "FET",
+      "grade": 11,
+      "subject": "Mathematics",
+      "assessmentType": "formal_exam",
+      "paper": "Paper 1",
+      "classification": "EXPLICIT_CAPS_WEIGHTING",
+      "capsDocument": "Mathematics CAPS Document Grades 10-12.pdf",
+      "pageSection": "Section 2.5; confirmed by Section 4.4 mark distribution table",
+      "totalMarks": 150,
+      "topicWeights": [
+        { "topic": "Algebra and Equations (and inequalities)", "targetMarks": 45, "tolerance": 3 },
+        { "topic": "Patterns and Sequences", "targetMarks": 25, "tolerance": 3 },
+        { "topic": "Finance, growth and decay", "targetMarks": 15, "tolerance": 3 },
+        { "topic": "Functions and Graphs", "targetMarks": 45, "tolerance": 3 },
+        { "topic": "Probability", "targetMarks": 20, "tolerance": 3 }
+      ],
+      "evidenceWording": "Grade 11 column of Section 2.5 Weighting of Content Areas: Algebra 45±3, Patterns 25±3, Finance 15±3, Functions 45±3, Probability 20±3, TOTAL 150",
+      "status": "verified"
+    },
+    {
+      "id": "FET-MATH-G11-P2",
+      "phase": "FET",
+      "grade": 11,
+      "subject": "Mathematics",
+      "assessmentType": "formal_exam",
+      "paper": "Paper 2",
+      "classification": "EXPLICIT_CAPS_WEIGHTING",
+      "capsDocument": "Mathematics CAPS Document Grades 10-12.pdf",
+      "pageSection": "Section 2.5",
+      "totalMarks": 150,
+      "topicWeights": [
+        { "topic": "Statistics", "targetMarks": 20, "tolerance": 3 },
+        { "topic": "Analytical Geometry", "targetMarks": 30, "tolerance": 3 },
+        { "topic": "Trigonometry", "targetMarks": 50, "tolerance": 3 },
+        { "topic": "Euclidean Geometry and Measurement", "targetMarks": 50, "tolerance": 3 }
+      ],
+      "evidenceWording": "Grade 11 column: Statistics 20±3, Analytical Geometry 30±3, Trigonometry 50±3, Euclidean Geometry and Measurement 50±3, TOTAL 150",
+      "status": "verified"
+    },
+    {
+      "id": "FET-MATH-G12-P1",
+      "phase": "FET",
+      "grade": 12,
+      "subject": "Mathematics",
+      "assessmentType": "formal_exam",
+      "paper": "Paper 1",
+      "classification": "EXPLICIT_CAPS_WEIGHTING",
+      "capsDocument": "Mathematics CAPS Document Grades 10-12.pdf",
+      "pageSection": "Section 2.5; also Term 4 Grade 12 pace-setter mark table and final NSC paper spec (Section 4.4/Term 4 table): (25±3) patterns, (35±3) algebra/equations, (35±3) calculus, (25±3) functions and graphs, (15±3) finance growth decay, (15±3) probability — note pace-setter groups differ slightly from Section 2.5 grouping; Section 2.5 values used here as the canonical CAPS table",
+      "totalMarks": 150,
+      "topicWeights": [
+        { "topic": "Algebra and Equations (and inequalities)", "targetMarks": 25, "tolerance": 3 },
+        { "topic": "Patterns and Sequences", "targetMarks": 25, "tolerance": 3 },
+        { "topic": "Finance, growth and decay", "targetMarks": 15, "tolerance": 3 },
+        { "topic": "Functions and Graphs", "targetMarks": 35, "tolerance": 3 },
+        { "topic": "Differential Calculus", "targetMarks": 35, "tolerance": 3 },
+        { "topic": "Probability", "targetMarks": 15, "tolerance": 3 }
+      ],
+      "evidenceWording": "Grade 12 column: Algebra 25±3, Patterns 25±3, Finance 15±3, Functions 35±3, Differential Calculus 35±3, Probability 15±3, TOTAL 150",
+      "status": "verified"
+    },
+    {
+      "id": "FET-MATH-G12-P2",
+      "phase": "FET",
+      "grade": 12,
+      "subject": "Mathematics",
+      "assessmentType": "formal_exam",
+      "paper": "Paper 2",
+      "classification": "EXPLICIT_CAPS_WEIGHTING",
+      "capsDocument": "Mathematics CAPS Document Grades 10-12.pdf",
+      "pageSection": "Section 2.5; also Section 4.5/Term4 final NSC paper spec table (50±3 Euclidean Geometry & Measurement, 40±3 Analytical Geometry, 40±3 Trigonometry, 20±3 Statistics and regression) — consistent with Section 2.5",
+      "totalMarks": 150,
+      "topicWeights": [
+        { "topic": "Statistics", "targetMarks": 20, "tolerance": 3 },
+        { "topic": "Analytical Geometry", "targetMarks": 40, "tolerance": 3 },
+        { "topic": "Trigonometry", "targetMarks": 40, "tolerance": 3 },
+        { "topic": "Euclidean Geometry and Measurement", "targetMarks": 50, "tolerance": 3 }
+      ],
+      "evidenceWording": "Grade 12 column: Statistics 20±3, Analytical Geometry 40±3, Trigonometry 40±3, Euclidean Geometry and Measurement 50±3, TOTAL 150",
+      "status": "verified"
+    }
+  ],
+  "unverified": [
+    {
+      "phase": "Intermediate Phase",
+      "grades": [4, 5, 6],
+      "subject": "Mathematics",
+      "reason": "CAPS_IP_MATHEMATICS_GR_4-6_web.pdf was supplied but does not appear to contain an explicit percentage-based assessment weighting table equivalent to FET Section 2.5. Only teaching-time allocations (hours/week per topic) were confirmed. Classification: CURRICULUM_CONTENT_WEIGHTING at most — NOT auto-usable as EXPLICIT_CAPS_WEIGHTING.",
+      "classification": "UNVERIFIED"
+    },
+    {
+      "phase": "Senior Phase",
+      "grades": [7, 8, 9],
+      "subject": "Mathematics",
+      "reason": "CAPS_SP_MATHEMATICS_GR_7-9.pdf, CAPS_Mathematics_Senior_Phase.pdf, and SENIOR_PHASE_MATHEMATICS_30_AUGUST_2011.pdf were supplied. No explicit percentage-per-paper assessment weighting table equivalent to FET Section 2.5 was confirmed in the inspected content; these documents specify teaching-time allocation and term-by-term topic pacing, which is CURRICULUM_CONTENT_WEIGHTING, not assessment mark allocation.",
+      "classification": "UNVERIFIED"
+    },
+    {
+      "phase": "Foundation Phase",
+      "grades": [1, 2, 3],
+      "subject": "Mathematics",
+      "reason": "CAPS_MATHS_ENGLISH_GR_1-3_FS.pdf supplied; Foundation Phase CAPS does not define paper-based percentage assessment weighting in the way FET does (assessment in this phase is task/rubric-based, not percentage-per-topic exam papers). No rule authored.",
+      "classification": "UNVERIFIED"
+    }
+  ]
+}
