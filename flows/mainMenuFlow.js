@@ -24,7 +24,7 @@
 
 'use strict';
 
-const { openMenu, consumeNumericReply, closeMenu } = require('../services/navigationService');
+const { openMenu, getOpenMenu, consumeNumericReply, closeMenu } = require('../services/navigationService');
 const {
   MENTAL_MATHS_GRADE_MENU_ID,
   MENTAL_MATHS_FAMILY_MENU_ID,
@@ -116,6 +116,26 @@ const MENUS_BY_ID = {
   [ACCOUNT_MENU_ID]: ACCOUNT_MENU_OPTIONS,
 };
 
+// RC1-PRINT fix: the set of menu ids this flow is actually allowed to
+// consume a numeric reply for. NavigationService's menu store holds at
+// most one open menu per phone, shared across every flow that uses
+// openMenu()/consumeNumericReply() (assessmentSession's COMPLETE_MENU,
+// blueprintAuthoring's PUBLISHED_MENU, reflection/growthPlan's correction
+// menus, etc.) — consumeNumericReply() itself has no concept of which
+// flow "owns" the currently open menu, it just matches whatever is open.
+// Before this fix, handleMainMenuFlow() called consumeNumericReply()
+// unconditionally on every message (it runs before the alreadyMidFlow
+// gate — see the dispatch-order note at the top of this file), so a
+// numeric reply meant for another flow's open menu (e.g. "2" for
+// COMPLETE_MENU's "Print a blueprint question paper") was consumed and
+// destroyed here first. None of this flow's own menuId branches matched
+// the foreign menuId, so the reply fell through to `return false`, but
+// the menu was already gone — the real flow's own consumeNumericReply()
+// call moments later found no_menu_open and re-rendered its menu instead
+// of acting on the choice. Same bug class as RC1-H-007/RC1-H-013, just
+// for this flow's unconditional (non-gated) call site.
+const OWN_MENU_IDS = new Set([...Object.keys(MENUS_BY_ID), ...MENTAL_MATHS_MENU_IDS]);
+
 function renderMenuText(menuId, name) {
   const options = MENUS_BY_ID[menuId];
   const lines = [];
@@ -203,6 +223,18 @@ async function handleMainMenuFlow(from, text, deps) {
   if (isMainMenuTrigger(upper)) {
     await sendMainMenu(from, deps);
     return true;
+  }
+
+  // RC1-PRINT fix: peek at whatever menu is currently open WITHOUT
+  // consuming it. If it belongs to a different flow (e.g.
+  // assessmentSession's COMPLETE_MENU or blueprintAuthoring's
+  // PUBLISHED_MENU), this is not our concern — leave it untouched so
+  // that flow's own consumeNumericReply() call gets the first (and only)
+  // chance to act on it. See OWN_MENU_IDS above for why this check is
+  // necessary at all.
+  const openMenuState = getOpenMenu(phoneHash);
+  if (openMenuState && !OWN_MENU_IDS.has(openMenuState.id)) {
+    return false;
   }
 
   const attempt = consumeNumericReply(phoneHash, text);
