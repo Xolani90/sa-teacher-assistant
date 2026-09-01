@@ -461,9 +461,13 @@ app.use((err, _req, res, _next) => {
 });
 
 // ── PDF cleanup scheduler (hourly) ────────────────────────────────────────
+// .unref() for the same reason as the renewal-reminder interval below: this
+// background timer must never be the thing keeping the process alive on its
+// own (e.g. in a script/test that requires server.js and expects to exit
+// cleanly once its own work — and any real HTTP server it started — is done).
 setInterval(() => {
   try { cleanupOldPdfs(); } catch (e) { console.error('[CLEANUP]', e.message); }
-}, 60 * 60 * 1000);
+}, 60 * 60 * 1000).unref();
 
 // ── Pro renewal reminder scheduler (daily) ────────────────────────────────
 // Queries for Pro teachers expiring within 3 days.
@@ -524,43 +528,63 @@ async function sendRenewalReminders() {
 // Run once at startup (catches any teachers who expired while server was down)
 // then every 24 hours.
 sendRenewalReminders();
-setInterval(sendRenewalReminders, 24 * 60 * 60 * 1000);
+// .unref() so this background timer never keeps the Node process alive by
+// itself — without it, any script that requires server.js (e.g. route-level
+// tests that create the app in-process) hangs forever after calling
+// server.close(), because this interval is the only thing left on the event
+// loop. Production behavior is unchanged: the timer still fires normally for
+// as long as anything else (the HTTP server) is keeping the process alive.
+setInterval(sendRenewalReminders, 24 * 60 * 60 * 1000).unref();
 
 // ── Start ──────────────────────────────────────────────────────────────────
-const PORT = parseInt(process.env.PORT || '3000', 10);
-const server = app.listen(PORT, '0.0.0.0', () => {
-  console.log(`\n[SERVER] ✓ SA Teacher Assistant running on 0.0.0.0:${PORT}`);
-  console.log(`[SERVER]   WhatsApp webhook: POST /webhook`);
-  console.log(`[SERVER]   Yoco webhook:     POST /payment/webhook`);
-  console.log(`[SERVER]   Health:           GET  /\n`);
-});
-
-// ── Startup/shutdown diagnostics ────────────────────────────────────────────
-// Added to debug a Render deploy where the log showed a successful
-// app.listen() callback but Render's port-scan still reported "no open
-// ports detected" minutes later. These handlers make it visible if the
-// process exits, receives a signal, or hits an unhandled error/rejection
-// after startup, rather than the process just going silent.
-process.on('exit', (code) => {
-  console.log('[SERVER] Process exiting:', code);
-});
-
-process.on('uncaughtException', (err) => {
-  console.error('[SERVER] Uncaught exception:', err);
-});
-
-process.on('unhandledRejection', (err) => {
-  console.error('[SERVER] Unhandled rejection:', err);
-});
-
-// ── Graceful shutdown ───────────────────────────────────────────────────────
-process.on('SIGTERM', () => {
-  console.log('[SERVER] SIGTERM received — shutting down gracefully');
-  server.close(() => {
-    console.log('[SERVER] HTTP server closed');
-    process.exit(0);
+// Guarded by require.main === module so that requiring this file from
+// elsewhere (e.g. route-level tests doing `const app = require('../server');
+// const server = app.listen(0);`) gets ONLY the Express app, not a second,
+// real server silently bound to the actual PORT/0.0.0.0 as a side effect of
+// the require. Previously this block ran unconditionally, so every test that
+// required server.js started a live listener on port 3000 that the test had
+// no reference to and therefore never closed — that leftover listener (not
+// the PDF-cleanup/renewal-reminder intervals) was what kept those test
+// processes alive indefinitely after their assertions finished, hanging
+// `npm test`. Production entry (`node server.js` / `npm start`) is
+// unaffected: require.main === module is true there, so this block still
+// runs exactly as before.
+if (require.main === module) {
+  const PORT = parseInt(process.env.PORT || '3000', 10);
+  const server = app.listen(PORT, '0.0.0.0', () => {
+    console.log(`\n[SERVER] ✓ SA Teacher Assistant running on 0.0.0.0:${PORT}`);
+    console.log(`[SERVER]   WhatsApp webhook: POST /webhook`);
+    console.log(`[SERVER]   Yoco webhook:     POST /payment/webhook`);
+    console.log(`[SERVER]   Health:           GET  /\n`);
   });
-  setTimeout(() => process.exit(1), 10000); // Force exit after 10s
-});
+
+  // ── Startup/shutdown diagnostics ──────────────────────────────────────────
+  // Added to debug a Render deploy where the log showed a successful
+  // app.listen() callback but Render's port-scan still reported "no open
+  // ports detected" minutes later. These handlers make it visible if the
+  // process exits, receives a signal, or hits an unhandled error/rejection
+  // after startup, rather than the process just going silent.
+  process.on('exit', (code) => {
+    console.log('[SERVER] Process exiting:', code);
+  });
+
+  process.on('uncaughtException', (err) => {
+    console.error('[SERVER] Uncaught exception:', err);
+  });
+
+  process.on('unhandledRejection', (err) => {
+    console.error('[SERVER] Unhandled rejection:', err);
+  });
+
+  // ── Graceful shutdown ─────────────────────────────────────────────────────
+  process.on('SIGTERM', () => {
+    console.log('[SERVER] SIGTERM received — shutting down gracefully');
+    server.close(() => {
+      console.log('[SERVER] HTTP server closed');
+      process.exit(0);
+    });
+    setTimeout(() => process.exit(1), 10000); // Force exit after 10s
+  });
+}
 
 module.exports = app;

@@ -38,7 +38,9 @@ function pruneExpiredSessions() {
 }
 
 pruneExpiredSessions();
-setInterval(pruneExpiredSessions, 60 * 60 * 1000);
+// .unref(): same reasoning as utils/deduplication.js — this module-scope
+// timer must never by itself keep a requiring process alive.
+setInterval(pruneExpiredSessions, 60 * 60 * 1000).unref();
 
 /**
  * A persistent Map-like session store for a single session type

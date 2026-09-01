@@ -20,7 +20,11 @@ const MAX_ENTRIES = 1000;
 // Map<messageId, expiresAt>
 const cache = new Map();
 
-// Periodic cleanup: every 60 seconds, delete expired entries
+// Periodic cleanup: every 60 seconds, delete expired entries.
+// .unref() so this module-scope timer (which starts the moment anything
+// requires this file) never by itself keeps a process alive — e.g. a
+// script or test that requires server.js transitively requires this file
+// and would otherwise hang after its own work is done.
 setInterval(() => {
   const now = Date.now();
   for (const [id, expiresAt] of cache) {
@@ -28,7 +32,7 @@ setInterval(() => {
       cache.delete(id);
     }
   }
-}, 60 * 1000);
+}, 60 * 1000).unref();
 
 /**
  * Returns true if this message ID has been seen before (duplicate).
