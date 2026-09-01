@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { to: '/classes', label: 'Classes', icon: '▤' },
   { to: '/resources', label: 'Lesson Plans', icon: '▦' },
   { to: '/observations', label: 'Observations', icon: '◎' },
+  { to: '/incidents', label: 'Incident Book', icon: '⚠' },
   { to: '/qms', label: 'QMS Readiness', icon: '✓' },
 ];
 

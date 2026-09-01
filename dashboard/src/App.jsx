@@ -13,6 +13,8 @@ import ResourcesWorkspace from './pages/ResourcesWorkspace';
 import ResourceDetail from './pages/ResourceDetail';
 import AssessmentDetail from './pages/AssessmentDetail';
 import QMS from './pages/QMS';
+import IncidentsWorkspace from './pages/IncidentsWorkspace';
+import IncidentDetail from './pages/IncidentDetail';
 
 export default function App() {
   return (
@@ -98,6 +100,22 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <QMS />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/incidents"
+              element={
+                <ProtectedRoute>
+                  <IncidentsWorkspace />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/incidents/:incidentId"
+              element={
+                <ProtectedRoute>
+                  <IncidentDetail />
                 </ProtectedRoute>
               }
             />
