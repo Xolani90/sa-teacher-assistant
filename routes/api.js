@@ -568,6 +568,209 @@ function createDeleteReflectionHandler({ deleteReflection }) {
 }
 
 /**
+ * Growth Plans routes (PR29/ADR-011 §2, topicId per PR32/ADR-013 §4.3) —
+ * thin wrappers over the pre-existing services/growthPlanService.js,
+ * the SAME service flows/growthPlanFlow.js's WhatsApp NEW GOAL flow
+ * calls. Mirrors the reflections handlers above exactly (dependency
+ * injection, no-existence-oracle 404 convention, soft-delete 204).
+ * No new business logic and no second growth-plan storage model.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, options?:Object) => Object[]} deps.listGrowthPlans
+ * @returns {(req, res) => void}
+ */
+function createGetGrowthPlansHandler({ listGrowthPlans }) {
+  /**
+   * GET /api/growth-plans
+   * Optional query params: ?term=<n>, ?status=<status>, matching
+   * listGrowthPlans()'s own { term, status } options.
+   *
+   * @returns 200 { growthPlans: [...] } — scoped to req.teacher.phoneHash,
+   *          most recent first, excluding soft-deleted rows
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetGrowthPlans(req, res) {
+    const termParam = req.query.term;
+    const term = termParam !== undefined ? Number(termParam) : null;
+    const status = req.query.status !== undefined ? req.query.status : null;
+
+    let growthPlans;
+    try {
+      growthPlans = listGrowthPlans(req.teacher.phoneHash, { term, status });
+    } catch (err) {
+      console.error('[API] listGrowthPlans failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+    return res.status(200).json({ growthPlans: growthPlans || [] });
+  };
+}
+
+/**
+ * Builds the GET /growth-plans/:id handler — thin wrapper around
+ * growthPlanService.getGrowthPlan(phoneHash, id).
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, id:number) => Object|null} deps.getGrowthPlan
+ * @returns {(req, res) => void}
+ */
+function createGetGrowthPlanDetailHandler({ getGrowthPlan }) {
+  /**
+   * GET /api/growth-plans/:id
+   *
+   * @returns 200 { growthPlan } on success
+   * @returns 400 for a non-positive-integer :id
+   * @returns 404 if the growth plan doesn't exist, isn't owned by this
+   *          teacher, or is already soft-deleted
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetGrowthPlanDetail(req, res) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid growth plan id' });
+    }
+
+    let growthPlan;
+    try {
+      growthPlan = getGrowthPlan(req.teacher.phoneHash, id);
+    } catch (err) {
+      console.error('[API] getGrowthPlan failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!growthPlan) {
+      return res.status(404).json({ error: 'Growth plan not found' });
+    }
+
+    return res.status(200).json({ growthPlan });
+  };
+}
+
+/**
+ * Builds the POST /growth-plans handler — thin wrapper around
+ * growthPlanService.createGrowthPlan(phoneHash, params).
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, params:Object) => Object} deps.createGrowthPlan
+ * @returns {(req, res) => void}
+ */
+function createPostGrowthPlanHandler({ createGrowthPlan }) {
+  /**
+   * POST /api/growth-plans
+   * Body: { goalText, term?, topicId, status? }
+   *
+   * @returns 201 { growthPlan } on success
+   * @returns 400 if goalText/topicId/status fail the service's own
+   *          validation (missing goalText, invalid topicId, bad status)
+   * @returns 500 if the underlying service throws for any other reason
+   */
+  return function handlePostGrowthPlan(req, res) {
+    const { goalText, term, topicId, status } = req.body || {};
+
+    let growthPlan;
+    try {
+      growthPlan = createGrowthPlan(req.teacher.phoneHash, { goalText, term, topicId, status });
+    } catch (err) {
+      if (/^createGrowthPlan:/.test(err.message)) {
+        return res.status(400).json({ error: err.message });
+      }
+      console.error('[API] createGrowthPlan failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    return res.status(201).json({ growthPlan });
+  };
+}
+
+/**
+ * Builds the PATCH /growth-plans/:id handler — thin wrapper around
+ * growthPlanService.updateGrowthPlan(phoneHash, id, params). Supports
+ * partial updates, so the dashboard can PATCH a status-only body for
+ * the "mark complete" action without resubmitting goalText/topicId.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, id:number, params:Object) => Object|null} deps.updateGrowthPlan
+ * @returns {(req, res) => void}
+ */
+function createPatchGrowthPlanHandler({ updateGrowthPlan }) {
+  /**
+   * PATCH /api/growth-plans/:id
+   * Body: any subset of { goalText, topicId, status }
+   *
+   * @returns 200 { growthPlan } on success
+   * @returns 400 for a non-positive-integer :id, or invalid goalText/topicId/status
+   * @returns 404 if the growth plan doesn't exist, isn't owned by this
+   *          teacher, or is already soft-deleted
+   * @returns 500 if the underlying service throws for any other reason
+   */
+  return function handlePatchGrowthPlan(req, res) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid growth plan id' });
+    }
+
+    const { goalText, topicId, status } = req.body || {};
+
+    let growthPlan;
+    try {
+      growthPlan = updateGrowthPlan(req.teacher.phoneHash, id, { goalText, topicId, status });
+    } catch (err) {
+      if (/^updateGrowthPlan:/.test(err.message)) {
+        return res.status(400).json({ error: err.message });
+      }
+      console.error('[API] updateGrowthPlan failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!growthPlan) {
+      return res.status(404).json({ error: 'Growth plan not found' });
+    }
+
+    return res.status(200).json({ growthPlan });
+  };
+}
+
+/**
+ * Builds the DELETE /growth-plans/:id handler — thin wrapper around
+ * growthPlanService.deleteGrowthPlan(phoneHash, id) (soft delete,
+ * ADR-011 §7 — never a hard DELETE).
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, id:number) => boolean} deps.deleteGrowthPlan
+ * @returns {(req, res) => void}
+ */
+function createDeleteGrowthPlanHandler({ deleteGrowthPlan }) {
+  /**
+   * DELETE /api/growth-plans/:id
+   *
+   * @returns 204 on success (no body)
+   * @returns 400 for a non-positive-integer :id
+   * @returns 404 if the growth plan doesn't exist, isn't owned by this
+   *          teacher, or is already soft-deleted
+   * @returns 500 if the underlying service throws
+   */
+  return function handleDeleteGrowthPlan(req, res) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid growth plan id' });
+    }
+
+    let deleted;
+    try {
+      deleted = deleteGrowthPlan(req.teacher.phoneHash, id);
+    } catch (err) {
+      console.error('[API] deleteGrowthPlan failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!deleted) {
+      return res.status(404).json({ error: 'Growth plan not found' });
+    }
+
+    return res.status(204).send();
+  };
+}
+
+/**
  * @param {Object} deps
  * @param {() => Array<{id:string,label:string,description:string,order:number}>} deps.listTopicsOrdered
  * @returns {(req, res) => void}
@@ -999,6 +1202,7 @@ const { getTeacherClasses, getSavedResources, getSavedResource } = require('../s
 const { getActiveRosterCounts } = require('../services/learnerRosterService');
 const { getStatusSnapshot } = require('../services/tseEvidenceService');
 const { listReflections, createReflection, updateReflection, deleteReflection } = require('../services/reflectionService');
+const { listGrowthPlans, getGrowthPlan, createGrowthPlan, updateGrowthPlan, deleteGrowthPlan } = require('../services/growthPlanService');
 const { getClassDetail } = require('../services/classDetailService');
 const { getClassSnapshot } = require('../services/classSnapshotService');
 const { getClass } = require('../services/teacherWorkspaceService');
@@ -1250,6 +1454,27 @@ router.delete(
 );
 
 router.get(
+  '/growth-plans',
+  createGetGrowthPlansHandler({ listGrowthPlans })
+);
+router.get(
+  '/growth-plans/:id',
+  createGetGrowthPlanDetailHandler({ getGrowthPlan })
+);
+router.post(
+  '/growth-plans',
+  createPostGrowthPlanHandler({ createGrowthPlan })
+);
+router.patch(
+  '/growth-plans/:id',
+  createPatchGrowthPlanHandler({ updateGrowthPlan })
+);
+router.delete(
+  '/growth-plans/:id',
+  createDeleteGrowthPlanHandler({ deleteGrowthPlan })
+);
+
+router.get(
   '/qms/topics',
   createGetQmsTopicsHandler({ listTopicsOrdered })
 );
@@ -1294,5 +1519,10 @@ module.exports.__testExports = {
   createPostReflectionHandler,
   createPatchReflectionHandler,
   createDeleteReflectionHandler,
+  createGetGrowthPlansHandler,
+  createGetGrowthPlanDetailHandler,
+  createPostGrowthPlanHandler,
+  createPatchGrowthPlanHandler,
+  createDeleteGrowthPlanHandler,
   createGetQmsTopicsHandler,
 };

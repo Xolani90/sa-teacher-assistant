@@ -7,6 +7,7 @@ import { Card, ErrorBanner, Spinner, SectionHeader, Pill } from '../components/u
 import QMSSummaryBanner from '../components/qms/QMSSummaryBanner';
 import QMSCategoryCard from '../components/qms/QMSCategoryCard';
 import ReflectionPanel from '../components/qms/ReflectionPanel';
+import GrowthPlanPanel from '../components/qms/GrowthPlanPanel';
 
 const STATUS_LOADING = 'loading';
 const STATUS_READY = 'ready';
@@ -39,17 +40,20 @@ export default function QMS() {
   const [error, setError] = useState(null);
   const [snapshot, setSnapshot] = useState(null);
   const [reflections, setReflections] = useState([]);
+  const [growthPlans, setGrowthPlans] = useState([]);
 
   const load = useCallback(async () => {
     setStatus(STATUS_LOADING);
     setError(null);
     try {
-      const [snapshotData, reflectionsData] = await Promise.all([
+      const [snapshotData, reflectionsData, growthPlansData] = await Promise.all([
         authedFetch('/api/tse/status'),
         authedFetch('/api/reflections'),
+        authedFetch('/api/growth-plans'),
       ]);
       setSnapshot(snapshotData);
       setReflections(reflectionsData.reflections || []);
+      setGrowthPlans(growthPlansData.growthPlans || []);
       setStatus(STATUS_READY);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong loading QMS readiness.');
@@ -118,6 +122,8 @@ export default function QMS() {
       {gaps.length > 0 && <GapsSection gaps={gaps} />}
 
       <ReflectionPanel reflections={reflections} onChange={load} />
+
+      <GrowthPlanPanel growthPlans={growthPlans} onChange={load} />
     </Layout>
   );
 }

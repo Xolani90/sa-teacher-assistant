@@ -24,6 +24,8 @@ const REFLECTIONS_RESPONSE = {
   reflections: [{ id: 'r1', term: 2, createdAt: '2026-05-10 09:00:00', content: 'Good lesson today.' }],
 };
 
+const GROWTH_PLANS_RESPONSE = { growthPlans: [] };
+
 function renderQMS() {
   return renderWithProviders(<QMS />, { authenticated: true });
 }
@@ -39,6 +41,7 @@ describe('QMS page', () => {
     mockFetchRoutes({
       '/tse/status': { body: SNAPSHOT },
       '/reflections': { body: REFLECTIONS_RESPONSE },
+      '/growth-plans': { body: GROWTH_PLANS_RESPONSE },
     });
     renderQMS();
 
@@ -61,6 +64,7 @@ describe('QMS page', () => {
     mockFetchRoutes({
       '/tse/status': { body: { ...SNAPSHOT, gaps: [] } },
       '/reflections': { body: { reflections: [] } },
+      '/growth-plans': { body: GROWTH_PLANS_RESPONSE },
     });
     renderQMS();
 
@@ -72,6 +76,7 @@ describe('QMS page', () => {
     mockFetchRoutes({
       '/tse/status': { body: { ...SNAPSHOT, strength: null, gaps: [] } },
       '/reflections': { body: { reflections: [] } },
+      '/growth-plans': { body: GROWTH_PLANS_RESPONSE },
     });
     renderQMS();
 
@@ -83,6 +88,7 @@ describe('QMS page', () => {
     mockFetchRoutes({
       '/tse/status': { body: SNAPSHOT },
       '/reflections': { body: { error: 'Reflections service down' }, ok: false, status: 503 },
+      '/growth-plans': { body: GROWTH_PLANS_RESPONSE },
     });
     renderQMS();
 
@@ -97,6 +103,7 @@ describe('QMS page', () => {
     const fetchMock = mockFetchRoutes({
       '/tse/status': { body: { error: 'Snapshot down' }, ok: false, status: 500 },
       '/reflections': { body: REFLECTIONS_RESPONSE },
+      '/growth-plans': { body: GROWTH_PLANS_RESPONSE },
     });
     const user = userEvent.setup();
     renderQMS();
