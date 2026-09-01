@@ -6,6 +6,7 @@ import logo from '../assets/logo.png';
 const NAV_ITEMS = [
   { to: '/app', label: 'Overview', icon: '◆', end: true },
   { to: '/classes', label: 'Classes', icon: '▤' },
+  { to: '/resources', label: 'Lesson Plans', icon: '▦' },
   { to: '/observations', label: 'Observations', icon: '◎' },
   { to: '/qms', label: 'QMS Readiness', icon: '✓' },
 ];

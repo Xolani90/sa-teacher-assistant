@@ -104,6 +104,168 @@ function createGetInterventionPlanHandler({ getLearnerById, getLearnerInterventi
 }
 
 /**
+ * Builds the GET /resources handler (Feature 2, dashboard integration).
+ *
+ * Exposes services/teacherWorkspaceService.js's existing
+ * getSavedResources(phoneHash, filters) — unchanged, no new
+ * persistence/generation logic introduced here. This is the SAME table
+ * (saved_resources) the WhatsApp SAVE command writes to
+ * (core/commandHandler.js) and the SAME rows Feature 2's lesson-plan
+ * homework grounding persists into — the dashboard reads the one
+ * authoritative record, it never generates or stores a resource of its
+ * own.
+ *
+ * List view intentionally omits `content` and `homework` (potentially
+ * long free text) to keep the list payload light; the full body is
+ * fetched per-resource via GET /resources/:id below when a teacher
+ * opens one.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, filters:Object) => Object[]} deps.getSavedResources
+ * @returns {(req, res) => void}
+ */
+function createGetResourcesHandler({ getSavedResources }) {
+  /**
+   * GET /api/resources?resourceType=&grade=&subject=
+   *
+   * @returns 200 { resources: [...] } — scoped to req.teacher.phoneHash;
+   *          an empty array for a teacher with none, not an error
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetResources(req, res) {
+    const filters = {};
+    if (typeof req.query.resourceType === 'string' && req.query.resourceType.trim() !== '') {
+      filters.resourceType = req.query.resourceType;
+    }
+    if (req.query.grade !== undefined) {
+      const g = Number(req.query.grade);
+      if (Number.isInteger(g)) filters.grade = g;
+    }
+    if (typeof req.query.subject === 'string' && req.query.subject.trim() !== '') {
+      filters.subject = req.query.subject;
+    }
+
+    let resources;
+    try {
+      resources = getSavedResources(req.teacher.phoneHash, filters);
+    } catch (err) {
+      console.error('[API] getSavedResources failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    return res.status(200).json({
+      resources: (resources || []).map((r) => ({
+        id: r.id,
+        resourceType: r.resource_type,
+        title: r.title,
+        grade: r.grade,
+        subject: r.subject,
+        topic: r.topic,
+        createdAt: r.created_at,
+      })),
+    });
+  };
+}
+
+/**
+ * Parses a saved_resources row's `metadata` TEXT column (JSON, written by
+ * services/teacherWorkspaceService.js#saveResource — see
+ * core/commandHandler.js's SAVE handler for what it contains) back into
+ * an object. Never throws: a malformed/legacy row (pre-dates a metadata
+ * field, or predates Feature 2's `homework` key entirely) degrades to
+ * `{}` rather than 500ing the whole request.
+ *
+ * @param {{ metadata?: string }} row
+ * @returns {Object}
+ */
+function parseResourceMetadata(row) {
+  if (!row || !row.metadata) return {};
+  try {
+    const parsed = JSON.parse(row.metadata);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Builds the GET /resources/:id handler (Feature 2, dashboard
+ * integration) — single saved resource, including the full generated
+ * content and, for a lesson plan, the exact homework text
+ * core/generationPipeline.js persisted at generation time.
+ *
+ * Ownership: getSavedResource(resourceId, phoneHash) — see
+ * services/teacherWorkspaceService.js — scopes BOTH the id and the
+ * phone_hash in a single SQL WHERE clause, so a resourceId belonging to
+ * a different teacher returns null exactly like a non-existent id does.
+ * This handler returns an identical 404 for both cases (same convention
+ * as every other ownership-scoped route in this file) — a caller can
+ * never use the response to tell "wrong owner" apart from "doesn't
+ * exist", and can never bypass ownership by any means, since the
+ * teacher identity comes from req.teacher.phoneHash (populated by
+ * requireTeacherAuth from the verified JWT), never from the request URL,
+ * query, or body.
+ *
+ * `homework` here is read verbatim from metadata.homework — the same
+ * string core/generationPipeline.js extracted and
+ * core/commandHandler.js persisted at SAVE time. This handler performs
+ * no generation, re-extraction, or AI call of any kind.
+ *
+ * @param {Object} deps
+ * @param {(resourceId:number, phoneHash:string) => Object|null} deps.getSavedResource
+ * @returns {(req, res) => void}
+ */
+function createGetResourceDetailHandler({ getSavedResource }) {
+  /**
+   * GET /api/resources/:id
+   *
+   * @returns 400 if :id is not a positive integer
+   * @returns 404 if no resource with that id exists, OR it belongs to a
+   *          different teacher (identical response either way)
+   * @returns 200 the resource, including content/homework/metadata
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetResourceDetail(req, res) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Resource id must be a positive integer.' });
+    }
+
+    let resource;
+    try {
+      resource = getSavedResource(id, req.teacher.phoneHash);
+    } catch (err) {
+      console.error('[API] getSavedResource failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!resource) {
+      return res.status(404).json({ error: 'Resource not found.' });
+    }
+
+    const metadata = parseResourceMetadata(resource);
+
+    return res.status(200).json({
+      id: resource.id,
+      resourceType: resource.resource_type,
+      title: resource.title,
+      content: resource.content,
+      grade: resource.grade,
+      subject: resource.subject,
+      topic: resource.topic,
+      term: metadata.term ?? null,
+      atpTopic: metadata.atpTopic ?? null,
+      // Feature 2: the exact persisted homework, verbatim — null for
+      // every resource type other than lessonPlan, and null for a
+      // lesson plan saved before Feature 2 shipped (no retroactive
+      // backfill; those rows simply have no metadata.homework key).
+      homework: metadata.homework ?? null,
+      createdAt: resource.created_at,
+    });
+  };
+}
+
+/**
  * Builds the GET /classes handler (ADR-008, PR18).
  *
  * First teacher-facing API endpoint beyond the intervention-plan route.
@@ -833,7 +995,7 @@ function createGetAssessmentPdfHandler({ getAssessmentDetail, generateBlueprintA
 // Real wiring — the only place this file touches actual services.
 const { getLearnerById, getTeacherLearners } = require('../services/learnerRepository');
 const { getLearnerInterventionPlan } = require('../services/interventionService');
-const { getTeacherClasses } = require('../services/teacherWorkspaceService');
+const { getTeacherClasses, getSavedResources, getSavedResource } = require('../services/teacherWorkspaceService');
 const { getActiveRosterCounts } = require('../services/learnerRosterService');
 const { getStatusSnapshot } = require('../services/tseEvidenceService');
 const { listReflections, createReflection, updateReflection, deleteReflection } = require('../services/reflectionService');
@@ -856,6 +1018,15 @@ router.get(
 router.get(
   '/classes',
   createGetClassesHandler({ getTeacherClasses, getActiveRosterCounts })
+);
+
+router.get(
+  '/resources',
+  createGetResourcesHandler({ getSavedResources })
+);
+router.get(
+  '/resources/:id',
+  createGetResourceDetailHandler({ getSavedResource })
 );
 
 router.get(
@@ -926,6 +1097,8 @@ module.exports = router;
 module.exports.__testExports = {
   createGetInterventionPlanHandler,
   createGetClassesHandler,
+  createGetResourcesHandler,
+  createGetResourceDetailHandler,
   createGetClassDetailHandler,
   createGetClassSnapshotHandler,
   createGetLearnerDetailHandler,

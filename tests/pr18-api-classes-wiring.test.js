@@ -68,8 +68,8 @@ console.log('\n── Section 2: delegates to the existing service, unchanged �
     "routes/api.js requires services/teacherWorkspaceService"
   );
   assert(
-    /const\s*\{\s*getTeacherClasses\s*\}\s*=\s*require\(['"]\.\.\/services\/teacherWorkspaceService['"]\)/.test(apiSrc),
-    'routes/api.js destructures getTeacherClasses from teacherWorkspaceService (not a locally-defined duplicate)'
+    /const\s*\{[^}]*\bgetTeacherClasses\b[^}]*\}\s*=\s*require\(['"]\.\.\/services\/teacherWorkspaceService['"]\)/.test(apiSrc),
+    'routes/api.js destructures getTeacherClasses from teacherWorkspaceService (not a locally-defined duplicate) — tolerant of other names destructured alongside it on the same require() line (e.g. Feature 2\'s getSavedResources/getSavedResource, also from teacherWorkspaceService)'
   );
   assert(
     /function\s+getTeacherClasses\s*\(\s*phoneHash\s*\)/.test(workspaceServiceSrc),
