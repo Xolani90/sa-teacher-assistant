@@ -1661,7 +1661,7 @@ const { getAssessmentDetail } = require('../services/assessmentDetailService');
 const { generateBlueprintAssessmentPdf } = require('../services/pdfService');
 const { buildPdfUrl } = require('../core/generationPipeline');
 const { listTopicsOrdered } = require('../utils/qmsTopics');
-const { createIncident, getIncident, listIncidents, updateIncident } = require('../services/incidentService');
+const { createIncident, getIncident, listIncidents, updateIncident, deleteIncident } = require('../services/incidentService');
 
 /**
  * Feature 3 — Teacher Incident Book API. Same shape/conventions as the
@@ -1823,6 +1823,43 @@ function createPatchIncidentHandler({ updateIncident }) {
   };
 }
 
+/**
+ * Builds the DELETE /incidents/:id handler (Phase 6 continuation —
+ * incident lifecycle closure), mirroring createDeleteReflectionHandler's
+ * shape exactly: id validation, ownership-scoped service call, no
+ * existence oracle beyond the standard 404.
+ */
+function createDeleteIncidentHandler({ deleteIncident }) {
+  /**
+   * DELETE /api/incidents/:id
+   *
+   * @returns 204 on success (no body)
+   * @returns 400 for a non-positive-integer :id
+   * @returns 404 if the incident doesn't exist or isn't owned by this teacher
+   * @returns 500 if the underlying service throws
+   */
+  return function handleDeleteIncident(req, res) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid incident id' });
+    }
+
+    let deleted;
+    try {
+      deleted = deleteIncident(req.teacher.phoneHash, id);
+    } catch (err) {
+      console.error('[API] deleteIncident failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!deleted) {
+      return res.status(404).json({ error: 'Incident not found' });
+    }
+
+    return res.status(204).send();
+  };
+}
+
 router.get(
   '/learners/:learnerId/intervention-plan',
   createGetInterventionPlanHandler({ getLearnerById, getLearnerInterventionPlan })
@@ -1976,6 +2013,10 @@ router.patch(
   '/incidents/:id',
   createPatchIncidentHandler({ updateIncident })
 );
+router.delete(
+  '/incidents/:id',
+  createDeleteIncidentHandler({ deleteIncident })
+);
 
 module.exports = router;
 module.exports.__testExports = {
@@ -1983,6 +2024,7 @@ module.exports.__testExports = {
   createGetIncidentDetailHandler,
   createPostIncidentHandler,
   createPatchIncidentHandler,
+  createDeleteIncidentHandler,
   createGetInterventionPlanHandler,
   createGetClassesHandler,
   createPatchClassHandler,

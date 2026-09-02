@@ -19,6 +19,7 @@ const {
   createGetIncidentDetailHandler,
   createPostIncidentHandler,
   createPatchIncidentHandler,
+  createDeleteIncidentHandler,
 } = require('../routes/api').__testExports;
 
 let passed = 0;
@@ -40,8 +41,10 @@ function mockRes() {
   const res = {
     statusCode: 200,
     body: undefined,
+    sent: false,
     status(code) { this.statusCode = code; return this; },
     json(payload) { this.body = payload; return this; },
+    send() { this.sent = true; return this; },
   };
   return res;
 }
@@ -195,6 +198,52 @@ console.log('\n── PATCH /incidents/:id ────────────�
   const res = mockRes();
   handler(mockReq('hash_owner', { params: { id: 'abc' }, body: {} }), res);
   test('non-numeric id responds 400', () => assert.strictEqual(res.statusCode, 400));
+}
+
+// ── DELETE /incidents/:id ────────────────────────────────────────────────
+console.log('\n── DELETE /incidents/:id ─────────────────────────────────');
+{
+  const handler = createDeleteIncidentHandler({ deleteIncident: () => true });
+  const res = mockRes();
+  handler(mockReq('hash_owner', { params: { id: '5' } }), res);
+  test('responds 204 on success', () => {
+    assert.strictEqual(res.statusCode, 204);
+    assert.strictEqual(res.sent, true);
+  });
+}
+{
+  const handler = createDeleteIncidentHandler({ deleteIncident: () => false });
+  const res = mockRes();
+  handler(mockReq('hash_owner', { params: { id: '5' } }), res);
+  test('false (not found OR wrong owner) maps to 404', () => assert.strictEqual(res.statusCode, 404));
+}
+{
+  let seenPhoneHash = null;
+  const handler = createDeleteIncidentHandler({
+    deleteIncident: (phoneHash, id) => { seenPhoneHash = phoneHash; return phoneHash === 'hash_owner'; },
+  });
+  const resAttacker = mockRes();
+  handler(mockReq('hash_attacker', { params: { id: '5' } }), resAttacker);
+  test('another teacher cannot DELETE this incident (404, not a mutation)', () => assert.strictEqual(resAttacker.statusCode, 404));
+  test('req.teacher.phoneHash is passed through to the service, not a body/query value', () => assert.strictEqual(seenPhoneHash, 'hash_attacker'));
+}
+{
+  const handler = createDeleteIncidentHandler({ deleteIncident: () => true });
+  const res = mockRes();
+  handler(mockReq('hash_owner', { params: { id: 'abc' } }), res);
+  test('non-numeric id responds 400', () => assert.strictEqual(res.statusCode, 400));
+}
+{
+  const handler = createDeleteIncidentHandler({ deleteIncident: () => true });
+  const res = mockRes();
+  handler(mockReq('hash_owner', { params: { id: '0' } }), res);
+  test('id="0" responds 400 (non-positive-integer guard)', () => assert.strictEqual(res.statusCode, 400));
+}
+{
+  const handler = createDeleteIncidentHandler({ deleteIncident: () => { throw new Error('db exploded'); } });
+  const res = mockRes();
+  handler(mockReq('hash_owner', { params: { id: '5' } }), res);
+  test('unexpected service throw maps to 500', () => assert.strictEqual(res.statusCode, 500));
 }
 
 console.log(`\n${'─'.repeat(55)}`);

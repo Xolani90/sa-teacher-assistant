@@ -270,6 +270,35 @@ function updateIncident(phoneHash, id, params = {}) {
   return getIncident(phoneHash, id);
 }
 
+/**
+ * Deletes a teacher's own incident (Phase 6 continuation — incident
+ * lifecycle closure). `incidents` is a leaf table — nothing else in the
+ * schema references it (unlike classes, which need deleteClass's
+ * dependent-record guard) — so this is a straight, unconditional hard
+ * delete scoped by (id, phone_hash) in one statement, mirroring
+ * teacherWorkspaceService.js's deleteSavedResource() exactly.
+ *
+ * This is deliberately a HARD delete, not the soft-delete
+ * (deleted_at) reflectionService.js's deleteReflection() uses —
+ * reflections are soft-deleted because they feed QMS evidence scoring
+ * (ADR-016) and a delete needs to trigger score recalculation.
+ * Incidents feed no scoring/evidence system, so there is no
+ * recalculation to preserve a trail for.
+ *
+ * @param {string} phoneHash
+ * @param {number} id
+ * @returns {boolean} true if a row was deleted, false if no matching
+ *   (id, phoneHash) row existed (missing or wrong owner).
+ */
+function deleteIncident(phoneHash, id) {
+  const db = getDb();
+  const result = db
+    .prepare(`DELETE FROM incidents WHERE id = ? AND phone_hash = ?`)
+    .run(id, phoneHash);
+
+  return result.changes > 0;
+}
+
 module.exports = {
   MAX_DESCRIPTION_LENGTH,
   MAX_ACTION_LENGTH,
@@ -279,4 +308,5 @@ module.exports = {
   getIncident,
   listIncidents,
   updateIncident,
+  deleteIncident,
 };

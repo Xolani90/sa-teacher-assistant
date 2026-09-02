@@ -181,4 +181,69 @@ describe('IncidentDetail', () => {
     // Original content still shown, unaffected by the discarded edit.
     expect(screen.getByText('Learner fell during break and scraped their knee.')).toBeInTheDocument();
   });
+
+  it('deletes the incident after confirmation and navigates back to the Incident Book', async () => {
+    const fetchMock = vi.fn(async (url, options = {}) => {
+      if (!url.includes('/api/incidents/1')) throw new Error(`Unmocked fetch in test: ${url}`);
+      if ((options.method || 'GET') === 'DELETE') {
+        return { ok: true, status: 204, text: async () => '' };
+      }
+      return { ok: true, status: 200, text: async () => JSON.stringify({ incident: INCIDENT }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const user = userEvent.setup();
+    renderDetail();
+
+    await screen.findByText(/Incident on 10 May 2026/);
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    expect(screen.getByText('Delete this incident?')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^confirm$/i }));
+
+    expect(await screen.findByText('Incidents list page')).toBeInTheDocument();
+  });
+
+  it('cancelling the delete confirmation leaves the incident in place', async () => {
+    mockFetchRoutes({ '/api/incidents/1': { method: 'GET', body: { incident: INCIDENT } } });
+    const user = userEvent.setup();
+    renderDetail();
+
+    await screen.findByText(/Incident on 10 May 2026/);
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    expect(screen.getByText('Delete this incident?')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /^cancel$/i }));
+
+    expect(screen.queryByText('Delete this incident?')).not.toBeInTheDocument();
+    expect(screen.getByText(/Incident on 10 May 2026/)).toBeInTheDocument();
+    expect(screen.queryByText('Incidents list page')).not.toBeInTheDocument();
+  });
+
+  it('surfaces a delete failure instead of navigating away', async () => {
+    const fetchMock = vi.fn(async (url, options = {}) => {
+      if (!url.includes('/api/incidents/1')) throw new Error(`Unmocked fetch in test: ${url}`);
+      if ((options.method || 'GET') === 'DELETE') {
+        return {
+          ok: false,
+          status: 404,
+          text: async () => JSON.stringify({ error: 'Incident not found' }),
+        };
+      }
+      return { ok: true, status: 200, text: async () => JSON.stringify({ incident: INCIDENT }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const user = userEvent.setup();
+    renderDetail();
+
+    await screen.findByText(/Incident on 10 May 2026/);
+    await user.click(screen.getByRole('button', { name: /^delete$/i }));
+    await user.click(screen.getByRole('button', { name: /^confirm$/i }));
+
+    expect(await screen.findByText('Incident not found')).toBeInTheDocument();
+    expect(screen.queryByText('Incidents list page')).not.toBeInTheDocument();
+    // Failure resets confirmation back to the plain Delete button.
+    expect(screen.getByRole('button', { name: /^delete$/i })).toBeInTheDocument();
+  });
 });

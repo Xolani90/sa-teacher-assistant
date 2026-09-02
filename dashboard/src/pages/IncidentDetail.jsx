@@ -46,6 +46,16 @@ export default function IncidentDetail() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState(null);
 
+  // Deletion (Phase 6 continuation — incident lifecycle closure) — a
+  // thin wrapper around DELETE /api/incidents/:id (incidentService.js's
+  // deleteIncident()). Same confirm-then-delete pattern as ClassDetail.jsx
+  // and ResourceDetail.jsx, scoped to this one incident. `incidents` is a
+  // leaf table nothing else references, so — like deleteSavedResource —
+  // there's no dependent-record guard to surface here.
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
   const load = useCallback(async () => {
     setStatus(STATUS_LOADING);
     setError(null);
@@ -100,6 +110,20 @@ export default function IncidentDetail() {
     }
   }
 
+  async function handleDeleteIncident() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await authedFetch(`/api/incidents/${incidentId}`, { method: 'DELETE' });
+      navigate('/incidents');
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : 'Could not delete this incident. Please try again.');
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return (
     <Layout>
       <button onClick={() => navigate('/incidents')} style={styles.backButton}>
@@ -125,8 +149,28 @@ export default function IncidentDetail() {
                 Logged {formatDateTime(incident.createdAt)}
               </p>
             </div>
-            <Button variant="secondary" onClick={startEdit}>Edit</Button>
+            <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+              <Button variant="secondary" onClick={startEdit}>Edit</Button>
+              {confirmDelete ? (
+                <>
+                  <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                    Delete this incident?
+                  </span>
+                  <Button variant="danger" onClick={handleDeleteIncident} disabled={deleting}>
+                    {deleting ? 'Deleting…' : 'Confirm'}
+                  </Button>
+                  <Button variant="ghost" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+                    Cancel
+                  </Button>
+                </>
+              ) : (
+                <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
+                  Delete
+                </Button>
+              )}
+            </div>
           </div>
+          {deleteError && <p style={styles.formError}>{deleteError}</p>}
 
           <Card style={{ padding: 'var(--space-5)', marginBottom: 'var(--space-5)' }}>
             <SectionHeader title="Description" />
@@ -220,6 +264,11 @@ function formatDateTime(iso) {
 }
 
 const styles = {
+  formError: {
+    color: 'var(--color-danger)',
+    fontSize: 'var(--text-sm)',
+    margin: '0.4rem 0 var(--space-4)',
+  },
   backButton: {
     background: 'none',
     border: 'none',

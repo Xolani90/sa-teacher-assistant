@@ -67,6 +67,7 @@ async function run() {
     getIncident,
     listIncidents,
     updateIncident,
+    deleteIncident,
     MAX_DESCRIPTION_LENGTH,
     MAX_ACTION_LENGTH,
   } = require('../services/incidentService');
@@ -224,6 +225,30 @@ async function run() {
 
   console.log('\nTest U-04: updating a nonexistent id returns null');
   assertEq(updateIncident(PHONE, 999999, { description: 'x' }), null, 'nonexistent id update returns null');
+
+  // ═══════════════════════════════════════════════════════════════════════
+  console.log('\n── Section 6: deleteIncident() ──────────────────────────────────────');
+
+  console.log('\nTest D-01: another teacher cannot delete it (returns false, no mutation)');
+  const wrongOwnerDelete = deleteIncident(OTHER_PHONE, inj1.id);
+  assertEq(wrongOwnerDelete, false, 'cross-owner delete returns false');
+  const stillThere = getIncident(PHONE, inj1.id);
+  assert(stillThere !== null, 'the row was not deleted by the failed cross-owner delete attempt');
+
+  console.log('\nTest D-02: deleting a nonexistent id returns false');
+  assertEq(deleteIncident(PHONE, 999999), false, 'nonexistent id delete returns false');
+
+  console.log('\nTest D-03: owner can delete their own incident');
+  const deleted = deleteIncident(PHONE, inj1.id);
+  assertEq(deleted, true, 'delete returns true for a successful delete');
+  assertEq(getIncident(PHONE, inj1.id), null, 'the incident is actually gone after delete');
+
+  console.log('\nTest D-04: deleting an already-deleted id is a safe no-op (returns false, no throw)');
+  assertEq(deleteIncident(PHONE, inj1.id), false, 're-deleting an already-deleted id returns false, not a throw');
+
+  console.log('\nTest D-05: deleting one incident does not affect a sibling incident');
+  const sibling = getIncident(PHONE, bul1.id);
+  assert(sibling !== null, "a sibling incident (bul1) still exists after inj1's deletion");
 
   _db.exec(`DELETE FROM incidents`);
 
