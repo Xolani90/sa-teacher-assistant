@@ -416,13 +416,16 @@ async function handleCommand(from, text, deps) {
 
   const isWorkspaceCmd =
     upper === 'MY RESOURCES' ||
-    upper === 'SAVE';
+    upper === 'SAVE' ||
+    upper === 'OPEN' ||
+    upper.startsWith('OPEN ');
 
   if (isWorkspaceCmd) {
     const {
       saveResource,
       getSavedResources,
       getSavedResourceByGenerationId,
+      getSavedResource,
     } = require('../services/teacherWorkspaceService');
 
     // ── SAVE ──────────────────────────────────────────────────────────────────
@@ -665,6 +668,78 @@ async function handleCommand(from, text, deps) {
         console.error('[Workspace] getSavedResources error:', err.message);
         await deps.safeSendMessage(from, `⚠️ Couldn't load your resources right now. Please try again.`);
       }
+      return true;
+    }
+
+    // ── OPEN <id> — Phase 3: full WhatsApp retrieval of a saved resource ──────
+    // Extends MY RESOURCES (which already prints each resource's real DB id
+    // in brackets, e.g. "[42] Fractions...") with the natural next step: open
+    // one of those ids and get the actual persisted content back over
+    // WhatsApp. This is a thin, stateless, single-message command — same
+    // convention as CLASS INTERVENTION <selector> / LEARNER PROGRESS <name>
+    // in workspaceFlow.js — not a multi-turn session, since the id is
+    // typed directly rather than picked from a freshly-shown list.
+    //
+    // Canonical retrieval only: getSavedResource(id, phoneHash) reads the
+    // SAME saved_resources row the dashboard's GET /api/resources/:id
+    // handler reads (routes/api.js) — no regeneration, no second copy.
+    //
+    // Ownership: getSavedResource() scopes BOTH id and phone_hash in one SQL
+    // WHERE clause (services/teacherWorkspaceService.js), so a resource
+    // belonging to a different teacher is indistinguishable from a
+    // nonexistent id here — same generic-404-style response the dashboard
+    // route already uses for this exact ownership boundary, so this WhatsApp
+    // path never becomes an existence oracle a teacher could use to probe
+    // other teachers' resource ids.
+    if (upper === 'OPEN' || upper.startsWith('OPEN ')) {
+      const phoneHash = deps.hashPhone(from);
+      const rawArg = upper.slice('OPEN'.length).trim();
+      const resourceId = parseInt(rawArg, 10);
+
+      if (!rawArg || !Number.isInteger(resourceId) || String(resourceId) !== rawArg || resourceId <= 0) {
+        await deps.safeSendMessage(from,
+          `📂 *Open a saved resource*\n\nReply *OPEN [number]* using the number shown in *MY RESOURCES*.\n\nExample:\n_OPEN 42_`
+        );
+        return true;
+      }
+
+      let resource;
+      try {
+        resource = getSavedResource(resourceId, phoneHash);
+      } catch (err) {
+        console.error('[Workspace] getSavedResource error:', err.message);
+        await deps.safeSendMessage(from, `⚠️ Couldn't open that resource right now. Please try again.`);
+        return true;
+      }
+
+      if (!resource) {
+        // Deliberately generic — identical wording whether the id doesn't
+        // exist at all or belongs to another teacher. See ownership note above.
+        await deps.safeSendMessage(from,
+          `That resource couldn't be found.\n\nReply *MY RESOURCES* to see your saved resources.`
+        );
+        return true;
+      }
+
+      const typeLabel = deps.intentLabel(resource.resource_type);
+      const gradeStr   = resource.grade != null ? ` · Gr ${resource.grade === 0 ? 'R' : resource.grade}` : '';
+      const subjectStr = resource.subject ? ` · ${resource.subject}` : '';
+      const date = resource.created_at ? resource.created_at.slice(0, 10) : '';
+
+      const header =
+        `📄 *${resource.title}*\n` +
+        `_${typeLabel.charAt(0).toUpperCase() + typeLabel.slice(1)}${gradeStr}${subjectStr}${date ? ` · ${date}` : ''}_\n` +
+        `_Resource #${resource.id}_\n\n`;
+
+      const footer = `\n\n_Reply *MY RESOURCES* to see your other saved resources._`;
+
+      // resource.content is the exact persisted content — the same string
+      // both SAVE originally wrote and the dashboard's GET /api/resources/:id
+      // returns. safeSendMessage -> sendMessage -> chunkMessage already
+      // splits anything over WhatsApp's per-message limit (services/
+      // whatsappService.js), so long resources are simply delivered across
+      // multiple messages rather than truncated.
+      await deps.safeSendMessage(from, header + resource.content + footer);
       return true;
     }
 
