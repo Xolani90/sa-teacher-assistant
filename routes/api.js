@@ -887,6 +887,104 @@ function createGetQmsTopicsHandler({ listTopicsOrdered }) {
 }
 
 /**
+ * Builds the PATCH /classes/:classId handler (Phase 6 — class editing).
+ *
+ * services/teacherWorkspaceService.js#updateClass already existed, fully
+ * implemented and ownership-scoped via getClass(classId, phoneHash), but
+ * had zero callers anywhere in the app — a teacher who mistyped a class
+ * name/grade/subject at creation had no way to fix it. This is the first
+ * caller.
+ *
+ * Ownership is enforced the same way as every other :id route here: this
+ * handler resolves the class via getClass(classId, phoneHash) first and
+ * 404s before calling updateClass() if the class doesn't exist or belongs
+ * to a different teacher (ADR-008 §8, identical response to "not found",
+ * no existence oracle).
+ *
+ * learner_count is deliberately never accepted from this route — it's a
+ * derived/roster-driven field, not something a teacher edits directly —
+ * so it's excluded from the allowed PATCH surface even if a client sends
+ * it.
+ *
+ * @param {Object} deps
+ * @param {(classId:number, phoneHash:string, updates:Object) => Object} deps.updateClass
+ * @param {(classId:number, phoneHash:string) => Object|null} deps.getClass
+ * @returns {(req, res) => void}
+ */
+function createPatchClassHandler({ updateClass, getClass }) {
+  /**
+   * PATCH /api/classes/:classId
+   * Body: any subset of { name, grade, subject }
+   *
+   * @returns 200 { class } on success
+   * @returns 400 for a non-positive-integer :classId, an empty body, an
+   *          empty-string name, a non-positive-integer grade, or an
+   *          empty-string subject
+   * @returns 404 if the class doesn't exist or isn't owned by this
+   *          teacher (getClass returns null) — updateClass is never
+   *          called in that case
+   * @returns 500 if the underlying service throws
+   */
+  return function handlePatchClass(req, res) {
+    const classId = Number(req.params.classId);
+    if (!Number.isInteger(classId) || classId <= 0) {
+      return res.status(400).json({ error: 'classId must be a positive integer.' });
+    }
+
+    const body = req.body || {};
+    const updates = {};
+
+    if (Object.prototype.hasOwnProperty.call(body, 'name')) {
+      if (typeof body.name !== 'string' || body.name.trim() === '') {
+        return res.status(400).json({ error: 'name must be a non-empty string.' });
+      }
+      updates.name = body.name;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'grade')) {
+      const grade = body.grade;
+      if (typeof grade !== 'number' || !Number.isInteger(grade) || grade <= 0) {
+        return res.status(400).json({ error: 'grade must be a positive integer.' });
+      }
+      updates.grade = grade;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'subject')) {
+      if (typeof body.subject !== 'string' || body.subject.trim() === '') {
+        return res.status(400).json({ error: 'subject must be a non-empty string.' });
+      }
+      updates.subject = body.subject;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'Provide at least one of name, grade, subject to update.' });
+    }
+
+    let existing;
+    try {
+      existing = getClass(classId, req.teacher.phoneHash);
+    } catch (err) {
+      console.error('[API] getClass failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Class not found.' });
+    }
+
+    let updatedClass;
+    try {
+      updatedClass = updateClass(classId, req.teacher.phoneHash, updates);
+    } catch (err) {
+      console.error('[API] updateClass failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    return res.status(200).json({ class: updatedClass });
+  };
+}
+
+/**
  * Builds the GET /classes/:classId/detail handler (dashboard "Class
  * Detail" / command-center view — PROJECT_STATUS.md's post-branding
  * milestone).
@@ -1301,7 +1399,7 @@ const { listGrowthPlans, getGrowthPlan, createGrowthPlan, updateGrowthPlan, dele
 const { listBlueprints, getBlueprintById } = require('../services/blueprintRepository');
 const { getClassDetail } = require('../services/classDetailService');
 const { getClassSnapshot } = require('../services/classSnapshotService');
-const { getClass } = require('../services/teacherWorkspaceService');
+const { getClass, updateClass } = require('../services/teacherWorkspaceService');
 const { getLearnerDetail } = require('../services/learnerDetailService');
 const { getObservationDetail } = require('../services/observationDetailService');
 const { getObservationHistory } = require('../services/observationRepository');
@@ -1490,6 +1588,11 @@ router.get(
   createGetResourceDetailHandler({ getSavedResource })
 );
 
+router.patch(
+  '/classes/:classId',
+  createPatchClassHandler({ updateClass, getClass })
+);
+
 router.get(
   '/classes/:classId/detail',
   createGetClassDetailHandler({ getClassDetail })
@@ -1609,6 +1712,7 @@ module.exports.__testExports = {
   createPatchIncidentHandler,
   createGetInterventionPlanHandler,
   createGetClassesHandler,
+  createPatchClassHandler,
   createGetResourcesHandler,
   createGetResourceDetailHandler,
   createGetClassDetailHandler,
