@@ -449,6 +449,44 @@ function getSavedReport(assessmentId, reportType, learnerName = null) {
   `).get(assessmentId, reportType) || null;
 }
 
+/**
+ * Lists all saved reports for an assessment, ownership-scoped to the
+ * requesting teacher. Reports were previously write-only: generated once
+ * via WhatsApp (saveReport, above) and delivered, but never retrievable
+ * again — migration 015's own doc comment says the reports table exists
+ * so reports "can be re-fetched without re-running the analysis
+ * pipeline", but no caller ever did that read.
+ *
+ * The internal 'ai_intervention_plan' report type is excluded — it's raw
+ * AI text cached for reuse inside generateInterventionReport() (see
+ * getSavedAiInterventionText above), not a report a teacher generated or
+ * would expect to see listed alongside their diagnostic/HOD/parent
+ * reports.
+ *
+ * @param {string} phoneHash
+ * @param {number} assessmentId
+ * @returns {Array<{id:number, reportType:string, learnerName:string|null, content:string, createdAt:string}>}
+ *   Most-recently-created first. Always an array, even when nothing is
+ *   saved or the assessmentId doesn't exist.
+ */
+function listSavedReports(phoneHash, assessmentId) {
+  const db = getDb();
+  const rows = db.prepare(`
+    SELECT id, report_type, learner_name, content, created_at
+    FROM reports
+    WHERE phone_hash = ? AND assessment_id = ? AND report_type != 'ai_intervention_plan'
+    ORDER BY id DESC
+  `).all(phoneHash, assessmentId);
+
+  return rows.map((row) => ({
+    id: row.id,
+    reportType: row.report_type,
+    learnerName: row.learner_name,
+    content: row.content,
+    createdAt: row.created_at,
+  }));
+}
+
 module.exports = {
   generateInterventionReport,
   generateTeacherSummary,
@@ -458,4 +496,5 @@ module.exports = {
   saveReport,
   getSavedReport,
   getSavedAiInterventionText,
+  listSavedReports,
 };

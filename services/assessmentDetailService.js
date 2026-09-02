@@ -24,6 +24,7 @@ const { getDb } = require('../utils/database');
 const { getBlueprintAssessmentAnalytics } = require('./blueprintAnalytics');
 const { performItemAnalysis } = require('./itemAnalysisService');
 const { computeInterventionPlan } = require('./interventionPlanService');
+const { listSavedReports } = require('./interventionReportsService');
 
 /**
  * @param {string} phoneHash
@@ -153,6 +154,13 @@ function getAssessmentDetail(phoneHash, assessmentId) {
     targetGroupSize = interventionPlanResult.targetGroups.reduce((sum, g) => sum + g.count, 0);
   }
 
+  // Saved diagnostic/HOD/parent reports (migration 015's `reports` table)
+  // were write-only until now: generated via WhatsApp REPORT/HOD/PARENT
+  // commands and delivered, but never re-fetchable. listSavedReports() is
+  // already ownership-scoped by (phoneHash, assessmentId), matching this
+  // whole handler's convention.
+  const savedReports = listSavedReports(phoneHash, assessmentId);
+
   return {
     assessment: {
       id: assessment.id,
@@ -179,6 +187,7 @@ function getAssessmentDetail(phoneHash, assessmentId) {
     interventionSummary: {
       targetGroupSize,
     },
+    savedReports,
   };
 }
 

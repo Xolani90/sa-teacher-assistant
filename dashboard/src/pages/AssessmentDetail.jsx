@@ -88,7 +88,7 @@ export default function AssessmentDetail() {
     );
   }
 
-  const { assessment, class: classInfo, summary, learners, analytics } = detail;
+  const { assessment, class: classInfo, summary, learners, analytics, savedReports } = detail;
 
   return (
     <Layout>
@@ -109,6 +109,8 @@ export default function AssessmentDetail() {
       <KpiRow summary={summary} analytics={analytics} />
 
       <LearnerResultsTable learners={learners} />
+
+      <SavedReportsList reports={savedReports} />
 
       {analytics.available && (
         <>
@@ -219,6 +221,85 @@ function LearnerResultsTable({ learners }) {
             ))}
           </tbody>
         </table>
+      )}
+    </Card>
+  );
+}
+
+// ── Saved reports (diagnostic / HOD / parent) ───────────────────────────
+const REPORT_TYPE_LABELS = {
+  diagnostic: 'Diagnostic Report',
+  hod: 'HOD Report',
+  parent: 'Parent Report',
+};
+
+function SavedReportsList({ reports }) {
+  const list = reports || [];
+  const [expandedId, setExpandedId] = useState(null);
+
+  return (
+    <Card style={{ padding: 'var(--space-5)', marginBottom: 'var(--space-6)' }}>
+      <SectionHeader title="Saved Reports" />
+      {list.length === 0 ? (
+        <EmptyState
+          title="No saved reports yet"
+          description="Diagnostic, HOD, and parent reports generated for this assessment on WhatsApp will appear here."
+        />
+      ) : (
+        <div>
+          {list.map((r) => {
+            const isOpen = expandedId === r.id;
+            const label = REPORT_TYPE_LABELS[r.reportType] || capitalize(r.reportType);
+            return (
+              <div key={r.id} style={{ padding: 'var(--space-3) 0', borderBottom: '1px solid var(--color-border)' }}>
+                <button
+                  onClick={() => setExpandedId(isOpen ? null : r.id)}
+                  style={{
+                    width: '100%',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    background: 'none',
+                    border: 'none',
+                    cursor: 'pointer',
+                    padding: 0,
+                    textAlign: 'left',
+                    font: 'inherit',
+                    color: 'inherit',
+                  }}
+                >
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)' }}>
+                    <Pill tone="neutral">{label}</Pill>
+                    {r.learnerName && (
+                      <span style={{ fontWeight: 600 }}>{r.learnerName}</span>
+                    )}
+                    <span style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
+                      {formatDate(r.createdAt)}
+                    </span>
+                  </span>
+                  <span style={{ color: 'var(--color-text-secondary)', fontSize: 'var(--text-sm)' }}>
+                    {isOpen ? '▲' : '▼'}
+                  </span>
+                </button>
+                {isOpen && (
+                  <pre
+                    style={{
+                      marginTop: 'var(--space-3)',
+                      whiteSpace: 'pre-wrap',
+                      fontFamily: 'inherit',
+                      fontSize: 'var(--text-sm)',
+                      background: 'var(--color-bg)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: 'var(--space-4)',
+                    }}
+                  >
+                    {r.content}
+                  </pre>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
     </Card>
   );

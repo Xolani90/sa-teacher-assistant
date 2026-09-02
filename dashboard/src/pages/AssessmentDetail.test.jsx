@@ -43,6 +43,10 @@ const BLUEPRINT_DETAIL = {
       },
     ],
   },
+  savedReports: [
+    { id: 2, reportType: 'hod', learnerName: null, content: 'HOD summary content', createdAt: '2026-05-13' },
+    { id: 1, reportType: 'parent', learnerName: 'Sipho Zulu', content: 'Parent summary for Sipho', createdAt: '2026-05-12' },
+  ],
 };
 
 const FREEFORM_DETAIL = {
@@ -56,6 +60,7 @@ const FREEFORM_DETAIL = {
   summary: { classAverage: 55, passRate: 50, learnerCount: 0 },
   learners: [],
   analytics: { available: false, topics: [], perLearnerTopics: [] },
+  savedReports: [],
 };
 
 function renderAssessmentDetail(options) {
@@ -152,6 +157,39 @@ describe('AssessmentDetail', () => {
     expect(screen.queryByText('Learner Topic Breakdown')).not.toBeInTheDocument();
 
     expect(screen.getByText('No results yet')).toBeInTheDocument();
+  });
+
+  it('lists saved reports and expands one to show its content on click', async () => {
+    mockFetchRoutes({ '/detail': { body: BLUEPRINT_DETAIL } });
+    const user = userEvent.setup();
+    renderAssessmentDetail();
+
+    await screen.findByText('Term 2 Fractions Test');
+
+    expect(screen.getByText('Saved Reports')).toBeInTheDocument();
+    expect(screen.getByText('HOD Report')).toBeInTheDocument();
+    expect(screen.getByText('Parent Report')).toBeInTheDocument();
+    // Parent report is scoped to a learner; its name should show alongside it.
+    expect(screen.getByText('Sipho Zulu')).toBeInTheDocument();
+
+    // Collapsed by default — content not shown yet.
+    expect(screen.queryByText('HOD summary content')).not.toBeInTheDocument();
+
+    const hodToggle = screen.getByRole('button', { name: /hod report/i });
+    await user.click(hodToggle);
+    expect(screen.getByText('HOD summary content')).toBeInTheDocument();
+
+    await user.click(hodToggle);
+    expect(screen.queryByText('HOD summary content')).not.toBeInTheDocument();
+  });
+
+  it('shows an empty state when no reports have been saved for this assessment', async () => {
+    mockFetchRoutes({ '/detail': { body: FREEFORM_DETAIL } });
+    renderAssessmentDetail();
+
+    await screen.findByText('Quick Quiz');
+    expect(screen.getByText('Saved Reports')).toBeInTheDocument();
+    expect(screen.getByText('No saved reports yet')).toBeInTheDocument();
   });
 
   it('downloads the PDF and opens it in a new tab', async () => {
