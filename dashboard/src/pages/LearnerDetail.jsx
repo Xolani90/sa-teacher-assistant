@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useTeacher } from '../auth/TeacherContext';
 import { ApiError } from '../api/client';
 import Layout from '../components/Layout';
-import { Card, EmptyState, ErrorBanner, Spinner, IconBadge, SectionHeader, Pill } from '../components/ui';
+import { Card, EmptyState, ErrorBanner, Spinner, IconBadge, SectionHeader, Pill, Button } from '../components/ui';
 
 const STATUS_LOADING = 'loading';
 const STATUS_READY = 'ready';
@@ -40,6 +40,13 @@ export default function LearnerDetail() {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
 
+  // Dashboard mirror of the WhatsApp "REMOVE LEARNER <name>" command
+  // (DELETE /api/learners/:learnerId -> services/learnerRosterService.js
+  // #removeLearner). Same confirm-then-delete pattern as ClassDetail.jsx.
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [removing, setRemoving] = useState(false);
+  const [removeError, setRemoveError] = useState(null);
+
   const load = useCallback(async () => {
     setStatus(STATUS_LOADING);
     setError(null);
@@ -59,6 +66,20 @@ export default function LearnerDetail() {
 
   const learner = detail?.learner;
   const performance = detail?.performance;
+
+  async function handleRemoveLearner() {
+    setRemoving(true);
+    setRemoveError(null);
+    try {
+      await authedFetch(`/api/learners/${learnerId}`, { method: 'DELETE' });
+      navigate(learner?.classId ? `/classes/${learner.classId}` : '/classes');
+    } catch (err) {
+      setRemoveError(err instanceof ApiError ? err.message : 'Could not remove this learner. Please try again.');
+      setConfirmRemove(false);
+    } finally {
+      setRemoving(false);
+    }
+  }
 
   const highMediumPlans = useMemo(
     () => (detail?.interventions?.plans || []).filter((p) => p.priority === 'high' || p.priority === 'medium'),
@@ -81,13 +102,41 @@ export default function LearnerDetail() {
       {status === STATUS_READY && detail && (
         <>
           <div style={{ marginBottom: 'var(--space-6)' }}>
-            <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.02em', margin: '0 0 var(--space-2)' }}>
-              {learner?.name}
-            </h1>
-            <p style={{ color: 'var(--color-text-secondary)', margin: 0, fontSize: 'var(--text-base)' }}>
-              {learner?.className || 'No class set'}
-              {learner?.grade != null ? ` · Grade ${learner.grade}` : ''}
-            </p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+              <div>
+                <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.02em', margin: '0 0 var(--space-2)' }}>
+                  {learner?.name}
+                </h1>
+                <p style={{ color: 'var(--color-text-secondary)', margin: 0, fontSize: 'var(--text-base)' }}>
+                  {learner?.className || 'No class set'}
+                  {learner?.grade != null ? ` · Grade ${learner.grade}` : ''}
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+                {confirmRemove ? (
+                  <>
+                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                      Remove from roster?
+                    </span>
+                    <Button variant="danger" onClick={handleRemoveLearner} disabled={removing}>
+                      {removing ? 'Removing…' : 'Confirm'}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setConfirmRemove(false)} disabled={removing}>
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="ghost" onClick={() => setConfirmRemove(true)}>
+                    Remove learner
+                  </Button>
+                )}
+              </div>
+            </div>
+            {removeError && (
+              <p style={{ color: 'var(--color-danger, #c0392b)', fontSize: 'var(--text-sm)', marginTop: 'var(--space-2)' }}>
+                {removeError}
+              </p>
+            )}
           </div>
 
           {/* KPI cards */}

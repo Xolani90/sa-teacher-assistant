@@ -1253,6 +1253,61 @@ function createGetLearnerDetailHandler({ getLearnerDetail }) {
   };
 }
 
+function createDeleteLearnerHandler({ getLearnerById, removeLearner }) {
+  /**
+   * DELETE /api/learners/:learnerId
+   *
+   * Soft-removes the learner from their class roster — the Dashboard
+   * mirror of the WhatsApp "REMOVE LEARNER <name>" command
+   * (services/learnerRosterService.js#removeLearner). History
+   * (learner_results, observation_records, intervention rows) is
+   * untouched; only removed_at is set, same as the WhatsApp path.
+   *
+   * @returns 204 on success (no body)
+   * @returns 400 for a non-positive-integer :learnerId
+   * @returns 404 if the learner doesn't exist, isn't owned by this
+   *          teacher, or has already been removed (identical response
+   *          to "not found", same ownership convention as every other
+   *          route in this file) — removeLearner is never called in
+   *          that case
+   * @returns 500 if the underlying service throws
+   */
+  return function handleDeleteLearner(req, res) {
+    const learnerId = Number(req.params.learnerId);
+    if (!Number.isInteger(learnerId) || learnerId <= 0) {
+      return res.status(400).json({ error: 'learnerId must be a positive integer.' });
+    }
+
+    let learner;
+    try {
+      learner = getLearnerById(learnerId);
+    } catch (err) {
+      console.error('[API] getLearnerById failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!learner || learner.phoneHash !== req.teacher.phoneHash) {
+      return res.status(404).json({ error: 'Learner not found.' });
+    }
+
+    let result;
+    try {
+      result = removeLearner(req.teacher.phoneHash, learner.classId, learner.canonicalName);
+    } catch (err) {
+      console.error('[API] removeLearner failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!result.removed) {
+      // Already removed (or roster mutated out from under us) — same
+      // "not found" convention as the rest of this file.
+      return res.status(404).json({ error: 'Learner not found.' });
+    }
+
+    return res.status(204).end();
+  };
+}
+
 /**
  * Builds the GET /observations/:assessmentId handler — session-scoped
  * counterpart to createGetLearnerDetailHandler above. Exposes
@@ -1470,7 +1525,7 @@ function createGetAssessmentPdfHandler({ getAssessmentDetail, generateBlueprintA
 const { getLearnerById, getTeacherLearners } = require('../services/learnerRepository');
 const { getLearnerInterventionPlan } = require('../services/interventionService');
 const { getTeacherClasses, getSavedResources, getSavedResource } = require('../services/teacherWorkspaceService');
-const { getActiveRosterCounts } = require('../services/learnerRosterService');
+const { getActiveRosterCounts, removeLearner } = require('../services/learnerRosterService');
 const { getStatusSnapshot } = require('../services/tseEvidenceService');
 const { listReflections, createReflection, updateReflection, deleteReflection } = require('../services/reflectionService');
 const { listGrowthPlans, getGrowthPlan, createGrowthPlan, updateGrowthPlan, deleteGrowthPlan } = require('../services/growthPlanService');
@@ -1691,6 +1746,11 @@ router.get(
   createGetLearnerDetailHandler({ getLearnerDetail })
 );
 
+router.delete(
+  '/learners/:learnerId',
+  createDeleteLearnerHandler({ getLearnerById, removeLearner })
+);
+
 router.get(
   '/observations',
   createGetObservationsHandler({ getObservationHistory })
@@ -1802,6 +1862,7 @@ module.exports.__testExports = {
   createGetClassDetailHandler,
   createGetClassSnapshotHandler,
   createGetLearnerDetailHandler,
+  createDeleteLearnerHandler,
   createGetObservationDetailHandler,
   createGetObservationsHandler,
   createGetAssessmentDetailHandler,
