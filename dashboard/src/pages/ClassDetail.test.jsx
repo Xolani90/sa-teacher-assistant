@@ -55,6 +55,7 @@ function renderClassDetail(options) {
   return renderWithProviders(
     <Routes>
       <Route path="/classes/:classId" element={<ClassDetail />} />
+      <Route path="/classes" element={<div>Classes list page</div>} />
     </Routes>,
     { route: '/classes/class-1', authenticated: true, ...options }
   );
@@ -150,5 +151,93 @@ describe('ClassDetail', () => {
     // whole page down.
     expect(screen.getByText(/couldn't load the class snapshot/i)).toBeInTheDocument();
     expect(screen.getByText('Snapshot service unavailable')).toBeInTheDocument();
+  });
+
+  it('lets a teacher edit the class name/grade/subject via PATCH, then reloads', async () => {
+    const fetchMock = mockFetchRoutes({
+      '/detail': { body: DETAIL },
+      '/snapshot': { body: SNAPSHOT_OK },
+      '/classes/class-1': { body: { class: { ...DETAIL.class, name: 'Grade 8 Maths (renamed)' } } },
+    });
+    const user = userEvent.setup();
+    renderClassDetail();
+
+    await screen.findByText('Grade 8 Mathematics');
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+
+    const nameInput = screen.getByLabelText('Class name');
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Grade 8 Maths (renamed)');
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    // Edit form closes and detail is re-fetched (reloadDetail) after a
+    // successful save — the mock's /detail route is static, so the
+    // reload's actual server-echoed name is verified by the e2e test in
+    // routes/api.js's test suite, not asserted again here.
+    await screen.findByText('Grade 8 Mathematics');
+    expect(screen.queryByRole('button', { name: 'Save Changes' })).not.toBeInTheDocument();
+
+    const detailCalls = fetchMock.mock.calls.filter(([url]) => url.includes('/detail'));
+    expect(detailCalls.length).toBeGreaterThanOrEqual(2);
+
+    const patchCall = fetchMock.mock.calls.find(([url, opts]) => opts?.method === 'PATCH');
+    expect(patchCall).toBeTruthy();
+    expect(patchCall[0]).toContain('/api/classes/class-1');
+    expect(JSON.parse(patchCall[1].body)).toEqual({ name: 'Grade 8 Maths (renamed)', grade: 8, subject: 'Mathematics' });
+  });
+
+  it('rejects an empty name client-side without calling the API', async () => {
+    mockFetchRoutes({
+      '/detail': { body: DETAIL },
+      '/snapshot': { body: SNAPSHOT_OK },
+    });
+    const user = userEvent.setup();
+    renderClassDetail();
+
+    await screen.findByText('Grade 8 Mathematics');
+    await user.click(screen.getByRole('button', { name: 'Edit' }));
+    await user.clear(screen.getByLabelText('Class name'));
+    await user.click(screen.getByRole('button', { name: 'Save Changes' }));
+
+    expect(screen.getByText('Name cannot be empty.')).toBeInTheDocument();
+  });
+
+  it('deletes the class after confirmation and navigates back to the class list', async () => {
+    mockFetchRoutes({
+      '/detail': { body: DETAIL },
+      '/snapshot': { body: SNAPSHOT_OK },
+      '/classes/class-1': { body: null },
+    });
+    const user = userEvent.setup();
+    renderClassDetail();
+
+    await screen.findByText('Grade 8 Mathematics');
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    expect(screen.getByText('Delete this class?')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    expect(await screen.findByText('Classes list page')).toBeInTheDocument();
+  });
+
+  it('surfaces the 409 dependent-record guard message instead of navigating away', async () => {
+    mockFetchRoutes({
+      '/detail': { body: DETAIL },
+      '/snapshot': { body: SNAPSHOT_OK },
+      '/classes/class-1': {
+        body: { error: 'deleteClass: cannot delete class 1 — it still has 2 learner(s) linked to it.' },
+        ok: false,
+        status: 409,
+      },
+    });
+    const user = userEvent.setup();
+    renderClassDetail();
+
+    await screen.findByText('Grade 8 Mathematics');
+    await user.click(screen.getByRole('button', { name: 'Delete' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm' }));
+
+    expect(await screen.findByText(/it still has 2 learner\(s\) linked to it/)).toBeInTheDocument();
+    expect(screen.queryByText('Classes list page')).not.toBeInTheDocument();
   });
 });
