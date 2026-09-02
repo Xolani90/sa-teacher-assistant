@@ -22,6 +22,7 @@ const INTENT_TYPES = {
   REFLECTION: 'reflection',
   GROWTH_PLAN: 'growth_plan',
   INCIDENT: 'incident',
+  INCIDENT_HISTORY: 'incidentHistory',
   CURRICULUM_QUERY: 'curriculumQuery',
   GREETING: 'greeting',
   SMALL_TALK: 'smallTalk',
@@ -229,6 +230,12 @@ function parseIntent(text) {
   // REFLECTION detection (narrow phrasing only — do not expand yet)
   } else if (/log\s+(a\s+)?reflection|record\s+(a\s+)?reflection|reflect\s+on\s+(my|this)\s+lesson/i.test(lower)) {
     type = INTENT_TYPES.REFLECTION;
+  // INCIDENT_HISTORY detection (before the INCIDENT bare shortcut and INCIDENT
+  // phrasing below — "my incidents" / "show incidents" is a request to VIEW past
+  // saved incidents, not to record a new one, mirrors OBSERVATION_HISTORY-before-
+  // OBSERVATION ordering above)
+  } else if (/\b(my\s+incidents?|show\s+incidents?|view\s+incidents?|incident\s+history|list\s+incidents?|see\s+(my\s+)?incidents?)\b/i.test(lower)) {
+    type = INTENT_TYPES.INCIDENT_HISTORY;
   // INCIDENT — bare shortcut command, alias for the natural-language incident phrases
   } else if (/^incident\.?$/i.test(lower)) {
     type = INTENT_TYPES.INCIDENT;

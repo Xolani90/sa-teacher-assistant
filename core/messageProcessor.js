@@ -233,6 +233,7 @@ async function processMessage(message, deps) {
     if (await deps.handleReflectionFlow(from, text, null, deps.buildReflectionDeps())) return;
     if (await deps.handleGrowthPlanFlow(from, text, null, deps.buildGrowthPlanDeps())) return;
     if (await deps.handleIncidentFlow(from, text, null, deps.buildIncidentDeps())) return;
+    if (await deps.handleIncidentHistoryFlow(from, text, null, deps.buildIncidentHistoryDeps())) return;
     if (await deps.handleAssessmentSessionFlow(from, text, message, null, deps.buildAssessmentSessionDeps())) return;
     if (await deps.handleBlueprintAuthoringFlow(from, text, message, null, deps.buildBlueprintAuthoringDeps())) return;
     if (await deps.handleRosterFlow(from, text, message, null, deps.buildRosterDeps())) return;
@@ -303,6 +304,10 @@ async function processMessage(message, deps) {
   // ── Incident Book multi-turn flow (Feature 3) ────────────────────────
   const incidentHandled = await deps.handleIncidentFlow(from, text, intent, deps.buildIncidentDeps());
   if (incidentHandled) return;
+
+  // ── Incident history multi-turn flow (Feature 3 Phase 2 — list + numbered selection) ──
+  const incidentHistoryHandled = await deps.handleIncidentHistoryFlow(from, text, intent, deps.buildIncidentHistoryDeps());
+  if (incidentHistoryHandled) return;
 
   // ── Assessment session multi-turn flow (ADR-006) ────────────────────
   // Checked immediately after the observation flows and before every

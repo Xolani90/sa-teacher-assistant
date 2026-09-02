@@ -9,11 +9,21 @@
  *
  * Expected deps shape:
  * {
- *   incidentState,    // SessionStore instance
- *   safeSendMessage,  // async (from, text) => void
- *   parseIntent,      // (text) => intent
- *   hashPhone,        // (from) => phoneHash
- *   createIncident,   // (phoneHash, params) => incident  (services/incidentService.js)
+ *   incidentState,        // SessionStore instance
+ *   safeSendMessage,      // async (from, text) => void
+ *   parseIntent,          // (text) => intent
+ *   hashPhone,            // (from) => phoneHash
+ *   createIncident,       // (phoneHash, params) => incident  (services/incidentService.js)
+ * }
+ *
+ * handleIncidentHistoryFlow's deps shape (MY INCIDENTS retrieval):
+ * {
+ *   incidentHistoryState, // SessionStore instance
+ *   safeSendMessage,      // async (from, text) => void
+ *   parseIntent,          // (text) => intent
+ *   hashPhone,            // (from) => phoneHash
+ *   listIncidents,        // (phoneHash, filters) => incident[]  (services/incidentService.js)
+ *   getIncident,          // (phoneHash, id) => incident|null   (services/incidentService.js)
  * }
  *
  * Scope: create-only over WhatsApp, mirroring reflectionFlow.js/
@@ -290,4 +300,185 @@ async function handleIncidentFlow(from, text, preClassifiedIntent, deps) {
   return false;
 }
 
-module.exports = { handleIncidentFlow, formatIncidentTypeMenu, resolveIncidentTypeSelection };
+/** Max incidents shown in the MY INCIDENTS list — mirrors MY OBSERVATIONS's cap. */
+const MAX_HISTORY_LIST = 8;
+
+/**
+ * @param {string} incidentDate - YYYY-MM-DD
+ * @returns {string} e.g. "01 Sep 2026"
+ */
+function formatIncidentDate(incidentDate) {
+  if (!incidentDate) return '';
+  const d = new Date(`${incidentDate}T00:00:00Z`);
+  if (Number.isNaN(d.getTime())) return incidentDate;
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${String(d.getUTCDate()).padStart(2, '0')} ${months[d.getUTCMonth()]} ${d.getUTCFullYear()}`;
+}
+
+/**
+ * @param {object} incident - serialized incident (services/incidentService.js)
+ * @returns {string}
+ */
+function buildIncidentDetailMessage(incident) {
+  const typeLabel = listIncidentTypesOrdered().find((t) => t.id === incident.incidentType)?.label || incident.incidentType;
+  return (
+    `📋 *Incident — ${formatIncidentDate(incident.incidentDate)}*\n\n` +
+    `*Time:* ${incident.incidentTime}\n` +
+    `*Type:* ${typeLabel}\n\n` +
+    `*What happened:*\n${incident.description}\n\n` +
+    `*Action taken / follow-up:*\n${incident.actionTaken}\n\n` +
+    `_Reply *BACK* to see your other incidents._`
+  );
+}
+
+/**
+ * Loads and sends the teacher's recent incidents as a numbered list, and
+ * puts incidentHistoryState into 'listShown' so the next message (a
+ * number, or BACK) is handled by handleIncidentHistoryFlow above.
+ *
+ * @param {string} from
+ * @param {string} phoneHash
+ * @param {object} deps
+ * @returns {Promise<boolean>}
+ */
+async function sendIncidentHistoryList(from, phoneHash, deps) {
+  const { incidentHistoryState, safeSendMessage, listIncidents } = deps;
+
+  let incidents;
+  try {
+    incidents = listIncidents(phoneHash, {});
+  } catch (err) {
+    console.error('[Workspace] listIncidents error:', err.message);
+    await safeSendMessage(from, `⚠️ Couldn't load your incidents right now. Please try again.`);
+    return true;
+  }
+
+  if (incidents.length === 0) {
+    incidentHistoryState.delete(phoneHash);
+    await safeSendMessage(
+      from,
+      `📋 *My Incidents*\n\nYou haven't logged any incidents yet.\n\nReply *INCIDENT* to record your first one.`
+    );
+    return true;
+  }
+
+  const shown = incidents.slice(0, MAX_HISTORY_LIST);
+  const typesById = new Map(listIncidentTypesOrdered().map((t) => [t.id, t.label]));
+
+  let msg = `📋 *My Incidents*\n\nHere are your most recent incidents:\n\n`;
+  shown.forEach((inc, i) => {
+    const typeLabel = typesById.get(inc.incidentType) || inc.incidentType;
+    msg += `${i + 1}. ${formatIncidentDate(inc.incidentDate)} • ${typeLabel}\n`;
+  });
+  msg += `\nReply with the number to view details.`;
+
+  incidentHistoryState.set(phoneHash, {
+    step: 'listShown',
+    ids: shown.map((inc) => inc.id),
+    lastActivity: Date.now(),
+  });
+  await safeSendMessage(from, msg);
+  return true;
+}
+
+/**
+ * Handles MY INCIDENTS: shows the teacher's recent logged incidents,
+ * then lets them reply with a number to view that incident's full
+ * detail. Read-only over WhatsApp — editing stays a dashboard-only
+ * affordance, same "create/view on WhatsApp, edit on dashboard" split
+ * as handleIncidentFlow's own scope note above.
+ *
+ * @param {string} from
+ * @param {string} text
+ * @param {object|null} preClassifiedIntent
+ * @param {object} deps
+ * @returns {Promise<boolean>}
+ */
+async function handleIncidentHistoryFlow(from, text, preClassifiedIntent, deps) {
+  const { incidentHistoryState, safeSendMessage, parseIntent, hashPhone, getIncident } = deps;
+
+  const phoneHash = hashPhone(from);
+  const state = incidentHistoryState.get(phoneHash);
+
+  if (state && Date.now() - state.lastActivity > 15 * 60 * 1000) {
+    incidentHistoryState.delete(phoneHash);
+    return false;
+  }
+
+  const trimmed = text.trim();
+
+  if (!state) {
+    const intent = preClassifiedIntent || parseIntent(text);
+    if (intent.type !== 'incidentHistory') return false;
+    return sendIncidentHistoryList(from, phoneHash, deps);
+  }
+
+  if (trimmed.toUpperCase() === 'CANCEL') {
+    incidentHistoryState.delete(phoneHash);
+    await safeSendMessage(from, `No problem — cancelled.`);
+    return true;
+  }
+
+  if (state.step === 'listShown') {
+    if (trimmed.toUpperCase() === 'BACK') {
+      return sendIncidentHistoryList(from, phoneHash, deps);
+    }
+
+    const choice = parseInt(trimmed, 10);
+    const ids = state.ids || [];
+    if (!Number.isInteger(choice) || choice < 1 || choice > ids.length) {
+      incidentHistoryState.set(phoneHash, { ...state, lastActivity: Date.now() });
+      await safeSendMessage(
+        from,
+        `Reply with a number from 1 to ${ids.length} to view that incident, or *BACK* to see the list again.`
+      );
+      return true;
+    }
+
+    const incidentId = ids[choice - 1];
+    let incident;
+    try {
+      incident = getIncident(phoneHash, incidentId);
+    } catch (err) {
+      console.error('[Workspace] getIncident error:', err.message);
+      await safeSendMessage(from, `⚠️ Couldn't load that incident right now. Please try again.`);
+      return true;
+    }
+
+    if (!incident) {
+      await safeSendMessage(from, `That incident couldn't be found — it may have been removed. Reply *BACK* to see the list.`);
+      return true;
+    }
+
+    incidentHistoryState.set(phoneHash, {
+      step: 'detailShown',
+      ids: state.ids,
+      incidentId: incident.id,
+      lastActivity: Date.now(),
+    });
+    await safeSendMessage(from, buildIncidentDetailMessage(incident));
+    return true;
+  }
+
+  if (state.step === 'detailShown') {
+    if (trimmed.toUpperCase() === 'BACK') {
+      return sendIncidentHistoryList(from, phoneHash, deps);
+    }
+    incidentHistoryState.set(phoneHash, { ...state, lastActivity: Date.now() });
+    await safeSendMessage(from, `Reply *BACK* to see your other incidents.`);
+    return true;
+  }
+
+  // Defensive fallback: unknown step, treat as no active flow.
+  incidentHistoryState.delete(phoneHash);
+  return false;
+}
+
+module.exports = {
+  handleIncidentFlow,
+  formatIncidentTypeMenu,
+  resolveIncidentTypeSelection,
+  handleIncidentHistoryFlow,
+  formatIncidentDate,
+  buildIncidentDetailMessage,
+};

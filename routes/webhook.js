@@ -138,6 +138,7 @@ const rosterState             = new SessionStore('roster',              30 * 60 
 const reflectionState          = new SessionStore('reflection',          30 * 60 * 1000);
 const growthPlanState          = new SessionStore('growthPlan',          30 * 60 * 1000);
 const incidentState            = new SessionStore('incident',            30 * 60 * 1000); // Feature 3 — Teacher Incident Book
+const incidentHistoryState     = new SessionStore('incidentHistory',     15 * 60 * 1000); // Feature 3 Phase 2 — MY INCIDENTS retrieval
 const saveLock = new Set(); // B5-F1: per-phone SAVE in-flight lock (try/finally in SAVE handler)
 
 // RC1-CANCEL: the same 13 stores messageProcessor.js's alreadyMidFlow checks
@@ -162,6 +163,7 @@ const FLOW_STORES = [
   reflectionState,
   growthPlanState,
   incidentState,
+  incidentHistoryState,
 ];
 
 /**
@@ -318,8 +320,8 @@ function buildGrowthPlanDeps() {
 }
 
 // ── Incident Book flow module (Feature 3) ───────────────────────────────────
-const { handleIncidentFlow } = require('../flows/incidentFlow');
-const { createIncident } = require('../services/incidentService');
+const { handleIncidentFlow, handleIncidentHistoryFlow } = require('../flows/incidentFlow');
+const { createIncident, getIncident, listIncidents } = require('../services/incidentService');
 
 function describeIncidentStatus(phoneHash) {
   const state = incidentState.get(phoneHash);
@@ -358,6 +360,17 @@ function buildIncidentDeps() {
     parseIntent,
     hashPhone,
     createIncident,
+  });
+}
+
+function buildIncidentHistoryDeps() {
+  return Object.freeze({
+    incidentHistoryState,
+    safeSendMessage,
+    parseIntent,
+    hashPhone,
+    getIncident,
+    listIncidents,
   });
 }
 
@@ -700,6 +713,7 @@ function buildProcessMessageDeps() {
     reflectionState,
     growthPlanState,
     incidentState,
+    incidentHistoryState,
     handleObservationFlow,
     buildObservationDeps,
     handleObservationHistoryFlow,
@@ -709,6 +723,8 @@ function buildProcessMessageDeps() {
     buildGrowthPlanDeps,
     handleIncidentFlow,
     buildIncidentDeps,
+    handleIncidentHistoryFlow,
+    buildIncidentHistoryDeps,
     handleAssessmentSessionFlow,
     buildAssessmentSessionDeps,
     handleBlueprintAuthoringFlow,

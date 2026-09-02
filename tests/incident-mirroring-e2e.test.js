@@ -50,7 +50,7 @@ function mockRes() {
   return res;
 }
 
-function run() {
+async function run() {
   const testDb = createTestDb(__filename);
   const db = testDb.db;
 
@@ -165,6 +165,50 @@ function run() {
 
   const finalList = incidentServiceReal.listIncidents(TEACHER_A_HASH);
   assert(finalList.length === 2, 'Teacher A now has both incidents (WhatsApp + dashboard) in one authoritative table');
+
+  // ── Step 6: Dashboard-created incident is retrievable back over WhatsApp ──
+  // Phase 2's actual gap: handleIncidentHistoryFlow (MY INCIDENTS) reading
+  // real incidentService.listIncidents/getIncident — no mocks — proving the
+  // dashboard-created row from Step 5 round-trips back to WhatsApp exactly
+  // as written, and that Teacher B still can't reach it through this path.
+  console.log('\n── Step 6: dashboard-created incident is retrievable via MY INCIDENTS (WhatsApp) ──');
+  const { handleIncidentHistoryFlow } = require('../flows/incidentFlow');
+
+  function makeHistoryDeps(fromToPhoneHash) {
+    const sent = [];
+    const incidentHistoryState = new Map();
+    return {
+      sent,
+      deps: {
+        incidentHistoryState: {
+          get: (k) => incidentHistoryState.get(k) || null,
+          set: (k, v) => incidentHistoryState.set(k, v),
+          delete: (k) => incidentHistoryState.delete(k),
+        },
+        safeSendMessage: async (to, text) => { sent.push(text); },
+        parseIntent: (text) => (/^my incidents$/i.test(text.trim()) ? { type: 'incidentHistory' } : { type: 'unknown' }),
+        hashPhone: () => fromToPhoneHash,
+        listIncidents: incidentServiceReal.listIncidents,
+        getIncident: incidentServiceReal.getIncident,
+      },
+    };
+  }
+
+  const { sent: sentA, deps: depsA } = makeHistoryDeps(TEACHER_A_HASH);
+  await handleIncidentHistoryFlow('27821111111', 'my incidents', null, depsA);
+  assert(sentA[0].includes('Bullying') || sentA[0].includes('Injury'), 'MY INCIDENTS list shows Teacher A\'s real persisted incidents');
+
+  await handleIncidentHistoryFlow('27821111111', '1', null, depsA);
+  const detailMsg = sentA[sentA.length - 1];
+  assert(
+    detailMsg.includes('Reported bullying incident during lunch break.') ||
+    detailMsg.includes('Learner fell during break and scraped a knee.'),
+    'WhatsApp detail view shows the exact persisted description — same row the dashboard wrote/read'
+  );
+
+  const { sent: sentB, deps: depsB } = makeHistoryDeps(TEACHER_B_HASH);
+  await handleIncidentHistoryFlow('27822222222', 'my incidents', null, depsB);
+  assert(sentB[0].includes("haven't logged any incidents"), "Teacher B's MY INCIDENTS shows empty — Teacher A's incidents never leak across the real ownership check");
 
   console.log(`\n${'─'.repeat(55)}`);
   console.log(`Incident Mirroring E2E Results: ${passed} passed, ${failed} failed`);
