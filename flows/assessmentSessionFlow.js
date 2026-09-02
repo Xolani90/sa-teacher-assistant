@@ -563,6 +563,13 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
         blueprintVersion: result.state.blueprintVersion,
         classId: result.state.classId,
         learnerResults: toLearnerResults(result.state),
+        // Phase 6 fix: mirror flows/assessmentFlow.js's (legacy CSV/photo
+        // flow) atpTopics wiring. Without this, storeAssessment() always
+        // persisted atp_topics: '[]' for blueprint-based captures, and
+        // updateCoverageFromAssessment() silently marked zero topics
+        // covered — even though each blueprint question carries a
+        // CAPS-registry-validated topic (validated at publish time).
+        atpTopics: [...new Set((result.state.questions || []).map((q) => q.topic).filter(Boolean))],
       });
 
       if (diagnostic.error) {
