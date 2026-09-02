@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useTeacher } from '../auth/TeacherContext';
 import { ApiError } from '../api/client';
 import Layout from '../components/Layout';
-import { Card, EmptyState, ErrorBanner, Spinner, SectionHeader, Pill } from '../components/ui';
+import { Card, EmptyState, ErrorBanner, Spinner, SectionHeader, Pill, Button } from '../components/ui';
 
 const STATUS_LOADING = 'loading';
 const STATUS_READY = 'ready';
@@ -26,6 +26,14 @@ export default function ObservationDetail() {
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
 
+  // Dashboard mirror of the WhatsApp "RESOLVE" command
+  // (PATCH /api/observations/records/:recordId ->
+  // services/observationRepository.js#resolveObservationRecord). Tracks
+  // in-flight/failed state per record id so multiple resolves can be
+  // attempted independently without one's spinner blocking another's.
+  const [resolvingId, setResolvingId] = useState(null);
+  const [resolveError, setResolveError] = useState(null);
+
   const load = useCallback(async () => {
     setStatus(STATUS_LOADING);
     setError(null);
@@ -45,6 +53,26 @@ export default function ObservationDetail() {
 
   const session = detail?.session;
   const lineage = detail?.correctionLineage;
+
+  async function handleResolve(recordId) {
+    setResolvingId(recordId);
+    setResolveError(null);
+    try {
+      await authedFetch(`/api/observations/records/${recordId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resolved: true }),
+      });
+      setDetail((prev) => ({
+        ...prev,
+        records: prev.records.map((r) => (r.id === recordId ? { ...r, resolved: true } : r)),
+      }));
+    } catch (err) {
+      setResolveError(err instanceof ApiError ? err.message : 'Could not resolve this record. Please try again.');
+    } finally {
+      setResolvingId(null);
+    }
+  }
 
   return (
     <Layout>
@@ -108,6 +136,11 @@ export default function ObservationDetail() {
           {/* Records */}
           <div>
             <SectionHeader title="Records" />
+            {resolveError && (
+              <p style={{ color: 'var(--color-danger, #c0392b)', fontSize: 'var(--text-sm)', marginBottom: 'var(--space-3)' }}>
+                {resolveError}
+              </p>
+            )}
             {detail.records.length === 0 ? (
               <EmptyState title="No records" description="This session has no observation records." />
             ) : (
@@ -123,6 +156,11 @@ export default function ObservationDetail() {
                           {r.resolved ? <Pill tone="success">Resolved</Pill> : <Pill tone="warning">Follow-up required</Pill>}
                         </div>
                       </div>
+                      {!r.resolved && (
+                        <Button variant="ghost" onClick={() => handleResolve(r.id)} disabled={resolvingId === r.id}>
+                          {resolvingId === r.id ? 'Resolving…' : 'Mark resolved'}
+                        </Button>
+                      )}
                     </div>
                     {r.notes && (
                       <p style={{ marginTop: 'var(--space-3)', fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>

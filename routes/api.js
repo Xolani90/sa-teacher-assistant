@@ -1359,6 +1359,56 @@ function createGetObservationDetailHandler({ getObservationDetail }) {
   };
 }
 
+function createPatchObservationRecordHandler({ resolveObservationRecord }) {
+  /**
+   * PATCH /api/observations/records/:recordId
+   * Body: { resolved: true }
+   *
+   * Dashboard mirror of the WhatsApp "RESOLVE" command
+   * (services/observationRepository.js#resolveObservationRecord) —
+   * marks a single follow-up record as resolved so it drops out of the
+   * "Needs follow-up" section. Currently the only supported transition
+   * is resolved:true; resolveObservationRecord itself has no "unresolve"
+   * counterpart, so that's the only body this handler accepts.
+   *
+   * @returns 200 { record } on success
+   * @returns 400 for a non-positive-integer :recordId, or a body that
+   *          isn't exactly { resolved: true }
+   * @returns 404 if the record doesn't exist or isn't owned by this
+   *          teacher (resolveObservationRecord returns null) — same
+   *          "not found" convention as every other route in this file
+   * @returns 500 if the underlying service throws for any other reason
+   */
+  return function handlePatchObservationRecord(req, res) {
+    const recordId = Number(req.params.recordId);
+    if (!Number.isInteger(recordId) || recordId <= 0) {
+      return res.status(400).json({ error: 'recordId must be a positive integer.' });
+    }
+
+    const body = req.body || {};
+    if (body.resolved !== true) {
+      return res.status(400).json({ error: 'Only { resolved: true } is supported.' });
+    }
+
+    let record;
+    try {
+      record = resolveObservationRecord(recordId, req.teacher.phoneHash);
+    } catch (err) {
+      if (/does not belong to this teacher/.test(err.message)) {
+        return res.status(404).json({ error: 'Observation record not found.' });
+      }
+      console.error('[API] resolveObservationRecord failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!record) {
+      return res.status(404).json({ error: 'Observation record not found.' });
+    }
+
+    return res.status(200).json({ record });
+  };
+}
+
 /**
  * Builds the GET /assessments/:assessmentId/detail handler — the
  * evidence view behind a class/learner's overall percentage. Same
@@ -1535,7 +1585,7 @@ const { getClassSnapshot } = require('../services/classSnapshotService');
 const { getClass, updateClass, deleteClass } = require('../services/teacherWorkspaceService');
 const { getLearnerDetail } = require('../services/learnerDetailService');
 const { getObservationDetail } = require('../services/observationDetailService');
-const { getObservationHistory } = require('../services/observationRepository');
+const { getObservationHistory, resolveObservationRecord } = require('../services/observationRepository');
 const { getAssessmentDetail } = require('../services/assessmentDetailService');
 const { generateBlueprintAssessmentPdf } = require('../services/pdfService');
 const { buildPdfUrl } = require('../core/generationPipeline');
@@ -1759,6 +1809,10 @@ router.get(
   '/observations/:assessmentId',
   createGetObservationDetailHandler({ getObservationDetail })
 );
+router.patch(
+  '/observations/records/:recordId',
+  createPatchObservationRecordHandler({ resolveObservationRecord })
+);
 
 router.get(
   '/assessments/:assessmentId/detail',
@@ -1864,6 +1918,7 @@ module.exports.__testExports = {
   createGetLearnerDetailHandler,
   createDeleteLearnerHandler,
   createGetObservationDetailHandler,
+  createPatchObservationRecordHandler,
   createGetObservationsHandler,
   createGetAssessmentDetailHandler,
   createGetAssessmentPdfHandler,
