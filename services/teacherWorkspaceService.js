@@ -150,6 +150,32 @@ function deleteClass(classId, phoneHash) {
   const db = getDb();
 
   try {
+    // Guard: classes.id is referenced by learners.class_id, assessments.class_id
+    // and observation_assessments.class_id via FOREIGN KEY (enforced — see
+    // utils/database.js `pragma('foreign_keys = ON')`), none of which declare
+    // ON DELETE CASCADE. A raw DELETE against a class with any dependent rows
+    // would throw a raw SQLITE_CONSTRAINT_FOREIGNKEY error rather than a
+    // meaningful message, and this app has no cascade/archival policy for
+    // wiping out a teacher's learner roster or assessment history as a side
+    // effect of removing a class. Rather than either surfacing that raw DB
+    // error or silently cascading data loss, block the delete with a clear,
+    // callable-distinguishable error so the caller can tell the teacher why
+    // (e.g. "reassign or delete the N learners first").
+    const dependents = db.prepare(`
+      SELECT
+        (SELECT COUNT(*) FROM learners WHERE class_id = ?) AS learners,
+        (SELECT COUNT(*) FROM assessments WHERE class_id = ?) AS assessments,
+        (SELECT COUNT(*) FROM observation_assessments WHERE class_id = ?) AS observations
+    `).get(classId, classId, classId);
+
+    if (dependents.learners > 0 || dependents.assessments > 0 || dependents.observations > 0) {
+      const parts = [];
+      if (dependents.learners > 0) parts.push(`${dependents.learners} learner(s)`);
+      if (dependents.assessments > 0) parts.push(`${dependents.assessments} assessment(s)`);
+      if (dependents.observations > 0) parts.push(`${dependents.observations} observation(s)`);
+      throw new Error(`deleteClass: cannot delete class ${classId} — it still has ${parts.join(', ')} linked to it.`);
+    }
+
     const result = db.prepare(`
       DELETE FROM classes WHERE id = ? AND phone_hash = ?
     `).run(classId, phoneHash);

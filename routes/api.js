@@ -985,6 +985,84 @@ function createPatchClassHandler({ updateClass, getClass }) {
 }
 
 /**
+ * Builds the DELETE /classes/:classId handler (Phase 6 continuation —
+ * class deletion).
+ *
+ * services/teacherWorkspaceService.js#deleteClass already existed, fully
+ * implemented, ownership-scoped, and default-class-reassignment-aware —
+ * but had zero callers anywhere in the app, same pattern as
+ * updateClass before this phase. A teacher who created a class in
+ * error (wrong grade, duplicate) had no way to remove it.
+ *
+ * Ownership follows the same getClass-then-mutate convention as the
+ * PATCH handler above: 404s before calling deleteClass() if the class
+ * doesn't exist or belongs to a different teacher.
+ *
+ * deleteClass() itself refuses to delete a class that still has
+ * learners, assessments, or observations linked to it (classes.id is
+ * FK-referenced by those tables with foreign_keys enforcement ON, and
+ * this app has no cascade/archival policy for wiping out a teacher's
+ * roster or assessment history as a side effect of removing a class).
+ * That guard error is distinguished by its `deleteClass:` prefix and
+ * surfaced as 409 Conflict with the service's explanatory message,
+ * rather than a raw 500.
+ *
+ * @param {Object} deps
+ * @param {(classId:number, phoneHash:string) => boolean} deps.deleteClass
+ * @param {(classId:number, phoneHash:string) => Object|null} deps.getClass
+ * @returns {(req, res) => void}
+ */
+function createDeleteClassHandler({ deleteClass, getClass }) {
+  /**
+   * DELETE /api/classes/:classId
+   *
+   * @returns 204 on success (no body)
+   * @returns 400 for a non-positive-integer :classId
+   * @returns 404 if the class doesn't exist or isn't owned by this
+   *          teacher (getClass returns null) — deleteClass is never
+   *          called in that case
+   * @returns 409 if the class still has learners, assessments, or
+   *          observations linked to it
+   * @returns 500 if the underlying service throws for any other reason
+   */
+  return function handleDeleteClass(req, res) {
+    const classId = Number(req.params.classId);
+    if (!Number.isInteger(classId) || classId <= 0) {
+      return res.status(400).json({ error: 'classId must be a positive integer.' });
+    }
+
+    let existing;
+    try {
+      existing = getClass(classId, req.teacher.phoneHash);
+    } catch (err) {
+      console.error('[API] getClass failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Class not found.' });
+    }
+
+    let deleted;
+    try {
+      deleted = deleteClass(classId, req.teacher.phoneHash);
+    } catch (err) {
+      if (/^deleteClass:/.test(err.message)) {
+        return res.status(409).json({ error: err.message });
+      }
+      console.error('[API] deleteClass failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!deleted) {
+      return res.status(404).json({ error: 'Class not found.' });
+    }
+
+    return res.status(204).send();
+  };
+}
+
+/**
  * Builds the GET /classes/:classId/detail handler (dashboard "Class
  * Detail" / command-center view — PROJECT_STATUS.md's post-branding
  * milestone).
@@ -1399,7 +1477,7 @@ const { listGrowthPlans, getGrowthPlan, createGrowthPlan, updateGrowthPlan, dele
 const { listBlueprints, getBlueprintById } = require('../services/blueprintRepository');
 const { getClassDetail } = require('../services/classDetailService');
 const { getClassSnapshot } = require('../services/classSnapshotService');
-const { getClass, updateClass } = require('../services/teacherWorkspaceService');
+const { getClass, updateClass, deleteClass } = require('../services/teacherWorkspaceService');
 const { getLearnerDetail } = require('../services/learnerDetailService');
 const { getObservationDetail } = require('../services/observationDetailService');
 const { getObservationHistory } = require('../services/observationRepository');
@@ -1593,6 +1671,11 @@ router.patch(
   createPatchClassHandler({ updateClass, getClass })
 );
 
+router.delete(
+  '/classes/:classId',
+  createDeleteClassHandler({ deleteClass, getClass })
+);
+
 router.get(
   '/classes/:classId/detail',
   createGetClassDetailHandler({ getClassDetail })
@@ -1713,6 +1796,7 @@ module.exports.__testExports = {
   createGetInterventionPlanHandler,
   createGetClassesHandler,
   createPatchClassHandler,
+  createDeleteClassHandler,
   createGetResourcesHandler,
   createGetResourceDetailHandler,
   createGetClassDetailHandler,
