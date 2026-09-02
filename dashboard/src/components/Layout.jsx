@@ -9,6 +9,7 @@ const NAV_ITEMS = [
   { to: '/resources', label: 'Lesson Plans', icon: '▦' },
   { to: '/observations', label: 'Observations', icon: '◎' },
   { to: '/incidents', label: 'Incident Book', icon: '⚠' },
+  { to: '/blueprints', label: 'Assessment Blueprints', icon: '⚖' },
   { to: '/qms', label: 'QMS Readiness', icon: '✓' },
 ];
 

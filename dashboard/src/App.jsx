@@ -15,6 +15,8 @@ import AssessmentDetail from './pages/AssessmentDetail';
 import QMS from './pages/QMS';
 import IncidentsWorkspace from './pages/IncidentsWorkspace';
 import IncidentDetail from './pages/IncidentDetail';
+import BlueprintsWorkspace from './pages/BlueprintsWorkspace';
+import BlueprintDetail from './pages/BlueprintDetail';
 
 export default function App() {
   return (
@@ -116,6 +118,22 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <IncidentDetail />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/blueprints"
+              element={
+                <ProtectedRoute>
+                  <BlueprintsWorkspace />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/blueprints/:blueprintId"
+              element={
+                <ProtectedRoute>
+                  <BlueprintDetail />
                 </ProtectedRoute>
               }
             />

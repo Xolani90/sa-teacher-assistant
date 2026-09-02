@@ -568,6 +568,101 @@ function createDeleteReflectionHandler({ deleteReflection }) {
 }
 
 /**
+ * Assessment Blueprint routes (ADR-005 §5, Migration 029) — additive
+ * Dashboard READ surface over the pre-existing services/blueprintRepository.js,
+ * the SAME repository flows/blueprintAuthoringFlow.js's WhatsApp blueprint-
+ * authoring flow writes to. No new persistence, no new weighting
+ * calculation — this exposes the canonical persisted blueprint + its
+ * already-computed weighting allocation exactly as stored. Mirrors the
+ * growth-plans handlers below (dependency injection, no-existence-oracle
+ * 404 convention) for both routes.
+ *
+ * listBlueprints(phoneHash, filters) already scopes by phone_hash inside
+ * the repository. getBlueprintById(blueprintId) does not take a
+ * phoneHash (it has no per-teacher variant), so ownership is checked
+ * here at the route layer using the phoneHash already present on the
+ * mapped blueprint object, and a mismatch is reported as 404 — not 403 —
+ * to avoid leaking whether a given id exists to a non-owning teacher,
+ * matching the existing convention on every other detail route.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, filters?:Object) => Object[]} deps.listBlueprints
+ * @returns {(req, res) => void}
+ */
+function createGetBlueprintsHandler({ listBlueprints }) {
+  /**
+   * GET /api/blueprints
+   * Optional query params: ?subject=<subject>, ?grade=<n>, ?status=<status>,
+   * matching listBlueprints()'s own filters.
+   *
+   * @returns 200 { blueprints: [...] } — scoped to req.teacher.phoneHash,
+   *          most recently updated first, excluding archived by default
+   * @returns 500 if the underlying repository throws
+   */
+  return function handleGetBlueprints(req, res) {
+    const subject = req.query.subject !== undefined ? req.query.subject : null;
+    const gradeParam = req.query.grade;
+    const grade = gradeParam !== undefined ? Number(gradeParam) : null;
+    const status = req.query.status !== undefined ? req.query.status : null;
+
+    let blueprints;
+    try {
+      blueprints = listBlueprints(req.teacher.phoneHash, {
+        subject: subject || undefined,
+        grade: grade != null ? grade : undefined,
+        status: status || undefined,
+      });
+    } catch (err) {
+      console.error('[API] listBlueprints failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+    return res.status(200).json({ blueprints: blueprints || [] });
+  };
+}
+
+/**
+ * Builds the GET /blueprints/:id handler — thin wrapper around
+ * blueprintRepository.getBlueprintById(id), with an ownership check at
+ * the route layer (see comment above).
+ *
+ * @param {Object} deps
+ * @param {(id:number) => Object|null} deps.getBlueprintById
+ * @returns {(req, res) => void}
+ */
+function createGetBlueprintDetailHandler({ getBlueprintById }) {
+  /**
+   * GET /api/blueprints/:id
+   *
+   * @returns 200 { blueprint } on success — full header + weighting
+   *          allocation (blueprint.questions), exactly as persisted
+   * @returns 400 for a non-positive-integer :id
+   * @returns 404 if the blueprint doesn't exist or isn't owned by this
+   *          teacher
+   * @returns 500 if the underlying repository throws
+   */
+  return function handleGetBlueprintDetail(req, res) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Invalid blueprint id' });
+    }
+
+    let blueprint;
+    try {
+      blueprint = getBlueprintById(id);
+    } catch (err) {
+      console.error('[API] getBlueprintById failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!blueprint || blueprint.phoneHash !== req.teacher.phoneHash) {
+      return res.status(404).json({ error: 'Blueprint not found' });
+    }
+
+    return res.status(200).json({ blueprint });
+  };
+}
+
+/**
  * Growth Plans routes (PR29/ADR-011 §2, topicId per PR32/ADR-013 §4.3) —
  * thin wrappers over the pre-existing services/growthPlanService.js,
  * the SAME service flows/growthPlanFlow.js's WhatsApp NEW GOAL flow
@@ -1203,6 +1298,7 @@ const { getActiveRosterCounts } = require('../services/learnerRosterService');
 const { getStatusSnapshot } = require('../services/tseEvidenceService');
 const { listReflections, createReflection, updateReflection, deleteReflection } = require('../services/reflectionService');
 const { listGrowthPlans, getGrowthPlan, createGrowthPlan, updateGrowthPlan, deleteGrowthPlan } = require('../services/growthPlanService');
+const { listBlueprints, getBlueprintById } = require('../services/blueprintRepository');
 const { getClassDetail } = require('../services/classDetailService');
 const { getClassSnapshot } = require('../services/classSnapshotService');
 const { getClass } = require('../services/teacherWorkspaceService');
@@ -1475,6 +1571,15 @@ router.delete(
 );
 
 router.get(
+  '/blueprints',
+  createGetBlueprintsHandler({ listBlueprints })
+);
+router.get(
+  '/blueprints/:id',
+  createGetBlueprintDetailHandler({ getBlueprintById })
+);
+
+router.get(
   '/qms/topics',
   createGetQmsTopicsHandler({ listTopicsOrdered })
 );
@@ -1525,4 +1630,6 @@ module.exports.__testExports = {
   createPatchGrowthPlanHandler,
   createDeleteGrowthPlanHandler,
   createGetQmsTopicsHandler,
+  createGetBlueprintsHandler,
+  createGetBlueprintDetailHandler,
 };
