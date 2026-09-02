@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { useTeacher } from '../auth/TeacherContext';
 import { ApiError } from '../api/client';
 import Layout from '../components/Layout';
-import { Card, ErrorBanner, Spinner, SectionHeader, Pill } from '../components/ui';
+import { Card, ErrorBanner, Spinner, SectionHeader, Pill, Button } from '../components/ui';
 
 const STATUS_LOADING = 'loading';
 const STATUS_READY = 'ready';
@@ -61,6 +61,16 @@ export default function ResourceDetail() {
   const [resource, setResource] = useState(null);
   const [error, setError] = useState(null);
 
+  // Deletion (Phase 6 continuation) — a thin wrapper around
+  // DELETE /api/resources/:id (routes/api.js -> teacherWorkspaceService.js's
+  // pre-existing, ownership-scoped deleteSavedResource()). Same
+  // confirm-then-delete pattern as ClassDetail.jsx, scoped to this one
+  // resource. saved_resources rows are leaves nothing else references, so
+  // unlike deleteClass there's no dependent-record guard to surface here.
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState(null);
+
   const load = useCallback(async () => {
     setStatus(STATUS_LOADING);
     setError(null);
@@ -77,6 +87,20 @@ export default function ResourceDetail() {
   useEffect(() => {
     load();
   }, [load]);
+
+  async function handleDeleteResource() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await authedFetch(`/api/resources/${resourceId}`, { method: 'DELETE' });
+      navigate('/resources');
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : 'Could not delete this resource. Please try again.');
+      setConfirmDelete(false);
+    } finally {
+      setDeleting(false);
+    }
+  }
 
   return (
     <Layout>
@@ -97,13 +121,37 @@ export default function ResourceDetail() {
               {resource.subject && <Pill>{resource.subject}</Pill>}
               {resource.term != null && <Pill tone="neutral">Term {resource.term}</Pill>}
             </div>
-            <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.02em', margin: '0 0 var(--space-2)' }}>
-              {resource.title || 'Untitled resource'}
-            </h1>
-            <p style={{ color: 'var(--color-text-secondary)', margin: 0, fontSize: 'var(--text-sm)' }}>
-              {resource.topic ? `${resource.topic} · ` : ''}
-              Created {formatDateTime(resource.createdAt)}
-            </p>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 'var(--space-3)' }}>
+              <div>
+                <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.02em', margin: '0 0 var(--space-2)' }}>
+                  {resource.title || 'Untitled resource'}
+                </h1>
+                <p style={{ color: 'var(--color-text-secondary)', margin: 0, fontSize: 'var(--text-sm)' }}>
+                  {resource.topic ? `${resource.topic} · ` : ''}
+                  Created {formatDateTime(resource.createdAt)}
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 'var(--space-2)', alignItems: 'center', flexWrap: 'wrap' }}>
+                {confirmDelete ? (
+                  <>
+                    <span style={{ fontSize: 'var(--text-sm)', color: 'var(--color-text-secondary)' }}>
+                      Delete this resource?
+                    </span>
+                    <Button variant="danger" onClick={handleDeleteResource} disabled={deleting}>
+                      {deleting ? 'Deleting…' : 'Confirm'}
+                    </Button>
+                    <Button variant="ghost" onClick={() => setConfirmDelete(false)} disabled={deleting}>
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <Button variant="ghost" onClick={() => setConfirmDelete(true)}>
+                    Delete
+                  </Button>
+                )}
+              </div>
+            </div>
+            {deleteError && <p style={styles.formError}>{deleteError}</p>}
           </div>
 
           {/* Full generated content, verbatim — same text WhatsApp delivered */}
@@ -141,6 +189,11 @@ function formatDateTime(iso) {
 }
 
 const styles = {
+  formError: {
+    color: 'var(--color-danger)',
+    fontSize: 'var(--text-sm)',
+    margin: '0.4rem 0 0',
+  },
   backButton: {
     background: 'none',
     border: 'none',
