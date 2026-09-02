@@ -985,6 +985,77 @@ function createPatchClassHandler({ updateClass, getClass }) {
 }
 
 /**
+ * Builds the DELETE /resources/:id handler (Phase 6 continuation —
+ * saved-resource deletion).
+ *
+ * services/teacherWorkspaceService.js#deleteSavedResource already
+ * existed, fully implemented and ownership-scoped (its own SQL WHERE
+ * clause matches both id AND phone_hash) — but had zero callers
+ * anywhere in the app, on WhatsApp or Dashboard. A teacher who saved a
+ * resource by mistake, or just wants to clear out clutter, had no way
+ * to remove it from either surface; MY RESOURCES / GET /resources only
+ * ever grows.
+ *
+ * Ownership follows the same getSavedResource-then-mutate convention as
+ * the class handlers above: 404s before calling deleteSavedResource()
+ * if the resource doesn't exist or belongs to a different teacher, so
+ * the same generic 404 covers both cases and this route can never be
+ * used as an existence oracle for another teacher's resource ids.
+ *
+ * No FK/dependent-record guard is needed here (unlike deleteClass) —
+ * saved_resources rows are leaf records nothing else references.
+ *
+ * @param {Object} deps
+ * @param {(resourceId:number, phoneHash:string) => boolean} deps.deleteSavedResource
+ * @param {(resourceId:number, phoneHash:string) => Object|null} deps.getSavedResource
+ * @returns {(req, res) => void}
+ */
+function createDeleteResourceHandler({ deleteSavedResource, getSavedResource }) {
+  /**
+   * DELETE /api/resources/:id
+   *
+   * @returns 204 on success (no body)
+   * @returns 400 for a non-positive-integer :id
+   * @returns 404 if the resource doesn't exist or isn't owned by this
+   *          teacher (getSavedResource returns null) — deleteSavedResource
+   *          is never called in that case
+   * @returns 500 if the underlying service throws
+   */
+  return function handleDeleteResource(req, res) {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      return res.status(400).json({ error: 'Resource id must be a positive integer.' });
+    }
+
+    let existing;
+    try {
+      existing = getSavedResource(id, req.teacher.phoneHash);
+    } catch (err) {
+      console.error('[API] getSavedResource failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!existing) {
+      return res.status(404).json({ error: 'Resource not found.' });
+    }
+
+    let deleted;
+    try {
+      deleted = deleteSavedResource(id, req.teacher.phoneHash);
+    } catch (err) {
+      console.error('[API] deleteSavedResource failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (!deleted) {
+      return res.status(404).json({ error: 'Resource not found.' });
+    }
+
+    return res.status(204).send();
+  };
+}
+
+/**
  * Builds the DELETE /classes/:classId handler (Phase 6 continuation —
  * class deletion).
  *
@@ -1574,7 +1645,7 @@ function createGetAssessmentPdfHandler({ getAssessmentDetail, generateBlueprintA
 // Real wiring — the only place this file touches actual services.
 const { getLearnerById, getTeacherLearners } = require('../services/learnerRepository');
 const { getLearnerInterventionPlan } = require('../services/interventionService');
-const { getTeacherClasses, getSavedResources, getSavedResource } = require('../services/teacherWorkspaceService');
+const { getTeacherClasses, getSavedResources, getSavedResource, deleteSavedResource } = require('../services/teacherWorkspaceService');
 const { getActiveRosterCounts, removeLearner } = require('../services/learnerRosterService');
 const { getStatusSnapshot } = require('../services/tseEvidenceService');
 const { listReflections, createReflection, updateReflection, deleteReflection } = require('../services/reflectionService');
@@ -1771,6 +1842,11 @@ router.get(
   createGetResourceDetailHandler({ getSavedResource })
 );
 
+router.delete(
+  '/resources/:id',
+  createDeleteResourceHandler({ deleteSavedResource, getSavedResource })
+);
+
 router.patch(
   '/classes/:classId',
   createPatchClassHandler({ updateClass, getClass })
@@ -1911,6 +1987,7 @@ module.exports.__testExports = {
   createGetClassesHandler,
   createPatchClassHandler,
   createDeleteClassHandler,
+  createDeleteResourceHandler,
   createGetResourcesHandler,
   createGetResourceDetailHandler,
   createGetClassDetailHandler,

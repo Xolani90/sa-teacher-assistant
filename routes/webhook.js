@@ -845,6 +845,12 @@ function buildCommandDeps() {
     // while a teacher is mid-flow in rosterFlow's PREVIEW step — see the
     // guard in commandHandler.js's SAVE branch for why this is needed here.
     rosterState,
+    // Phase 6 cycle 4: DELETE must not be claimed globally (saved-resource
+    // deletion) while a teacher is mid-flow in observationFlow's own
+    // delete-confirmation step (awaitingDeleteConfirmation) — see the guard
+    // in commandHandler.js's DELETE branch for why this is needed here.
+    // Same collision shape as RC1-H-006 (SAVE/rosterState) above.
+    observationHistoryState,
     // RC1-CANCEL: CANCEL must not be claimed globally (discard the
     // just-generated resource) while a teacher is mid-flow in ANY of the 13
     // stores messageProcessor's alreadyMidFlow checks — those flows own
@@ -1081,4 +1087,8 @@ module.exports.__testExports = {
   // lastWorksheetState so the EASIER/HARDER/VISUAL/ORAL bookkeeping can be
   // inspected directly, mirroring lastGeneratedState above.
   lastWorksheetState,
+  // Phase 6 cycle 4 (tests/phase6-delete-saved-resource.test.js): exposed so
+  // the DELETE-collision guard against flows/observationFlow.js's own
+  // bare-DELETE step can be exercised directly, mirroring rosterState above.
+  observationHistoryState,
 };

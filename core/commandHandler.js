@@ -414,11 +414,26 @@ async function handleCommand(from, text, deps) {
     return false;
   }
 
+  // Same collision shape as the SAVE/rosterState guard above: bare DELETE
+  // is already owned by flows/observationFlow.js's delete-confirmation step
+  // (awaitingDeleteConfirmation) while a teacher is viewing a specific
+  // observation. commandHandler runs before messageProcessor's
+  // alreadyMidFlow dispatch, so without this guard a bare DELETE typed
+  // mid-observation-review would be swallowed here instead of reaching
+  // observationFlow. Only the bare command collides — "DELETE <id>" (the
+  // saved-resource command below) is never a valid observation reply, so
+  // it's left unguarded.
+  if (upper === 'DELETE' && deps.observationHistoryState?.get(deps.hashPhone(from))) {
+    return false;
+  }
+
   const isWorkspaceCmd =
     upper === 'MY RESOURCES' ||
     upper === 'SAVE' ||
     upper === 'OPEN' ||
-    upper.startsWith('OPEN ');
+    upper.startsWith('OPEN ') ||
+    upper === 'DELETE' ||
+    upper.startsWith('DELETE ');
 
   if (isWorkspaceCmd) {
     const {
@@ -426,6 +441,7 @@ async function handleCommand(from, text, deps) {
       getSavedResources,
       getSavedResourceByGenerationId,
       getSavedResource,
+      deleteSavedResource,
     } = require('../services/teacherWorkspaceService');
 
     // ── SAVE ──────────────────────────────────────────────────────────────────
@@ -661,7 +677,7 @@ async function handleCommand(from, text, deps) {
           msg += `_...and ${resources.length - 8} more_\n`;
         }
 
-        msg += `\n_Reply *SAVE* after any generation to add to this list._`;
+        msg += `\n_Reply *OPEN [number]* to view one, *DELETE [number]* to remove one, or *SAVE* after any generation to add to this list._`;
 
         await deps.safeSendMessage(from, msg);
       } catch (err) {
@@ -740,6 +756,71 @@ async function handleCommand(from, text, deps) {
       // whatsappService.js), so long resources are simply delivered across
       // multiple messages rather than truncated.
       await deps.safeSendMessage(from, header + resource.content + footer);
+      return true;
+    }
+
+    // ── DELETE <id> — Phase 6: remove a saved resource ────────────────────────
+    // Mirrors OPEN <id> above exactly: same id-parsing, same generic
+    // not-found wording, same ownership convention. Reuses
+    // services/teacherWorkspaceService.js#deleteSavedResource — already
+    // implemented and ownership-scoped (its SQL matches id AND phone_hash
+    // in one WHERE clause) but previously had zero callers anywhere.
+    //
+    // No confirmation step: deleting a saved resource has no cascading
+    // effect on any other record (unlike deleteClass's dependent-record
+    // guard), and a teacher can always regenerate the same content, so a
+    // single explicit DELETE <id> is enough — consistent with OPEN <id>
+    // being a single-message command rather than a multi-turn session.
+    if (upper === 'DELETE' || upper.startsWith('DELETE ')) {
+      const phoneHash = deps.hashPhone(from);
+      const rawArg = upper.slice('DELETE'.length).trim();
+      const resourceId = parseInt(rawArg, 10);
+
+      if (!rawArg || !Number.isInteger(resourceId) || String(resourceId) !== rawArg || resourceId <= 0) {
+        await deps.safeSendMessage(from,
+          `🗑️ *Delete a saved resource*\n\nReply *DELETE [number]* using the number shown in *MY RESOURCES*.\n\nExample:\n_DELETE 42_`
+        );
+        return true;
+      }
+
+      let existing;
+      try {
+        existing = getSavedResource(resourceId, phoneHash);
+      } catch (err) {
+        console.error('[Workspace] getSavedResource error:', err.message);
+        await deps.safeSendMessage(from, `⚠️ Couldn't delete that resource right now. Please try again.`);
+        return true;
+      }
+
+      if (!existing) {
+        // Same generic wording as OPEN's not-found case — see ownership
+        // note above for why this must not distinguish "doesn't exist"
+        // from "belongs to another teacher".
+        await deps.safeSendMessage(from,
+          `That resource couldn't be found.\n\nReply *MY RESOURCES* to see your saved resources.`
+        );
+        return true;
+      }
+
+      let deleted;
+      try {
+        deleted = deleteSavedResource(resourceId, phoneHash);
+      } catch (err) {
+        console.error('[Workspace] deleteSavedResource error:', err.message);
+        await deps.safeSendMessage(from, `⚠️ Couldn't delete that resource right now. Please try again.`);
+        return true;
+      }
+
+      if (!deleted) {
+        await deps.safeSendMessage(from,
+          `That resource couldn't be found.\n\nReply *MY RESOURCES* to see your saved resources.`
+        );
+        return true;
+      }
+
+      await deps.safeSendMessage(from,
+        `🗑️ *Deleted*\n\n_${existing.title}_ has been removed from your saved resources.\n\nReply *MY RESOURCES* to see what's left.`
+      );
       return true;
     }
 
