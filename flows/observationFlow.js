@@ -188,14 +188,21 @@ async function handleObservationFlow(from, text, preClassifiedIntent, deps) {
         console.error('[WEBHOOK] saveObservationSubmission failed:', err.message);
       }
 
-      observationState.delete(phoneHash);
-
       if (saveError) {
+        // Preserve state (records, header, and — critically for
+        // correction integrity — correctsAssessmentId) so a retry
+        // resubmits the same correction rather than silently becoming
+        // a brand-new, unlinked observation. Mirrors the preserve-on-
+        // failure fix applied to growthPlanFlow.js/reflectionFlow.js
+        // in Cycle 10, which this flow was missed by.
+        observationState.set(phoneHash, { ...state, lastActivity: Date.now() });
         await safeSendMessage(from,
-          `⚠️ *Couldn't save that observation right now.* Please try sending it again in a moment.`
+          `⚠️ *Couldn't save that observation right now.* Nothing was lost — reply *DONE* to try saving it again, or *CANCEL* to discard.`
         );
         return true;
       }
+
+      observationState.delete(phoneHash);
 
       const correctionNote = state.correctsAssessmentId
         ? `\n\n_This replaces the earlier version — the old one is now marked as corrected._`

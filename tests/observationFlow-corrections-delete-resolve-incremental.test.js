@@ -334,6 +334,59 @@ async function testIncrementalBadAdditionKeepsEarlierRecordsSafe() {
   assert.strictEqual([...repo._debug_assessments.values()][0].records.length, 1);
 }
 
+async function testSaveFailurePreservesStateAndCorrectionLinkage() {
+  const repo = makeFakeRepository();
+  const messages = [];
+  const observationState = new SessionStore();
+  const observationHistoryState = new SessionStore();
+  const deps = makeDeps(repo, { observationState, observationHistoryState, messages });
+
+  // Cycle 13: a save failure must not discard the teacher's
+  // already-collected records or — critically — correctsAssessmentId.
+  // Losing correctsAssessmentId on retry would silently turn a
+  // correction into a brand-new, unlinked observation, breaking the
+  // insert-only audit trail. Mirrors the Cycle 10 fix applied to
+  // growthPlanFlow.js/reflectionFlow.js, which this flow was missed by.
+  let shouldFail = true;
+  const realSave = repo.saveObservationSubmission;
+  deps.saveObservationSubmission = (...args) => {
+    if (shouldFail) throw new Error('db unavailable');
+    return realSave(...args);
+  };
+
+  // A real prior assessment to correct (correctsAssessmentId must
+  // reference an existing, owned assessment per the repository's
+  // ownership check).
+  const original = realSave('hash:' + FROM, { assessment: 'T3W3', grade: 'R', subject: 'Maths' }, [
+    { learnerName: 'Sipho', domain: 'Number Recognition', developmentalStatus: 'Developing', notes: null },
+  ]);
+
+  await handleObservationFlow(FROM, 'record observation', { type: 'observation' }, deps);
+  await handleObservationFlow(FROM, CHUNK_1, null, deps);
+  // Simulate this being a correction of that earlier assessment.
+  const preState = observationState.get(deps.hashPhone(FROM));
+  observationState.set(deps.hashPhone(FROM), { ...preState, correctsAssessmentId: original.assessmentId });
+
+  await handleObservationFlow(FROM, 'DONE', null, deps);
+
+  const state = observationState.get(deps.hashPhone(FROM));
+  assert.ok(state, 'session is NOT cleared after a save failure — the composed observation is not lost');
+  assert.strictEqual(state.step, 'collectingRecords', 'stays on collectingRecords so DONE retries without re-entering records');
+  assert.strictEqual(state.records.length, 1, 'records preserved across the failed save');
+  assert.strictEqual(state.correctsAssessmentId, original.assessmentId, 'correctsAssessmentId preserved — retry still corrects the right assessment, not a fresh unlinked one');
+  assert.ok(/nothing was lost/i.test(lastMessage(messages)), 'reassures the teacher their input is preserved');
+  assert.strictEqual(repo._debug_assessments.size, 1, 'only the pre-existing original exists; nothing new saved yet');
+
+  // Retry: DONE again, this time the save succeeds.
+  shouldFail = false;
+  await handleObservationFlow(FROM, 'DONE', null, deps);
+  assert.strictEqual(repo._debug_assessments.size, 2, 'retry saves exactly one new row, no duplicate');
+  const saved = [...repo._debug_assessments.values()].find(a => a.id !== original.assessmentId);
+  assert.strictEqual(saved.correctsAssessmentId, original.assessmentId, 'the saved row still carries the original correction linkage');
+  assert.strictEqual(observationState.get(deps.hashPhone(FROM)), undefined, 'state cleared once the retried save succeeds');
+  assert.ok(/saved successfully/i.test(lastMessage(messages)));
+}
+
 // ── Tests: correction (supersedes) ──────────────────────────────────────
 
 async function driveToDetailView(repo, deps, from) {
@@ -554,6 +607,7 @@ async function main() {
   await test('DONE saves all accumulated records from multiple messages as one assessment', testIncrementalDone);
   await test('CANCEL discards accumulated records without saving', testIncrementalCancelDiscards);
   await test('a bad addition mid-collection keeps earlier records safe and DONE-able', testIncrementalBadAdditionKeepsEarlierRecordsSafe);
+  await test('a save failure preserves state and correction linkage; retry succeeds without duplicating', testSaveFailurePreservesStateAndCorrectionLinkage);
 
   console.log('Correction (supersedes):');
   await test('CORRECT hands off, saves as correction, hides original from history', testCorrectFlowSupersedesOriginal);
