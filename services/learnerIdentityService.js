@@ -100,16 +100,49 @@ function previewLearnerResolution({ phoneHash, classId, learnerName }) {
     : { status: 'new' };
 }
 
+// Cycle 17 fix: findByIdentity() matches on (phone_hash, class_id,
+// normalized_name) alone — it has no removed_at filter, and can't
+// reasonably have one, because idx_learners_identity_classed /
+// idx_learners_identity_unclassed (Migration 026) are themselves not
+// scoped by removed_at. A soft-removed learner permanently occupies
+// their identity slot; a genuinely new INSERT for the same
+// (teacher, class, name) is rejected by that unique index regardless of
+// removed_at, so "match the removed row" is the only outcome the schema
+// allows here — never "create a fresh, distinct learner".
+//
+// learnerRosterService.js's setRoster()/addLearner() already knew this
+// and un-remove (removed_at = NULL) whatever resolveLearner() hands
+// back before using it, specifically so a re-pasted or re-added name
+// reappears on the active roster instead of silently staying hidden.
+// But every OTHER resolveLearner() caller — observationRepository.js's
+// saveObservationSubmission() and diagnosticWorkflowService.js's
+// learner_results insertion — took the returned row as-is, with no
+// revival. A teacher who removes a learner via the dashboard (or
+// WhatsApp REMOVE LEARNER) and then later logs a WhatsApp observation
+// or captures assessment marks for the same name silently attaches
+// that new evidence to the removed learner's identity: it never
+// reappears in GET /learners, the class roster, or classDetailService's
+// active-roster views, yet keeps accumulating fresh records the teacher
+// has no ordinary way to find. Centralizing the revival here (rather
+// than requiring every future caller to remember the roster-service
+// pattern) closes the gap for all four call sites uniformly.
+function reviveIfRemoved(learner) {
+  if (!learner || !learner.removed_at) return learner;
+  const db = getDb();
+  db.prepare(`UPDATE learners SET removed_at = NULL, updated_at = datetime('now') WHERE id = ?`).run(learner.id);
+  return { ...learner, removed_at: null };
+}
+
 function resolveLearner({ phoneHash, classId, learnerName }) {
   const existing = findByIdentity({ phoneHash, classId, learnerName });
-  if (existing) return existing;
+  if (existing) return reviveIfRemoved(existing);
 
   try {
     return createLearner({ phoneHash, classId, learnerName });
   } catch (err) {
     if (isUniqueConstraintError(err)) {
       const refetched = findByIdentity({ phoneHash, classId, learnerName });
-      if (refetched) return refetched;
+      if (refetched) return reviveIfRemoved(refetched);
     }
     throw err;
   }

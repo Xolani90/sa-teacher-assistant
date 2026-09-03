@@ -179,6 +179,38 @@ test('resolveLearner recovers via re-find when createLearner hits a UNIQUE viola
   assert.strictEqual(resolved.id, all[0].id);
 });
 
+// --- Cycle 17 fix: resolveLearner revives a soft-removed identity ---
+test('resolveLearner un-removes a soft-removed learner matched by identity (classed)', () => {
+  const created = resolveLearner({ phoneHash: 't1', classId: 11, learnerName: 'Thandiwe Nkosi' });
+  db.prepare(`UPDATE learners SET removed_at = datetime('now') WHERE id = ?`).run(created.id);
+
+  const before = db.prepare(`SELECT removed_at FROM learners WHERE id = ?`).get(created.id);
+  assert.ok(before.removed_at, 'fixture setup: learner should be removed before the resolve call');
+
+  // Simulates a WhatsApp observation/assessment naming a learner who was
+  // removed from the roster in the meantime (dashboard DELETE or REMOVE
+  // LEARNER) — resolveLearner() must reactivate them, not silently attach
+  // new records to an invisible identity.
+  const resolved = resolveLearner({ phoneHash: 't1', classId: 11, learnerName: 'Thandiwe Nkosi' });
+  assert.strictEqual(resolved.id, created.id, 'must match the same identity, not create a duplicate');
+  assert.strictEqual(resolved.removed_at, null, 'resolveLearner must return the learner as no longer removed');
+
+  const after = db.prepare(`SELECT removed_at FROM learners WHERE id = ?`).get(created.id);
+  assert.strictEqual(after.removed_at, null, 'removed_at must be cleared in the database, not just the return value');
+});
+
+test('resolveLearner un-removes a soft-removed learner matched by identity (unclassed)', () => {
+  const created = resolveLearner({ phoneHash: 't4', classId: null, learnerName: 'Kagiso Molefe' });
+  db.prepare(`UPDATE learners SET removed_at = datetime('now') WHERE id = ?`).run(created.id);
+
+  const resolved = resolveLearner({ phoneHash: 't4', classId: null, learnerName: 'Kagiso Molefe' });
+  assert.strictEqual(resolved.id, created.id);
+  assert.strictEqual(resolved.removed_at, null);
+
+  const after = db.prepare(`SELECT removed_at FROM learners WHERE id = ?`).get(created.id);
+  assert.strictEqual(after.removed_at, null);
+});
+
 console.log(`\n${passed} passed`);
 
 db.close();
