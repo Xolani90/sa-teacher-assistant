@@ -68,29 +68,36 @@ function processAssessmentData(phoneHash, assessmentData) {
     });
   }
 
-  // Step 1: Validate and store assessment (only reached once the
-  // blueprint-status/marks validation above has already passed).
-  const assessmentId = storeAssessment(phoneHash, assessmentData);
+  // Step 1+2: atomically store assessment metadata + learner results.
+  //
+  // Cycle 12 fix: storeAssessment() and storeLearnerResults() used to be
+  // two independent writes — storeAssessment() autocommitted its INSERT
+  // immediately, then storeLearnerResults() ran its own separate
+  // BEGIN/COMMIT/ROLLBACK for the learner_results loop. Any genuine
+  // failure inside that second write (constraint violation, SQLITE_BUSY,
+  // a malformed row that throws mid-loop, a momentary disk error) rolled
+  // back learner_results only — the assessments row from Step 1 was
+  // already permanently committed with zero learner_results, an orphan
+  // that would show up in getDiagnosticHistory()/the dashboard forever.
+  // The teacher, meanwhile, was told "Failed to store learner results"
+  // and left on a dead-end ACTIVE-step session (assessmentSessionFlow.js
+  // preserves `result.state`, but isComplete(state) is already true, so
+  // submitReply() on any further input just returns "already complete" —
+  // there's no route back to retry). storeAssessmentAndLearnerResults()
+  // below wraps both writes in one transaction so a failure in either
+  // half rolls back both, matching the actual business invariant: an
+  // assessments row must never exist without its learner_results, and
+  // vice versa. classId comes from assessmentData.classId, resolved by
+  // the calling flow per ADR-004; null for teachers with 0 classes
+  // (zero-class policy).
+  const stored = storeAssessmentAndLearnerResults(phoneHash, assessmentData, learnerResults);
 
-  if (!assessmentId) {
-    return { error: 'Failed to store assessment data' };
+  if (stored.error) {
+    return { error: stored.error };
   }
 
-  // Step 2: Store learner results
-  // classId comes from assessmentData.classId, resolved by the calling
-  // flow per ADR-004 before processAssessmentData() is invoked; null for
-  // teachers with 0 classes (zero-class policy).
-  const storeResult = storeLearnerResults(
-    phoneHash,
-    assessmentId,
-    learnerResults,
-    assessmentData.classId ?? null
-  );
-
-  if (!storeResult.success) {
-    return { error: 'Failed to store learner results' };
-  }
-
+  const assessmentId = stored.assessmentId;
+  const storeResult = stored.storeResult;
   storeResult.skipped = [...blueprintSkipped, ...storeResult.skipped];
 
   // Step 2a: persist a per-learner, per-subject InterventionPlan
@@ -177,49 +184,65 @@ function processAssessmentData(phoneHash, assessmentData) {
  * @param {Object} assessmentData - Assessment data
  * @returns {number} Assessment ID or null
  */
+function insertAssessmentRow(db, phoneHash, assessmentData) {
+  const result = db.prepare(`
+    INSERT INTO assessments (
+      phone_hash, title, grade, subject, term, assessment_type, total_marks, atp_topics, class_id, blueprint_id, blueprint_version
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    phoneHash,
+    assessmentData.title,
+    assessmentData.grade,
+    assessmentData.subject,
+    assessmentData.term,
+    assessmentData.type,
+    assessmentData.totalMarks,
+    JSON.stringify(assessmentData.atpTopics || []),
+    // ADR-004: null for teachers with 0 classes (zero-class policy) or
+    // when the calling flow hasn't resolved class context yet.
+    assessmentData.classId ?? null,
+    // ADR-005/Migration 030: both null for an assessment created
+    // without going through the blueprint flow — every existing
+    // caller of storeAssessment() continues to work unchanged.
+    assessmentData.blueprintId ?? null,
+    assessmentData.blueprintVersion ?? null
+  );
+
+  const assessmentId = result.lastInsertRowid;
+
+  // TSE Evidence Engine (Migration 034): tag as 'assessment' evidence.
+  // Non-fatal — see tseEvidenceService.tagEvidence().
+  try {
+    require('./tseEvidenceService').tagEvidence(
+      phoneHash,
+      'assessment',
+      'assessments',
+      assessmentId
+    );
+  } catch (evidenceErr) {
+    console.error('[TSE] storeAssessment evidence tagging failed:', evidenceErr.message);
+  }
+
+  return assessmentId;
+}
+
+/**
+ * Stores assessment metadata in the database, as a standalone write.
+ *
+ * Kept for existing standalone callers (e.g.
+ * tests/tseEvidenceHooks.test.js) that only need an assessments row with
+ * no learner_results. processAssessmentData() no longer calls this
+ * directly — see storeAssessmentAndLearnerResults() below for why the
+ * two writes must share one transaction.
+ *
+ * @param {string} phoneHash - Teacher's phone hash
+ * @param {Object} assessmentData - Assessment data
+ * @returns {number} Assessment ID or null
+ */
 function storeAssessment(phoneHash, assessmentData) {
   const db = getDb();
-
   try {
-    const result = db.prepare(`
-      INSERT INTO assessments (
-        phone_hash, title, grade, subject, term, assessment_type, total_marks, atp_topics, class_id, blueprint_id, blueprint_version
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(
-      phoneHash,
-      assessmentData.title,
-      assessmentData.grade,
-      assessmentData.subject,
-      assessmentData.term,
-      assessmentData.type,
-      assessmentData.totalMarks,
-      JSON.stringify(assessmentData.atpTopics || []),
-      // ADR-004: null for teachers with 0 classes (zero-class policy) or
-      // when the calling flow hasn't resolved class context yet.
-      assessmentData.classId ?? null,
-      // ADR-005/Migration 030: both null for an assessment created
-      // without going through the blueprint flow — every existing
-      // caller of storeAssessment() continues to work unchanged.
-      assessmentData.blueprintId ?? null,
-      assessmentData.blueprintVersion ?? null
-    );
-
-    const assessmentId = result.lastInsertRowid;
-
-    // TSE Evidence Engine (Migration 034): tag as 'assessment' evidence.
-    // Non-fatal — see tseEvidenceService.tagEvidence().
-    try {
-      require('./tseEvidenceService').tagEvidence(
-        phoneHash,
-        'assessment',
-        'assessments',
-        assessmentId
-      );
-    } catch (evidenceErr) {
-      console.error('[TSE] storeAssessment evidence tagging failed:', evidenceErr.message);
-    }
-
-    return assessmentId;
+    return insertAssessmentRow(db, phoneHash, assessmentData);
   } catch (error) {
     console.error('Failed to store assessment:', error.message);
     return null;
@@ -242,24 +265,19 @@ function storeAssessment(phoneHash, assessmentData) {
  *   every existing caller of storeLearnerResults() continues to work
  *   unchanged since this is purely an additional field on the return
  *   object, not a signature change.
+ *
+ * Assumes the caller already holds an open transaction
+ * (storeAssessmentAndLearnerResults() below) — this function issues no
+ * BEGIN/COMMIT/ROLLBACK of its own and lets any error propagate so the
+ * caller's transaction rolls back both this write and the assessments
+ * row inserted alongside it.
  */
-function storeLearnerResults(phoneHash, assessmentId, learnerResults, classId = null) {
-  const db = getDb();
-
-  // Wrap the INSERT loop in a transaction so a throw partway through (e.g.
-  // unparseable per-learner data) cannot leave a partial set of learner
-  // rows committed under this assessmentId while the caller is told the
-  // whole operation failed (false) -- a teacher who re-uploads believing
-  // nothing was saved would otherwise get duplicate rows for the learners
-  // that *did* make it in before the throw.
-  try {
-    db.prepare('BEGIN').run();
-
-    const insert = db.prepare(`
-      INSERT INTO learner_results (
-        assessment_id, learner_name, mark, total_marks, percentage, question_data, learner_id
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
+function insertLearnerResultRows(db, phoneHash, assessmentId, learnerResults, classId = null) {
+  const insert = db.prepare(`
+    INSERT INTO learner_results (
+      assessment_id, learner_name, mark, total_marks, percentage, question_data, learner_id
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
 
     const skipped = [];
     const learnerIds = [];
@@ -306,16 +324,51 @@ function storeLearnerResults(phoneHash, assessmentId, learnerResults, classId = 
       );
     }
 
-    if (skipped.length > 0) {
-      console.warn(`[diagnosticWorkflow] Skipped ${skipped.length} malformed learner row(s) for assessment ${assessmentId}: ${skipped.join(', ')}`);
-    }
+  if (skipped.length > 0) {
+    console.warn(`[diagnosticWorkflow] Skipped ${skipped.length} malformed learner row(s) for assessment ${assessmentId}: ${skipped.join(', ')}`);
+  }
 
+  return { skipped, learnerIds };
+}
+
+/**
+ * Atomically stores an assessments row and its learner_results rows in a
+ * single transaction (Cycle 12 fix — see the call site in
+ * processAssessmentData() for the full defect writeup). Either both
+ * writes land, or neither does: an assessments row can never be left
+ * behind without its learner_results.
+ *
+ * Preserves the exact two distinct error strings the rest of the
+ * codebase (and tests/phase-c2-diagnostic-atomicity.test.js) already
+ * expect: 'Failed to store assessment data' when the assessments INSERT
+ * itself is what failed, 'Failed to store learner results' when it's the
+ * learner_results half — the caller doesn't need to know a shared
+ * transaction is involved.
+ *
+ * @returns {{assessmentId: number, storeResult: {skipped: string[], learnerIds: number[]}}|{error: string}}
+ */
+function storeAssessmentAndLearnerResults(phoneHash, assessmentData, learnerResults) {
+  const db = getDb();
+  const classId = assessmentData.classId ?? null;
+
+  let assessmentId;
+  try {
+    db.prepare('BEGIN').run();
+    assessmentId = insertAssessmentRow(db, phoneHash, assessmentData);
+  } catch (error) {
+    try { db.prepare('ROLLBACK').run(); } catch (_) { /* best-effort */ }
+    console.error('Failed to store assessment:', error.message);
+    return { error: 'Failed to store assessment data' };
+  }
+
+  try {
+    const storeResult = insertLearnerResultRows(db, phoneHash, assessmentId, learnerResults, classId);
     db.prepare('COMMIT').run();
-    return { success: true, skipped, learnerIds };
+    return { assessmentId, storeResult };
   } catch (error) {
     try { db.prepare('ROLLBACK').run(); } catch (_) { /* best-effort */ }
     console.error('Failed to store learner results:', error.message);
-    return { success: false, skipped: [] };
+    return { error: 'Failed to store learner results' };
   }
 }
 
