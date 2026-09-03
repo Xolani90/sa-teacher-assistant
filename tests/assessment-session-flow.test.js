@@ -104,8 +104,16 @@ async function run() {
   let classesFixture = [];
   const sentMessages = [];
 
+  // archivedBlueprintsFixture stands in for blueprints that exist (so
+  // getBlueprintById can still find them, matching real getBlueprintById's
+  // any-status lookup) but have been archived since being listed —
+  // exercising the SELECT_CLASS-step re-check independently of
+  // blueprintsFixture/listBlueprints, which only ever returns published
+  // blueprints (matching the real status:'published' filter).
+  let archivedBlueprintsFixture = [];
+
   const getBlueprintById = (id) => {
-    const summary = blueprintsFixture.find((b) => b.id === id);
+    const summary = archivedBlueprintsFixture.find((b) => b.id === id) || blueprintsFixture.find((b) => b.id === id);
     if (!summary) return null;
     return {
       id: summary.id,
@@ -115,6 +123,7 @@ async function run() {
       term: summary.term ?? 3,
       totalMarks: summary.total_marks,
       version: summary.version ?? 1,
+      status: summary.status ?? 'published',
       questions: [{ questionNumber: 1, topic: 'General', maxMarks: summary.total_marks }],
     };
   };
@@ -233,7 +242,37 @@ async function run() {
   assert(/No active assessment session/i.test(lastMessage()), 'STATUS with no session gives clear guidance');
 
   // ═══════════════════════════════════════════════════════════════════
-  console.log('\n── Section 6: STOP is not handled here (reserved for global opt-out) ─');
+  console.log('\n── Section 6: Blueprint archived between selection and class-pick ────');
+  // Cycle 8 regression: SessionStore persists this session across turns
+  // (and potentially days, per RESUME), so a blueprint picked at
+  // SELECT_BLUEPRINT can legitimately be archived (e.g. via the
+  // Dashboard) before SELECT_CLASS is reached. getBlueprintById() itself
+  // returns blueprints in any status by design, so the flow must re-check
+  // status itself rather than trusting SELECT_BLUEPRINT's earlier filter.
+  archivedBlueprintsFixture = [
+    { id: 2, title: 'Term 3 Geometry Test', grade: 5, subject: 'Mathematics', total_marks: 20, status: 'archived' },
+  ];
+  blueprintsFixture = [
+    { id: 2, title: 'Term 3 Geometry Test', grade: 5, subject: 'Mathematics', total_marks: 20, question_count: 3 },
+  ];
+  classesFixture = [
+    { id: 9, name: 'Grade 5B', grade: 5, subject: 'Mathematics', learner_count: 38 },
+  ];
+
+  await send('NEW TEST');
+  await send('1'); // picks blueprint id 2 — published at this point (listBlueprints fixture)
+  state = assessmentSessionState.get(phoneHash);
+  assert(state.step === 'selectClass', 'state advances to selectClass on a still-published blueprint');
+
+  // Blueprint gets archived out-of-band (Dashboard) while the WhatsApp
+  // session sits at SELECT_CLASS — getBlueprintById now resolves it as
+  // 'archived', matching the archivedBlueprintsFixture entry.
+  await send('1'); // picks the class
+  assert(/no longer available.*archived/is.test(lastMessage()), 'archived-blueprint re-check blocks capture with a clear message');
+  assert(assessmentSessionState.get(phoneHash) === undefined, 'session cleaned up after archived-blueprint block');
+
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 7: STOP is not handled here (reserved for global opt-out) ─');
   handled = await send('STOP');
   assert(handled === false, 'STOP falls through unhandled — no collision with the global opt-out command');
 

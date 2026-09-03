@@ -71,6 +71,7 @@ async function run() {
       term: 1,
       totalMarks: blueprint.total_marks,
       version: 1,
+      status: 'published',
       questions: blueprint.questions,
     } : null);
 

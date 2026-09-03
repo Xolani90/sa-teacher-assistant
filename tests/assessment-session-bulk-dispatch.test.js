@@ -85,6 +85,7 @@ async function run() {
       term: 3,
       totalMarks: summary.total_marks,
       version: 1,
+      status: summary.status ?? 'published',
       questions: [
         { questionNumber: 1, topic: 'Fractions', maxMarks: 5 },
         { questionNumber: 2, topic: 'Decimals', maxMarks: 10 },

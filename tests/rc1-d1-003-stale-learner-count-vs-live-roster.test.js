@@ -85,6 +85,7 @@ async function run() {
     term: 3,
     totalMarks: 10,
     version: 1,
+    status: 'published',
     questions: [{ questionNumber: 1, topic: 'Common Fractions', maxMarks: 10 }],
   });
 

@@ -447,6 +447,29 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
       return true;
     }
 
+    // getBlueprintById() intentionally returns a blueprint in ANY status
+    // (draft/published/archived) — that's correct for read/history access
+    // (see blueprintRepository.js#archiveBlueprint's docstring), but this
+    // call site is starting a brand-new capture session, not reading one.
+    // listBlueprints(phoneHash, { status: 'published' }) already filtered
+    // SELECT_BLUEPRINT's options to published-only, but SessionStore
+    // persists this session across turns (and process restarts/days —
+    // see this file's own header comment on RESUME), so the blueprint can
+    // legitimately be archived (e.g. via the Dashboard, in a separate
+    // session) in the gap between picking it here and reaching this step.
+    // Without this re-check, capture would proceed and persist
+    // learner_results against an archived blueprint_id — directly
+    // contradicting archiveBlueprint()'s documented invariant that
+    // archiving "prevents further versions/instances being created from
+    // it going forward."
+    if (blueprint.status !== 'published') {
+      assessmentSessionState.delete(phoneHash);
+      await safeSendMessage(from,
+        `*${blueprint.title}* is no longer available to start a new test from (it's been archived). Send *NEW TEST* to pick a different Blueprint.`
+      );
+      return true;
+    }
+
     // ADR-006 PR2.5: if this class has a saved roster, capture is
     // prefilled from it (no roster -> falls back to PR2's ask-every-name
     // behaviour, unchanged). getClassRoster is optional in deps so this
