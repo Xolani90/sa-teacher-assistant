@@ -26,26 +26,24 @@ const { validateLearnerResultsAgainstBlueprint } = require('./blueprintMarksImpo
 function processAssessmentData(phoneHash, assessmentData) {
   const db = getDb();
 
-  // Step 1: Validate and store assessment
-  const assessmentId = storeAssessment(phoneHash, assessmentData);
-
-  if (!assessmentId) {
-    return { error: 'Failed to store assessment data' };
-  }
-
-  // Step 1a: if this assessment was created from a published Blueprint
-  // (ADR-005, assessmentData.blueprintId), validate every learner's
-  // per-question marks against blueprint_questions.max_marks BEFORE
-  // storing anything, rather than accepting free-form question_data.
-  // A learner whose marks fail blueprint validation (unknown question
-  // number, marks exceeding max_marks, non-numeric) is skipped here —
-  // same "skip the bad row, don't corrupt the whole class's stats"
-  // policy storeLearnerResults() already applies to malformed
-  // total/mark values on the non-blueprint path.
+  // Cycle 9 fix: if this assessment is being created from a Blueprint
+  // (ADR-005, assessmentData.blueprintId), the blueprint's published
+  // status must be re-checked and every learner's per-question marks
+  // validated BEFORE any row is written. The Cycle 8 fix (26dfcab)
+  // re-checks status at SELECT_CLASS, but a blueprint can still be
+  // archived later, during active capture — this is the completion-time
+  // half of the same invariant. Validating here, before storeAssessment(),
+  // guarantees a failed/archived blueprint can never leave a partial or
+  // orphaned `assessments` row behind (the failure mode Cycle 8's
+  // closure audit found: storeAssessment() used to commit first, then
+  // this same check threw afterwards, leaving an orphaned row and no
+  // learner_results).
   let learnerResults = assessmentData.learnerResults;
   let blueprintSkipped = [];
 
   if (assessmentData.blueprintId) {
+    // Let this throw propagate to the caller unchanged (same contract as
+    // before) — but now nothing has been persisted yet when it does.
     const { results: blueprintResults } = validateLearnerResultsAgainstBlueprint(
       assessmentData.blueprintId,
       learnerResults
@@ -68,6 +66,14 @@ function processAssessmentData(phoneHash, assessmentData) {
       result.totalMarks = assessmentData.totalMarks;
       return true;
     });
+  }
+
+  // Step 1: Validate and store assessment (only reached once the
+  // blueprint-status/marks validation above has already passed).
+  const assessmentId = storeAssessment(phoneHash, assessmentData);
+
+  if (!assessmentId) {
+    return { error: 'Failed to store assessment data' };
   }
 
   // Step 2: Store learner results

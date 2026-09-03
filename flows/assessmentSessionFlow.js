@@ -562,45 +562,75 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
     const bulkNotice = isBulk ? formatBulkResultNotice(result.result) : '';
 
     if (isComplete(result.state)) {
-      // ADR-019 Commit 5 part 2: the session moves to COMPLETE_MENU rather
-      // than being deleted, and the completion menu opens immediately —
-      // before PDF generation — so the options are live from the moment
-      // the teacher sees the completion message, not after a follow-up
-      // PDF send. The menu is included in this same message.
-      assessmentSessionState.set(phoneHash, { step: STEP.COMPLETE_MENU, lastActivity: Date.now() });
-      navigationService.openMenu(phoneHash, { id: COMPLETE_MENU_ID, options: COMPLETE_MENU_OPTIONS });
-
-      const completionPrefix = bulkNotice ? `${bulkNotice}\n\n` : '';
-      await safeSendMessage(from,
-        `${completionPrefix}Capture complete.\n\n${result.state.learnerCount} learner${result.state.learnerCount === 1 ? '' : 's'}\n${result.state.questions.length} question${result.state.questions.length === 1 ? '' : 's'}\n\nGenerating assessment...\n\n${formatCompleteMenu()}`
-      );
-
-      const diagnostic = await processAssessmentData(phoneHash, {
-        title: result.state.blueprintTitle,
-        grade: result.state.grade,
-        subject: result.state.subject,
-        term: result.state.term,
-        type: 'test',
-        totalMarks: result.state.blueprintTotalMarks,
-        blueprintId: result.state.blueprintId,
-        blueprintVersion: result.state.blueprintVersion,
-        classId: result.state.classId,
-        learnerResults: toLearnerResults(result.state),
-        // Phase 6 fix: mirror flows/assessmentFlow.js's (legacy CSV/photo
-        // flow) atpTopics wiring. Without this, storeAssessment() always
-        // persisted atp_topics: '[]' for blueprint-based captures, and
-        // updateCoverageFromAssessment() silently marked zero topics
-        // covered — even though each blueprint question carries a
-        // CAPS-registry-validated topic (validated at publish time).
-        atpTopics: [...new Set((result.state.questions || []).map((q) => q.topic).filter(Boolean))],
-      });
+      // Cycle 9 fix: previously the "Capture complete... Generating
+      // assessment..." message was sent, and the session was overwritten
+      // to COMPLETE_MENU (discarding the captured marks from
+      // SessionStore), *before* processAssessmentData() ran. If the
+      // blueprint had since been archived, processAssessmentData() would
+      // throw (after Cycle 9's earlier fix, before writing anything) or
+      // fail — but the teacher had already been told capture succeeded,
+      // and their marks were already gone from SessionStore. Persistence
+      // now runs first; the session is only cleared, and the success
+      // message only sent, once it has actually succeeded. On failure the
+      // in-progress capture state is preserved so the teacher's entered
+      // marks are not lost and a retry (e.g. after picking NEW TEST) is
+      // possible without re-entering everything.
+      let diagnostic;
+      try {
+        diagnostic = await processAssessmentData(phoneHash, {
+          title: result.state.blueprintTitle,
+          grade: result.state.grade,
+          subject: result.state.subject,
+          term: result.state.term,
+          type: 'test',
+          totalMarks: result.state.blueprintTotalMarks,
+          blueprintId: result.state.blueprintId,
+          blueprintVersion: result.state.blueprintVersion,
+          classId: result.state.classId,
+          learnerResults: toLearnerResults(result.state),
+          // Phase 6 fix: mirror flows/assessmentFlow.js's (legacy CSV/photo
+          // flow) atpTopics wiring. Without this, storeAssessment() always
+          // persisted atp_topics: '[]' for blueprint-based captures, and
+          // updateCoverageFromAssessment() silently marked zero topics
+          // covered — even though each blueprint question carries a
+          // CAPS-registry-validated topic (validated at publish time).
+          atpTopics: [...new Set((result.state.questions || []).map((q) => q.topic).filter(Boolean))],
+        });
+      } catch (err) {
+        // e.g. the blueprint was archived mid-capture: nothing was
+        // persisted (validation now runs before storeAssessment()), and
+        // the session keeps the captured marks in ACTIVE state rather
+        // than being cleared, so the teacher isn't told a falsehood and
+        // doesn't lose their work.
+        assessmentSessionState.set(phoneHash, result.state);
+        await safeSendMessage(from,
+          `Capture is complete, but I couldn't finish generating the report because the Blueprint is no longer available (${err.message}). Your marks are still saved — send NEW TEST to pick a different Blueprint, or try again once it's republished.`
+        );
+        return true;
+      }
 
       if (diagnostic.error) {
+        // Assessment row exists but learner results failed to store —
+        // keep the session so the teacher isn't left with silently lost
+        // marks and an ambiguous state.
+        assessmentSessionState.set(phoneHash, result.state);
         await safeSendMessage(from,
           `Marks were captured, but I couldn't finish generating the report: ${diagnostic.error}`
         );
         return true;
       }
+
+      // ADR-019 Commit 5 part 2: the session moves to COMPLETE_MENU rather
+      // than being deleted, and the completion menu opens now that
+      // persistence has actually succeeded, alongside the PDF generation
+      // that follows.
+      assessmentSessionState.set(phoneHash, { step: STEP.COMPLETE_MENU, lastActivity: Date.now() });
+      navigationService.openMenu(phoneHash, { id: COMPLETE_MENU_ID, options: COMPLETE_MENU_OPTIONS });
+
+      const completionPrefix = bulkNotice ? `${bulkNotice}\n\n` : '';
+      await safeSendMessage(from,
+        `${completionPrefix}Capture complete.\n\n${result.state.learnerCount} learner${result.state.learnerCount === 1 ? '' : 's'}\n${result.state.questions.length} question${result.state.questions.length === 1 ? '' : 's'}\n\n${formatCompleteMenu()}`
+      );
 
       await safeSendMessage(from, diagnostic.teacherSummary);
       await generateAndSendBlueprintPdf(from, diagnostic.assessmentId, deps);
