@@ -40,6 +40,7 @@
 const navigationService = require('../services/navigationService');
 const { parseGrade } = require('../utils/capsPhase');
 const { computeBlueprint } = require('../services/assessmentWeightingEngine');
+const { validateAssessment } = require('../services/assessmentBlueprintValidator');
 
 const STEP = {
   HEADER_TITLE: 'headerTitle',
@@ -207,6 +208,29 @@ function formatUnresolvedTopics(unresolvedTopics) {
 }
 
 /**
+ * Formats an assessmentBlueprintValidator.validateAssessment() failure
+ * (missing/excess topic marks, or total-marks deviation) for the
+ * teacher. Distinct concern from formatUnresolvedTopics: that one is
+ * about topic *names* CAPS doesn't recognise; this one is about the
+ * *mark allocation* the teacher already agreed to not being met.
+ */
+function formatAllocationMismatch(validation) {
+  const lines = ['⚠️ The questions entered don\'t match the resolved weighting allocation:'];
+  for (const m of validation.missingRequirements) {
+    lines.push(`— ${m.topic}: short by ${m.shortBy} mark(s)`);
+  }
+  for (const e of validation.excessRequirements) {
+    const note = e.note ? ` (${e.note})` : '';
+    lines.push(`— ${e.topic}: ${e.excessBy} mark(s) over allocation${note}`);
+  }
+  if (Math.abs(validation.totalMarksDeviation) > 0 && validation.missingRequirements.length === 0 && validation.excessRequirements.length === 0) {
+    lines.push(`— Total marks: expected ${validation.totalMarksExpected}, got ${validation.totalMarksGenerated}`);
+  }
+  lines.push('', 'Adjust your questions to match the allocation, then reply *PUBLISH* to try again, or *CANCEL* to discard.');
+  return lines.join('\n');
+}
+
+/**
  * Attempts to publish the blueprint currently held in `state`. On the
  * first attempt, this also creates the DB rows (createBlueprint()) —
  * see this file's header comment for why persistence starts here and
@@ -216,6 +240,32 @@ function formatUnresolvedTopics(unresolvedTopics) {
  */
 function attemptPublish(phoneHash, state, deps) {
   const { createBlueprint, publishBlueprint } = deps;
+
+  // Deterministic post-generation check (ADR-005 Phase 6), run before any
+  // DB write. Distinct from publishBlueprint()'s unresolvedTopics check
+  // below: that verifies topic *names* are recognised CAPS topics; this
+  // verifies the teacher's entered mark allocation actually satisfies the
+  // resolved blueprint (CAPS or teacher-custom) they were already shown.
+  // Only runs when a blueprint was actually resolved (state.weighting
+  // present with status 'OK') — WEIGHTING_UNVERIFIED never reaches here,
+  // so nothing is invented to validate against, matching the engine's
+  // own refusal to guess.
+  if (state.weighting && state.weighting.status === 'OK') {
+    const generatedQuestions = state.questions.map((q) => ({
+      question_id: q.questionNumber,
+      topic: q.topic,
+      marks: q.maxMarks,
+    }));
+    const validation = validateAssessment(state.weighting, generatedQuestions);
+    if (!validation.passed) {
+      const nextState = {
+        ...state,
+        step: STEP.REVIEW,
+        lastActivity: Date.now(),
+      };
+      return { nextState, message: formatAllocationMismatch(validation) };
+    }
+  }
 
   let blueprintId = state.blueprintId;
 

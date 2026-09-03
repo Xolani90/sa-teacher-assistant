@@ -308,7 +308,15 @@ async function run() {
     await handleBlueprintAuthoringFlow(from, '2', null, null, deps); // paper 2
     await handleBlueprintAuthoringFlow(from, 'SKIP', null, null, deps);
     await handleBlueprintAuthoringFlow(from, '100', null, null, deps);
-    await handleBlueprintAuthoringFlow(from, 'Euclidean Geometry | 50', null, null, deps);
+    // Matches the resolved FET-MATH-G10-P2 allocation exactly (Statistics
+    // 15, Analytical Geometry 15, Trigonometry 40, Euclidean Geometry and
+    // Measurement 30 — see data/caps-weighting/evidence-inventory.json),
+    // so this also doubles as the "valid assessment" fixture for the
+    // validator-wiring PUBLISH below.
+    await handleBlueprintAuthoringFlow(from, 'Statistics | 15', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Analytical Geometry | 15', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Trigonometry | 40', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Euclidean Geometry and Measurement | 30', null, null, deps);
     await handleBlueprintAuthoringFlow(from, 'DONE', null, null, deps);
 
     const state = deps.blueprintAuthoringState.get(phoneHash);
@@ -317,10 +325,115 @@ async function run() {
 
     // Publishing must still work unchanged — weighting is advisory only,
     // never a publish gate (matches computeBlueprint's own contract that
-    // it never blocks question authoring).
+    // it never blocks question authoring). A valid, matching assessment
+    // must still publish once validateAssessment() is wired in below.
     await handleBlueprintAuthoringFlow(from, 'PUBLISH', null, null, deps);
     assert(deps.createBlueprint.callCount() === 1, 'PUBLISH still creates the blueprint with a weighting attached');
     assertEqual(deps.blueprintAuthoringState.get(phoneHash).step, 'publishedMenu', 'reaches PUBLISHED_MENU normally');
+  }
+
+  console.log('\n── validateAssessment() wiring: valid allocation publishes ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000308';
+    const phoneHash = 'hash:+27000000308';
+
+    await handleBlueprintAuthoringFlow(from, 'NEW BLUEPRINT', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Term 2 Exam', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Mathematics', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, '10', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, '2', null, null, deps); // paper 2
+    await handleBlueprintAuthoringFlow(from, 'SKIP', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, '100', null, null, deps);
+    // Matches FET-MATH-G10-P2 exactly (see above).
+    await handleBlueprintAuthoringFlow(from, 'Statistics | 15', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Analytical Geometry | 15', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Trigonometry | 40', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Euclidean Geometry and Measurement | 30', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'DONE', null, null, deps);
+
+    await handleBlueprintAuthoringFlow(from, 'PUBLISH', null, null, deps);
+    assertEqual(deps.blueprintAuthoringState.get(phoneHash).step, 'publishedMenu', 'a valid generated assessment matching the resolved blueprint publishes');
+    assert(deps.publishBlueprint.callCount() === 1, 'publishBlueprint was actually called for the matching assessment');
+  }
+
+  console.log('\n── validateAssessment() wiring: materially incorrect allocation is rejected before publication ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000309';
+    const phoneHash = 'hash:+27000000309';
+
+    await handleBlueprintAuthoringFlow(from, 'NEW BLUEPRINT', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Term 2 Exam', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Mathematics', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, '10', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, '2', null, null, deps); // paper 2
+    await handleBlueprintAuthoringFlow(from, 'SKIP', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, '100', null, null, deps);
+    // Deliberately wrong: a single 50-mark question covering only one of
+    // the four required topics, far outside tolerance on every count.
+    await handleBlueprintAuthoringFlow(from, 'Euclidean Geometry and Measurement | 50', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'DONE', null, null, deps);
+
+    await handleBlueprintAuthoringFlow(from, 'PUBLISH', null, null, deps);
+    const state = deps.blueprintAuthoringState.get(phoneHash);
+    assertEqual(state.step, 'review', 'a materially incorrect allocation stays on REVIEW instead of publishing');
+    assertEqual(deps.createBlueprint.callCount(), 0, 'createBlueprint is never called for a materially incorrect allocation');
+    assertEqual(deps.publishBlueprint.callCount(), 0, 'publishBlueprint is never called for a materially incorrect allocation');
+    assertContains(lastMessage(deps), "don't match the resolved weighting allocation", 'explains the allocation mismatch to the teacher');
+    assertContains(lastMessage(deps), 'Statistics', 'names a specific topic that is short of its required marks');
+  }
+
+  console.log('\n── validateAssessment() wiring: CUSTOM weighting is still validated and still publishes ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000310';
+    const phoneHash = 'hash:+27000000310';
+
+    await handleBlueprintAuthoringFlow(from, 'NEW BLUEPRINT', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Fractions Test', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Mathematics', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, '6', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'SKIP', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, '20', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'CUSTOM', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Common Fractions 40\nWhole Numbers 60', null, null, deps);
+    // Matches the 40/60 custom split exactly: 8 and 12 marks.
+    await handleBlueprintAuthoringFlow(from, 'Common Fractions | 8', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Whole Numbers | 12', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'DONE', null, null, deps);
+
+    await handleBlueprintAuthoringFlow(from, 'PUBLISH', null, null, deps);
+    const state = deps.blueprintAuthoringState.get(phoneHash);
+    assertEqual(state.step, 'publishedMenu', 'CUSTOM weighting matching the teacher-set split still publishes');
+    assert(deps.publishBlueprint.callCount() === 1, 'publishBlueprint was called once for the matching custom-weighted assessment');
+  }
+
+  console.log('\n── validateAssessment() wiring: WEIGHTING_UNVERIFIED still invents nothing and never blocks publish ──');
+  {
+    const deps = createDeps();
+    const from = '+27000000311';
+    const phoneHash = 'hash:+27000000311';
+
+    await handleBlueprintAuthoringFlow(from, 'NEW BLUEPRINT', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Fractions Test', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'Mathematics', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, '6', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'SKIP', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, '20', null, null, deps);
+
+    assert(deps.blueprintAuthoringState.get(phoneHash).weighting === undefined, 'no weighting is invented for an unverified grade');
+
+    // Wildly "wrong" by any topic-allocation standard, but there is no
+    // resolved blueprint to check against, so this must publish freely —
+    // the validator must never be invoked when weighting is unresolved.
+    await handleBlueprintAuthoringFlow(from, 'Whatever Topic | 3', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'DONE', null, null, deps);
+    await handleBlueprintAuthoringFlow(from, 'PUBLISH', null, null, deps);
+
+    const state = deps.blueprintAuthoringState.get(phoneHash);
+    assertEqual(state.step, 'publishedMenu', 'WEIGHTING_UNVERIFIED sessions still publish — validator is never invoked without a resolved blueprint');
+    assert(deps.publishBlueprint.callCount() === 1, 'publishBlueprint was called despite no weighting ever being resolved');
   }
 
   console.log('\n── regression: existing STATUS/CANCEL still work mid-weighting-flow ──');
