@@ -141,6 +141,8 @@ async function run() {
       handleAssessmentFlow: noopFlow,
       buildAssessmentDeps: () => ({}),
       handleCommand: async () => false,
+      handleMainMenuFlow: noopFlow,
+      buildMainMenuDeps: () => ({}),
       needsOnboarding: () => false,
       handleOnboarding: () => ({ handled: false }),
       pendingIntentState: emptyState('rc1h013PendingIntent'),

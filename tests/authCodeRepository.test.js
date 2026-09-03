@@ -71,6 +71,13 @@ function assertThrows(fn, expectedMsg, label) {
   }
 }
 
+// SQLite's datetime('now', ...) produces a UTC 'YYYY-MM-DD HH:MM:SS' string
+// with no 'T' or 'Z'. new Date() on that exact string is parsed as LOCAL
+// time by Node/V8, not UTC — silently wrong on any host outside UTC+0.
+// This normalizes it to an explicit UTC ISO string before parsing.
+function sqliteUtcToDate(sqliteTs) {
+  return new Date(sqliteTs.replace(' ', 'T') + 'Z');
+}
 // ── Test runner ───────────────────────────────────────────────────────────────
 async function run() {
   const testDb = createTestDb(__filename);
@@ -300,12 +307,12 @@ async function run() {
   const aAfter = _db.prepare(`SELECT consumed_at, superseded_at, expires_at FROM auth_codes WHERE id = ?`).get(otpA.id);
   assertEq(aAfter.consumed_at, null, 'A: consumed_at still NULL after generation');
   assert(aAfter.superseded_at !== null, 'A: superseded_at is now populated (retired)');
-  assert(new Date(aAfter.expires_at) < new Date(), 'A: expires_at remains in the past (unchanged)');
+  assert(sqliteUtcToDate(aAfter.expires_at) < new Date(), 'A: expires_at remains in the past (unchanged)');
 
   const bRow = _db.prepare(`SELECT consumed_at, superseded_at, expires_at FROM auth_codes WHERE id = ?`).get(otpB.id);
   assertEq(bRow.consumed_at, null, 'B: consumed_at is NULL');
   assertEq(bRow.superseded_at, null, 'B: superseded_at is NULL');
-  assert(new Date(bRow.expires_at) > new Date(), 'B: expires_at is in the future');
+  assert(sqliteUtcToDate(bRow.expires_at) > new Date(), 'B: expires_at is in the future');
 
   const activeAfter = getActiveAuthCode(PHONE);
   assert(activeAfter !== null, 'getActiveAuthCode() returns a row');
