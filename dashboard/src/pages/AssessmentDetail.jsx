@@ -42,21 +42,34 @@ export default function AssessmentDetail() {
   const [pdfError, setPdfError] = useState(null);
   const [expandedLearner, setExpandedLearner] = useState(null);
 
-  const load = useCallback(async () => {
-    setStatus(STATUS_LOADING);
-    setError(null);
-    try {
-      const data = await authedFetch(`/api/assessments/${assessmentId}/detail`);
-      setDetail(data);
-      setStatus(STATUS_READY);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong loading this assessment.');
-      setStatus(STATUS_ERROR);
-    }
-  }, [authedFetch, assessmentId]);
+  const load = useCallback(
+    async ({ cancelledRef } = {}) => {
+      setStatus(STATUS_LOADING);
+      setError(null);
+      try {
+        const data = await authedFetch(`/api/assessments/${assessmentId}/detail`);
+        if (cancelledRef?.current) return;
+        setDetail(data);
+        setStatus(STATUS_READY);
+      } catch (err) {
+        if (cancelledRef?.current) return;
+        setError(err instanceof ApiError ? err.message : 'Something went wrong loading this assessment.');
+        setStatus(STATUS_ERROR);
+      }
+    },
+    [authedFetch, assessmentId]
+  );
 
+  // Guard against a slow-resolving request for a previous assessmentId
+  // overwriting the currently-viewed assessment's state after rapid
+  // navigation between two assessment detail pages (same pattern as
+  // ClassDetail.jsx / LearnerDetail.jsx, Cycle 14).
   useEffect(() => {
-    load();
+    const cancelledRef = { current: false };
+    load({ cancelledRef });
+    return () => {
+      cancelledRef.current = true;
+    };
   }, [load]);
 
   const handleDownloadPdf = async () => {

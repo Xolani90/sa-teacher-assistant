@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes, useNavigate } from 'react-router-dom';
 import { renderWithProviders, screen, userEvent } from '../test/test-utils';
 import BlueprintDetail from './BlueprintDetail';
+
+function GoToBlueprint2Button() {
+  const navigate = useNavigate();
+  return <button onClick={() => navigate('/blueprints/2')}>go</button>;
+}
 
 function mockFetchRoutes(routes) {
   const fetchMock = vi.fn(async (url, options = {}) => {
@@ -124,5 +129,50 @@ describe('BlueprintDetail', () => {
 
     await screen.findByText('Term 2 Fractions Test');
     expect(screen.getAllByText('No questions recorded on this blueprint.').length).toBeGreaterThan(0);
+  });
+
+  it('does not let a slow-resolving request for a previous blueprint overwrite the current blueprint after rapid navigation', async () => {
+    // blueprint 1's fetch resolves LAST even though it was requested
+    // first, simulating network reordering during rapid back-to-back
+    // navigation between two blueprint detail pages.
+    let resolveB1;
+    const b1Promise = new Promise((res) => { resolveB1 = res; });
+    const fetchMock = vi.fn((url) => {
+      if (url.includes('/api/blueprints/1')) {
+        return b1Promise.then(() => ({ ok: true, status: 200, text: async () => JSON.stringify({ blueprint: BLUEPRINT }) }));
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ blueprint: { ...BLUEPRINT, id: 2, title: 'Term 3 Ratios Test' } }),
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(
+      <>
+        <GoToBlueprint2Button />
+        <Routes>
+          <Route path="/blueprints/:blueprintId" element={<BlueprintDetail />} />
+          <Route path="/blueprints" element={<div>Blueprints list page</div>} />
+        </Routes>
+      </>,
+      { route: '/blueprints/1', authenticated: true }
+    );
+
+    const user = userEvent.setup();
+    await screen.findByText(/loading blueprint/i);
+    await user.click(screen.getByText('go'));
+    await screen.findByText('Term 3 Ratios Test');
+
+    // Now let the stale blueprint-1 response resolve.
+    resolveB1();
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Still on /blueprints/2 — must keep showing blueprint 2's data,
+    // not be overwritten by the stale blueprint-1 response that
+    // arrived late.
+    expect(screen.getByText('Term 3 Ratios Test')).toBeInTheDocument();
+    expect(screen.queryByText('Term 2 Fractions Test')).not.toBeInTheDocument();
   });
 });

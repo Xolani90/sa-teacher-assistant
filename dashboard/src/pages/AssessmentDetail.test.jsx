@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes, useNavigate } from 'react-router-dom';
 import { renderWithProviders, screen, userEvent } from '../test/test-utils';
 import AssessmentDetail from './AssessmentDetail';
+
+function GoToAssessment2Button() {
+  const navigate = useNavigate();
+  return <button onClick={() => navigate('/assessments/a2')}>go</button>;
+}
 
 /**
  * AssessmentDetail fires GET .../detail on mount and, separately,
@@ -267,5 +272,52 @@ describe('AssessmentDetail', () => {
     await user.click(screen.getByRole('button', { name: /back/i }));
 
     expect(screen.getByText('Class detail page')).toBeInTheDocument();
+  });
+
+  it('does not let a slow-resolving request for a previous assessment overwrite the current assessment after rapid navigation', async () => {
+    // a1's fetch resolves LAST even though it was requested first,
+    // simulating network reordering during rapid back-to-back
+    // navigation between two assessment detail pages.
+    let resolveA1;
+    const a1Promise = new Promise((res) => { resolveA1 = res; });
+    const fetchMock = vi.fn((url) => {
+      if (url.includes('/a1/')) {
+        return a1Promise.then(() => ({ ok: true, status: 200, text: async () => JSON.stringify(BLUEPRINT_DETAIL) }));
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({
+          ...FREEFORM_DETAIL,
+          assessment: { ...FREEFORM_DETAIL.assessment, title: 'Term 3 Reading Quiz' },
+        }),
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(
+      <>
+        <GoToAssessment2Button />
+        <Routes>
+          <Route path="/assessments/:assessmentId" element={<AssessmentDetail />} />
+          <Route path="/classes/class-1" element={<div>Class detail page</div>} />
+        </Routes>
+      </>,
+      { route: '/assessments/a1', authenticated: true }
+    );
+
+    const user = userEvent.setup();
+    await screen.findByText(/loading assessment/i);
+    await user.click(screen.getByText('go'));
+    await screen.findByText('Term 3 Reading Quiz');
+
+    // Now let the stale a1 response resolve.
+    resolveA1();
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Still on /assessments/a2 — must keep showing a2's data, not be
+    // overwritten by the stale a1 response that arrived late.
+    expect(screen.getByText('Term 3 Reading Quiz')).toBeInTheDocument();
+    expect(screen.queryByText('Term 2 Fractions Test')).not.toBeInTheDocument();
   });
 });

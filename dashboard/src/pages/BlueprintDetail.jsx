@@ -38,21 +38,34 @@ export default function BlueprintDetail() {
   const [blueprint, setBlueprint] = useState(null);
   const [error, setError] = useState(null);
 
-  const load = useCallback(async () => {
-    setStatus(STATUS_LOADING);
-    setError(null);
-    try {
-      const res = await authedFetch(`/api/blueprints/${blueprintId}`);
-      setBlueprint(res?.blueprint || null);
-      setStatus(STATUS_READY);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
-      setStatus(STATUS_ERROR);
-    }
-  }, [authedFetch, blueprintId]);
+  const load = useCallback(
+    async ({ cancelledRef } = {}) => {
+      setStatus(STATUS_LOADING);
+      setError(null);
+      try {
+        const res = await authedFetch(`/api/blueprints/${blueprintId}`);
+        if (cancelledRef?.current) return;
+        setBlueprint(res?.blueprint || null);
+        setStatus(STATUS_READY);
+      } catch (err) {
+        if (cancelledRef?.current) return;
+        setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+        setStatus(STATUS_ERROR);
+      }
+    },
+    [authedFetch, blueprintId]
+  );
 
+  // Guard against a slow-resolving request for a previous blueprintId
+  // overwriting the currently-viewed blueprint's state after rapid
+  // navigation between two blueprint detail pages (same pattern as
+  // ClassDetail.jsx / LearnerDetail.jsx, Cycle 14).
   useEffect(() => {
-    load();
+    const cancelledRef = { current: false };
+    load({ cancelledRef });
+    return () => {
+      cancelledRef.current = true;
+    };
   }, [load]);
 
   const topicRows = blueprint ? buildTopicWeighting(blueprint) : [];
