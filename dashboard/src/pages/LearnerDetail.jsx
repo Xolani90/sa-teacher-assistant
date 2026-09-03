@@ -47,21 +47,34 @@ export default function LearnerDetail() {
   const [removing, setRemoving] = useState(false);
   const [removeError, setRemoveError] = useState(null);
 
-  const load = useCallback(async () => {
-    setStatus(STATUS_LOADING);
-    setError(null);
-    try {
-      const res = await authedFetch(`/api/learners/${learnerId}/detail`);
-      setDetail(res);
-      setStatus(STATUS_READY);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
-      setStatus(STATUS_ERROR);
-    }
-  }, [authedFetch, learnerId]);
+  const load = useCallback(
+    async ({ cancelledRef } = {}) => {
+      setStatus(STATUS_LOADING);
+      setError(null);
+      try {
+        const res = await authedFetch(`/api/learners/${learnerId}/detail`);
+        if (cancelledRef?.current) return;
+        setDetail(res);
+        setStatus(STATUS_READY);
+      } catch (err) {
+        if (cancelledRef?.current) return;
+        setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+        setStatus(STATUS_ERROR);
+      }
+    },
+    [authedFetch, learnerId]
+  );
 
+  // Guard against a slow-resolving request for a previous learnerId
+  // overwriting the currently-viewed learner's state after rapid
+  // navigation between two learner detail pages (same pattern as
+  // ClassDetail.jsx / ObservationWorkspace.jsx).
   useEffect(() => {
-    load();
+    const cancelledRef = { current: false };
+    load({ cancelledRef });
+    return () => {
+      cancelledRef.current = true;
+    };
   }, [load]);
 
   const learner = detail?.learner;

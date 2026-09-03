@@ -71,21 +71,34 @@ export default function ResourceDetail() {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState(null);
 
-  const load = useCallback(async () => {
-    setStatus(STATUS_LOADING);
-    setError(null);
-    try {
-      const res = await authedFetch(`/api/resources/${resourceId}`);
-      setResource(res);
-      setStatus(STATUS_READY);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
-      setStatus(STATUS_ERROR);
-    }
-  }, [authedFetch, resourceId]);
+  const load = useCallback(
+    async ({ cancelledRef } = {}) => {
+      setStatus(STATUS_LOADING);
+      setError(null);
+      try {
+        const res = await authedFetch(`/api/resources/${resourceId}`);
+        if (cancelledRef?.current) return;
+        setResource(res);
+        setStatus(STATUS_READY);
+      } catch (err) {
+        if (cancelledRef?.current) return;
+        setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+        setStatus(STATUS_ERROR);
+      }
+    },
+    [authedFetch, resourceId]
+  );
 
+  // Guard against a slow-resolving request for a previous resourceId
+  // overwriting the currently-viewed resource's state after rapid
+  // navigation between two resource detail pages (same pattern as
+  // ClassDetail.jsx / ObservationWorkspace.jsx).
   useEffect(() => {
-    load();
+    const cancelledRef = { current: false };
+    load({ cancelledRef });
+    return () => {
+      cancelledRef.current = true;
+    };
   }, [load]);
 
   async function handleDeleteResource() {

@@ -34,21 +34,34 @@ export default function ObservationDetail() {
   const [resolvingId, setResolvingId] = useState(null);
   const [resolveError, setResolveError] = useState(null);
 
-  const load = useCallback(async () => {
-    setStatus(STATUS_LOADING);
-    setError(null);
-    try {
-      const res = await authedFetch(`/api/observations/${assessmentId}`);
-      setDetail(res);
-      setStatus(STATUS_READY);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
-      setStatus(STATUS_ERROR);
-    }
-  }, [authedFetch, assessmentId]);
+  const load = useCallback(
+    async ({ cancelledRef } = {}) => {
+      setStatus(STATUS_LOADING);
+      setError(null);
+      try {
+        const res = await authedFetch(`/api/observations/${assessmentId}`);
+        if (cancelledRef?.current) return;
+        setDetail(res);
+        setStatus(STATUS_READY);
+      } catch (err) {
+        if (cancelledRef?.current) return;
+        setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+        setStatus(STATUS_ERROR);
+      }
+    },
+    [authedFetch, assessmentId]
+  );
 
+  // Guard against a slow-resolving request for a previous assessmentId
+  // overwriting the currently-viewed observation's state after rapid
+  // navigation between two observation detail pages (same pattern as
+  // ClassDetail.jsx / ObservationWorkspace.jsx).
   useEffect(() => {
-    load();
+    const cancelledRef = { current: false };
+    load({ cancelledRef });
+    return () => {
+      cancelledRef.current = true;
+    };
   }, [load]);
 
   const session = detail?.session;

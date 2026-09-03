@@ -1,7 +1,12 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Route, Routes } from 'react-router-dom';
+import { Route, Routes, useNavigate } from 'react-router-dom';
 import { renderWithProviders, screen, userEvent } from '../test/test-utils';
 import LearnerDetail from './LearnerDetail';
+
+function GoToLearner2Button() {
+  const navigate = useNavigate();
+  return <button onClick={() => navigate('/learners/learner-2')}>go</button>;
+}
 
 function mockFetchDetail(body, { ok = true, status = ok ? 200 : 400 } = {}) {
   const fetchMock = vi.fn(async () => ({ ok, status, text: async () => JSON.stringify(body) }));
@@ -154,5 +159,57 @@ describe('LearnerDetail', () => {
     expect(screen.getByText('No observations recorded yet')).toBeInTheDocument();
     expect(screen.getByText('No recommendations yet')).toBeInTheDocument();
     expect(screen.getByText('Not enough data yet')).toBeInTheDocument(); // insufficient-data trend label
+  });
+
+  it('does not let a slow-resolving request for a previous learner overwrite the current learner after rapid navigation', async () => {
+    // Two deferred fetches: learner-1's resolves LAST even though it was
+    // requested first, simulating network reordering during rapid
+    // back-to-back navigation between two learner detail pages.
+    let resolveLearner1;
+    const learner1Promise = new Promise((res) => { resolveLearner1 = res; });
+    const fetchMock = vi.fn((url) => {
+      if (url.includes('learner-1')) {
+        return learner1Promise.then(() => ({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ ...BASE_DETAIL, learner: { ...BASE_DETAIL.learner, name: 'Naledi Dube' } }),
+        }));
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ...BASE_DETAIL, learner: { ...BASE_DETAIL.learner, name: 'Sipho Nkosi', classId: 'class-2' } }),
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(
+      <>
+        <GoToLearner2Button />
+        <Routes>
+          <Route path="/learners/:learnerId" element={<LearnerDetail />} />
+          <Route path="/classes" element={<div>Classes list page</div>} />
+          <Route path="/classes/:classId" element={<div>Class detail page</div>} />
+          <Route path="/observations/:assessmentId" element={<div>Observation detail page</div>} />
+        </Routes>
+      </>,
+      { route: '/learners/learner-1', authenticated: true }
+    );
+
+    // Navigate to learner-2 before learner-1's request has resolved.
+    const user = userEvent.setup();
+    await screen.findByText(/loading learner/i);
+    await user.click(screen.getByText('go'));
+    await screen.findByText('Sipho Nkosi');
+
+    // Now let the stale learner-1 response resolve.
+    resolveLearner1();
+    await new Promise((r) => setTimeout(r, 0));
+
+    // The page is still showing /learners/learner-2 — it must keep
+    // showing learner-2's data, not be overwritten by the stale
+    // learner-1 response that arrived late.
+    expect(screen.getByText('Sipho Nkosi')).toBeInTheDocument();
+    expect(screen.queryByText('Naledi Dube')).not.toBeInTheDocument();
   });
 });
