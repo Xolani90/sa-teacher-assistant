@@ -18,12 +18,14 @@
 
 'use strict';
 
+const { AsyncLocalStorage } = require('async_hooks');
+
 /**
  * Processes a single incoming WhatsApp message.
  *
  * @param {Object} message - WhatsApp message object
  */
-async function processMessage(message, deps) {
+async function processMessageUnserialized(message, deps) {
   const from        = message.from;
   const messageType = message.type;
   const messageId   = message.id;
@@ -411,6 +413,64 @@ async function processMessage(message, deps) {
   // Process generation (deps.triggerGeneration persists last_intent internally)
   await deps.triggerGeneration({ from, intent, originalText: text, deps: deps.buildGenerationDeps() });
   return;
+}
+
+// ── Per-phoneHash serialization ─────────────────────────────────────────
+//
+// Session state (utils/sessionStore.js) is read at the top of a flow and
+// written back later, with real async gaps in between (AI generation calls,
+// outbound WhatsApp sends, etc). Meta can deliver two separate webhook
+// requests for the same teacher close together (a teacher sending a second
+// message before the first has finished processing is an entirely normal,
+// frequent occurrence — not an edge case), and Express/Node will run both
+// processMessage() calls concurrently since nothing today prevents it. Both
+// then read the same pre-update session state, and whichever finishes last
+// silently overwrites the other's write — a classic lost-update race that
+// can drop teacher-entered content (e.g. a report-comment mid-batch) even
+// though the now-invisible call already spent quota generating it.
+//
+// This serializes same-phoneHash calls onto a per-phoneHash promise chain so
+// a second message for the same teacher only begins once the first message's
+// full processing (including its final session-state write) has completed.
+// Different teachers are entirely unaffected and keep running concurrently.
+//
+// One legitimate call path is intentionally re-entrant: mainMenuFlow's
+// reDispatchAsText() calls processMessage() again for the SAME phoneHash
+// from inside an already-in-flight processMessage() call. Naively queuing
+// that call behind "the current call for this phoneHash" would deadlock (the
+// outer call is awaiting the inner one, which would be awaiting the outer
+// one to finish). AsyncLocalStorage lets the inner call recognise it's
+// already running inside this phoneHash's serialized slot and skip queuing.
+const inFlightByPhoneHash = new Map();
+const activePhoneHashContext = new AsyncLocalStorage();
+
+async function processMessage(message, deps) {
+  const phoneHash = message && message.from;
+  if (!phoneHash) {
+    return processMessageUnserialized(message, deps);
+  }
+
+  // Re-entrant call for the phoneHash whose slot we're already inside
+  // (e.g. reDispatchAsText) — run directly, no additional queuing.
+  if (activePhoneHashContext.getStore() === phoneHash) {
+    return processMessageUnserialized(message, deps);
+  }
+
+  const prior = inFlightByPhoneHash.get(phoneHash) || Promise.resolve();
+  const run = prior.then(
+    () => activePhoneHashContext.run(phoneHash, () => processMessageUnserialized(message, deps)),
+    () => activePhoneHashContext.run(phoneHash, () => processMessageUnserialized(message, deps))
+  );
+  // Never let one failed message poison the chain for this teacher's next one.
+  const settled = run.catch(() => {});
+  inFlightByPhoneHash.set(phoneHash, settled);
+  settled.finally(() => {
+    if (inFlightByPhoneHash.get(phoneHash) === settled) {
+      inFlightByPhoneHash.delete(phoneHash);
+    }
+  });
+
+  return run;
 }
 
 module.exports = { processMessage };
