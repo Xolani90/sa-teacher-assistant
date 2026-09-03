@@ -465,23 +465,41 @@ async function run() {
     assertEqual(state.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'topicId field is preserved');
   }
 
+  // Cycle 10: a save failure must not discard the teacher's already
+  // fully-composed reflection (three multi-turn free-text answers) —
+  // state now stays at reviewSummary so a YES retries the save instead
+  // of forcing complete re-entry.
   console.log('\n── save failure ──');
   {
+    let shouldFail = true;
     const deps = createDeps({
       createReflection: createMockFn(() => {
-        throw new Error('db unavailable');
+        if (shouldFail) throw new Error('db unavailable');
+        return { id: 1 };
       }),
     });
     const from = '+27000000011';
+    const phoneHash = 'hash:+27000000011';
 
     await runHappyPathUpTo(deps, from, 'reviewSummary');
     await handleReflectionFlow(from, 'YES', null, deps);
 
-    assert(deps.reflectionState.get('hash:+27000000011') === null, 'state is cleared even though the save failed');
+    const state = deps.reflectionState.get(phoneHash);
+    assert(state !== null, 'session is NOT cleared after a save failure — the composed reflection is not lost');
+    assertEqual(state && state.step, 'reviewSummary', 'session stays on reviewSummary so a retry does not require re-entering fields');
 
     const lastCall = deps.safeSendMessage.calls[deps.safeSendMessage.calls.length - 1];
     const lastMessage = lastCall[1];
     assertMatch(lastMessage, /couldn't save that reflection/i, 'tells the teacher the save failed');
+    assertMatch(lastMessage, /nothing was lost/i, 'reassures the teacher their input is preserved');
+
+    // Retry: same YES reply, this time the save succeeds.
+    shouldFail = false;
+    await handleReflectionFlow(from, 'YES', null, deps);
+    assert(deps.createReflection.callCount() === 2, 'retry calls createReflection again without re-entering fields');
+    assert(deps.reflectionState.get(phoneHash) === null, 'state is cleared once the retried save succeeds');
+    const retryLastCall = deps.safeSendMessage.calls[deps.safeSendMessage.calls.length - 1];
+    assertMatch(retryLastCall[1], /saved successfully/i, 'retry succeeds and confirms the save');
   }
 
   console.log('\n' + '─'.repeat(55));

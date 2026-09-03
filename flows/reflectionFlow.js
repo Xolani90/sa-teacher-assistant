@@ -336,15 +336,16 @@ async function handleReflectionFlow(from, text, preClassifiedIntent, deps) {
         console.error('[Reflection] createReflection failed:', err.message);
       }
 
-      reflectionState.delete(phoneHash);
+      reflectionState.set(phoneHash, { ...state, lastActivity: Date.now() });
 
       if (saveError) {
         await safeSendMessage(from,
-          `⚠️ *Couldn't save that reflection right now.* Please try sending it again in a moment.`
+          `⚠️ *Couldn't save that reflection right now.* Nothing was lost — reply *YES* to try saving it again, or *CANCEL* to stop.`
         );
         return true;
       }
 
+      reflectionState.delete(phoneHash);
       await safeSendMessage(from, `✅ *Reflection saved successfully.*`);
       return true;
     }

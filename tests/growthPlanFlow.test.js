@@ -426,23 +426,44 @@ async function run() {
   }
 
   // ── save failure ───────────────────────────────────────────
+  // Cycle 10: a save failure must not discard the teacher's
+  // already-composed goal/topic — they preserved it through the whole
+  // multi-turn conversation, so a transient DB error shouldn't force
+  // them to retype everything. State now stays at reviewSummary so a
+  // simple YES retries the save.
   console.log('\n── save failure ──');
   {
+    let shouldFail = true;
     const deps = createDeps({
       createGrowthPlan: createMockFn(() => {
-        throw new Error('db unavailable');
+        if (shouldFail) throw new Error('db unavailable');
+        return { id: 1 };
       }),
     });
     const from = '+27000000011';
+    const phoneHash = 'hash:+27000000011';
 
     await runHappyPathUpTo(deps, from, 'reviewSummary');
     await handleGrowthPlanFlow(from, 'YES', null, deps);
 
-    assert(deps.growthPlanState.get('hash:+27000000011') === null, 'state is cleared even though the save failed');
+    const state = deps.growthPlanState.get(phoneHash);
+    assert(state !== null, 'session is NOT cleared after a save failure — the composed plan is not lost');
+    assertEqual(state && state.step, 'reviewSummary', 'session stays on reviewSummary so a retry does not require re-entering fields');
+    assertEqual(state && state.goalText, 'Improve questioning technique', 'goalText is preserved across the failed save');
+    assertEqual(state && state.topicId, 'TOPIC_CLASSROOM_MANAGEMENT', 'topicId is preserved across the failed save');
 
     const lastCall = deps.safeSendMessage.calls[deps.safeSendMessage.calls.length - 1];
     const lastMessage = lastCall[1];
     assertMatch(lastMessage, /couldn't save that growth plan/i, 'tells the teacher the save failed');
+    assertMatch(lastMessage, /nothing was lost/i, 'reassures the teacher their input is preserved');
+
+    // Retry: same YES reply, this time the save succeeds.
+    shouldFail = false;
+    await handleGrowthPlanFlow(from, 'YES', null, deps);
+    assert(deps.createGrowthPlan.callCount() === 2, 'retry calls createGrowthPlan again without re-entering fields');
+    assert(deps.growthPlanState.get(phoneHash) === null, 'state is cleared once the retried save succeeds');
+    const retryLastCall = deps.safeSendMessage.calls[deps.safeSendMessage.calls.length - 1];
+    assertMatch(retryLastCall[1], /saved successfully/i, 'retry succeeds and confirms the save');
   }
 
   console.log('\n' + '─'.repeat(55));

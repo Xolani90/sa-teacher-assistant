@@ -247,15 +247,16 @@ async function handleGrowthPlanFlow(from, text, preClassifiedIntent, deps) {
         console.error('[GrowthPlan] createGrowthPlan failed:', err.message);
       }
 
-      growthPlanState.delete(phoneHash);
+      growthPlanState.set(phoneHash, { ...state, lastActivity: Date.now() });
 
       if (saveError) {
         await safeSendMessage(from,
-          `⚠️ *Couldn't save that growth plan right now.* Please try sending it again in a moment.`
+          `⚠️ *Couldn't save that growth plan right now.* Nothing was lost — reply *YES* to try saving it again, or *CANCEL* to stop.`
         );
         return true;
       }
 
+      growthPlanState.delete(phoneHash);
       await safeSendMessage(from, `✅ *Growth plan saved successfully.*`);
       return true;
     }
