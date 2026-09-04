@@ -259,8 +259,17 @@ async function handleVerifyCode(req, res) {
     // limit (§4.2) — the sole authority is the phone-level state below.
     // This per-row field is retained only for backward-compatible shape,
     // never read or enforced against here.
+    // Constant-time comparison (mirrors utils/yocoWebhookVerifier.js's
+    // timingSafeEqual usage) — length check first since timingSafeEqual
+    // throws on mismatched buffer lengths rather than returning false.
     const suppliedHash = hashOtp(code);
-    if (suppliedHash !== authCode.codeHash) {
+    const suppliedBuf = Buffer.from(suppliedHash);
+    const storedBuf = Buffer.from(authCode.codeHash);
+    const hashesMatch =
+      suppliedBuf.length === storedBuf.length &&
+      crypto.timingSafeEqual(suppliedBuf, storedBuf);
+
+    if (!hashesMatch) {
       // Authoritative counter (§4.1/§4.2): persists across OTP
       // generations, not reset by requesting a new code, locks the phone
       // at the 5th failure.

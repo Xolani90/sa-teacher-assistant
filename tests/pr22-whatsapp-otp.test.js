@@ -464,6 +464,54 @@ async function run() {
   const afterConsume = getActiveAuthCode(validPhoneHash);
   assert(afterConsume === null, 'code is consumed after successful verification');
 
+  console.log('\nTest VC-12: OTP digest comparison uses crypto.timingSafeEqual (constant-time)');
+  resetDb();
+  insertTeacher(validPhoneHash, 'Valid Teacher');
+  createAuthCode(validPhoneHash, validOtpHash, futureExp);
+
+  const crypto = require('crypto');
+  const originalTimingSafeEqual = crypto.timingSafeEqual;
+  let timingSafeEqualCalled = false;
+  crypto.timingSafeEqual = (...args) => {
+    timingSafeEqualCalled = true;
+    return originalTimingSafeEqual(...args);
+  };
+
+  const { req: req19, res: res19 } = makeReqRes({ phone: validPhone, code: validOtp });
+  await handleVerifyCode(req19, res19);
+
+  crypto.timingSafeEqual = originalTimingSafeEqual;
+
+  assert(timingSafeEqualCalled, 'handleVerifyCode uses crypto.timingSafeEqual for digest comparison');
+  assertEq(res19.statusCode, 200, 'correct OTP still verifies successfully via constant-time comparison');
+
+  console.log('\nTest VC-13: incorrect OTP still fails via constant-time comparison, no exception');
+  resetDb();
+  insertTeacher(validPhoneHash, 'Valid Teacher');
+  createAuthCode(validPhoneHash, validOtpHash, futureExp);
+
+  const { req: req20, res: res20 } = makeReqRes({ phone: validPhone, code: '000000' });
+  await handleVerifyCode(req20, res20);
+
+  assertEq(res20.statusCode, 401, 'incorrect OTP still returns 401 under constant-time comparison');
+  const phoneStateAfterWrong = getPhoneAuthState(validPhoneHash);
+  assertEq(phoneStateAfterWrong.failedAttempts, 1, 'failed-attempt accounting still increments under constant-time comparison');
+
+  console.log('\nTest VC-14: malformed/short code input does not throw and returns 401');
+  resetDb();
+  insertTeacher(validPhoneHash, 'Valid Teacher');
+  createAuthCode(validPhoneHash, validOtpHash, futureExp);
+
+  const { req: req21, res: res21 } = makeReqRes({ phone: validPhone, code: 'x' });
+  let threw = false;
+  try {
+    await handleVerifyCode(req21, res21);
+  } catch (err) {
+    threw = true;
+  }
+  assert(!threw, 'malformed short code does not throw (length-mismatch guarded before timingSafeEqual)');
+  assertEq(res21.statusCode, 401, 'malformed short code returns 401, does not bypass verification');
+
   // ── Summary ───────────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);
   console.log(`PR22B WhatsApp OTP Results: ${passed} passed, ${failed} failed`);
