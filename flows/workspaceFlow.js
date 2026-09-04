@@ -36,6 +36,14 @@
  *   safeSendMessage,          // async (from, text) => void
  *   gradeLabel,                // (grade) => string
  *   getTeacherClasses,        // (hash) => Class[]
+ *   getActiveRosterCounts,    // (hash) => Map<number,number> classId -> live active roster count
+ *                                // (services/learnerRosterService.js). MY CLASSES uses this, not
+ *                                // classes.learner_count, so its count matches the dashboard's
+ *                                // GET /api/classes — see that route's doc comment for why the
+ *                                // raw column drifts stale. NEW CLASS's own confirmation message
+ *                                // intentionally keeps reading classes.learner_count directly (it's
+ *                                // echoing the just-declared capacity right after creation, not
+ *                                // reporting a live headcount) — not touched by this fix.
  *   createClass,              // (hash, name, grade, subject, count) => Class
  *   getAssessmentHistory,     // (hash) => Assessment[]
  *   validateNewClassInput,    // (rawName, rawCount, existingClasses) => { valid, error?, name?, count? }
@@ -70,6 +78,7 @@ async function handleWorkspaceFlow(from, text, deps) {
     safeSendMessage,
     gradeLabel,
     getTeacherClasses,
+    getActiveRosterCounts,
     createClass,
     getAssessmentHistory,
     validateNewClassInput,
@@ -173,10 +182,14 @@ async function handleWorkspaceFlow(from, text, deps) {
           `📚 *Your Classes*\n\nYou haven't added any classes yet.\n\nTo create one, reply:\n*NEW CLASS [name] | [learner count]*\n\nExample:\n_NEW CLASS Grade 8B Mathematics | 28_`
         );
       } else {
+        // Live active roster count (matches dashboard's GET /api/classes),
+        // not the classes.learner_count cache — see getActiveRosterCounts'
+        // doc comment for why the raw column drifts stale.
+        const rosterCounts = getActiveRosterCounts(hash);
         let msg = `📚 *Your Classes* (${classes.length})\n\n`;
         for (const cls of classes) {
           msg += `*${cls.name}*\n`;
-          msg += `${cls.grade != null ? gradeLabel(cls.grade) : 'Grade ?'} | ${cls.subject || '?'} | ${cls.learner_count || 0} learners\n\n`;
+          msg += `${cls.grade != null ? gradeLabel(cls.grade) : 'Grade ?'} | ${cls.subject || '?'} | ${rosterCounts.get(cls.id) || 0} learners\n\n`;
         }
         msg += `_Reply *NEW CLASS [name] | [count]* to add another class._`;
         await safeSendMessage(from, msg);

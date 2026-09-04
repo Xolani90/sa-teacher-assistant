@@ -127,6 +127,7 @@ async function runFunctional() {
     safeSendMessage: async (from, text) => { sent.push({ from, text }); },
     gradeLabel: (g) => `Grade ${g}`,
     getTeacherClasses: () => ([{ id: 1, name: 'Grade 7A', grade: 7, subject: 'Mathematics', learner_count: 30 }]),
+    getActiveRosterCounts: () => new Map([[1, 30]]),
     createClass: () => ({ id: 2, name: 'New Class' }),
     getAssessmentHistory: () => ([]),
     validateNewClassInput: () => ({ valid: true, name: 'New Class', count: 25 }),

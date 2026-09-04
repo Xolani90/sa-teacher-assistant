@@ -286,6 +286,7 @@ async function handleCommand(from, text, deps) {
     const { getLearnerInterventionPlan } = require('../services/interventionService');
     const { getClassInterventionPlan } = require('../services/classInterventionService');
     const { generateClassInterventionPdf, generateLearnerInterventionPdf } = require('../services/pdfService');
+    const { getActiveRosterCounts } = require('../services/learnerRosterService');
 
     return Object.freeze({
       hashPhone: deps.hashPhone,
@@ -293,6 +294,7 @@ async function handleCommand(from, text, deps) {
       safeSendMessage: deps.safeSendMessage,
       gradeLabel: deps.gradeLabel,
       getTeacherClasses,
+      getActiveRosterCounts,
       createClass,
       getAssessmentHistory,
       validateNewClassInput,

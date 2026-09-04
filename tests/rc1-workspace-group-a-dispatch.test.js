@@ -108,14 +108,21 @@ function lastReply() {
     check(/NEW CLASS/.test(lastReply()), 'MY CLASSES (zero classes): prompts NEW CLASS');
   }
   {
-    // Scenario: one class
+    // Scenario: one class. Declared capacity (30) at creation deliberately
+    // differs from the real roster (2 actually added) — RC1-D1-004/Cycle 25:
+    // MY CLASSES must show the live active roster count (matching the
+    // dashboard's GET /api/classes), not the stale classes.learner_count
+    // capacity column.
     const { phone, phoneHash } = onboardedTeacher({});
-    createClass(phoneHash, 'Grade 6A Mathematics', 6, 'Mathematics', 30);
+    const newClass = createClass(phoneHash, 'Grade 6A Mathematics', 6, 'Mathematics', 30);
+    const { setRoster } = require('../services/learnerRosterService');
+    setRoster(phoneHash, newClass.id, ['Learner One', 'Learner Two']);
     sentMessages.length = 0;
     const handled = await handleCommand(phone, 'MY CLASSES');
     check(handled === true, 'MY CLASSES (one class): handled');
     check(/Grade 6A Mathematics/.test(lastReply()), 'MY CLASSES (one class): real class name present');
-    check(/30 learners/.test(lastReply()), 'MY CLASSES (one class): real learner count present');
+    check(/2 learners/.test(lastReply()), 'MY CLASSES (one class): shows live roster count (2), not the stale declared capacity (30)');
+    check(!/30 learners/.test(lastReply()), 'MY CLASSES (one class): does not show the stale declared capacity');
     check(/\(1\)/.test(lastReply()), 'MY CLASSES (one class): count header shows 1');
   }
   {

@@ -40,6 +40,7 @@ function makeBaseDeps(overrides = {}) {
     safeSendMessage: async (from, text) => { sent.push({ from, text }); },
     gradeLabel: (g) => `Grade ${g}`,
     getTeacherClasses: () => ([]),
+    getActiveRosterCounts: () => new Map(),
     createClass: () => ({}),
     getAssessmentHistory: () => ([]),
     validateNewClassInput: () => ({ valid: true }),
