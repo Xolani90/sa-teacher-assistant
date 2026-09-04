@@ -4,6 +4,7 @@ import { useTeacher } from '../auth/TeacherContext';
 import { ApiError } from '../api/client';
 import Layout from '../components/Layout';
 import { Card, ErrorBanner, Spinner, SectionHeader, Pill, Button } from '../components/ui';
+import { formatDateTime } from '../utils/dateFormat';
 
 const STATUS_LOADING = 'loading';
 const STATUS_READY = 'ready';
@@ -268,12 +269,6 @@ function formatDate(dateStr) {
   const d = new Date(`${dateStr}T00:00:00`);
   if (Number.isNaN(d.getTime())) return dateStr;
   return d.toLocaleDateString('en-ZA', { year: 'numeric', month: 'short', day: 'numeric' });
-}
-
-function formatDateTime(iso) {
-  if (!iso) return '';
-  const d = new Date(iso.replace(' ', 'T'));
-  return d.toLocaleString('en-ZA', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 const styles = {

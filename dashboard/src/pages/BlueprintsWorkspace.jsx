@@ -4,6 +4,7 @@ import { useTeacher } from '../auth/TeacherContext';
 import { ApiError } from '../api/client';
 import Layout from '../components/Layout';
 import { Card, EmptyState, ErrorBanner, Spinner, Pill } from '../components/ui';
+import { formatDate } from '../utils/dateFormat';
 
 const STATUS_LOADING = 'loading';
 const STATUS_READY = 'ready';
@@ -141,11 +142,6 @@ export default function BlueprintsWorkspace() {
   );
 }
 
-function formatDate(iso) {
-  if (!iso) return '';
-  const d = new Date(iso.replace(' ', 'T'));
-  return d.toLocaleDateString('en-ZA', { year: 'numeric', month: 'short', day: 'numeric' });
-}
 
 const styles = {
   search: {

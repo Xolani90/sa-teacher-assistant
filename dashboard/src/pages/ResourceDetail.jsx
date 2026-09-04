@@ -4,6 +4,7 @@ import { useTeacher } from '../auth/TeacherContext';
 import { ApiError } from '../api/client';
 import Layout from '../components/Layout';
 import { Card, ErrorBanner, Spinner, SectionHeader, Pill, Button } from '../components/ui';
+import { formatDateTime } from '../utils/dateFormat';
 
 const STATUS_LOADING = 'loading';
 const STATUS_READY = 'ready';
@@ -195,11 +196,6 @@ export default function ResourceDetail() {
   );
 }
 
-function formatDateTime(iso) {
-  if (!iso) return '';
-  const d = new Date(iso.replace(' ', 'T'));
-  return d.toLocaleString('en-ZA', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
-}
 
 const styles = {
   formError: {

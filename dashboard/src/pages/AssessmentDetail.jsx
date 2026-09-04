@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTeacher } from '../auth/TeacherContext';
 import { ApiError } from '../api/client';
+import { formatDate } from '../utils/dateFormat';
 import Layout from '../components/Layout';
 import {
   Card,
@@ -444,8 +445,4 @@ function capitalize(s) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-function formatDate(iso) {
-  if (!iso) return '';
-  const d = new Date(iso.replace(' ', 'T'));
-  return d.toLocaleDateString('en-ZA', { year: 'numeric', month: 'short', day: 'numeric' });
-}
+

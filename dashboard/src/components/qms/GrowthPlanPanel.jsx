@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 import { useTeacher } from '../../auth/TeacherContext';
 import { ApiError } from '../../api/client';
 import { Card, EmptyState, Pill, SectionHeader, Button } from '../ui';
+import { formatDate } from '../../utils/dateFormat';
 
 const MODE_IDLE = 'idle';
 const MODE_ADDING = 'adding';
@@ -338,11 +339,6 @@ function GrowthPlanForm({ goalText, setGoalText, topics = [], topicId, setTopicI
   );
 }
 
-function formatDate(iso) {
-  if (!iso) return '';
-  const d = new Date(iso.replace(' ', 'T'));
-  return d.toLocaleDateString('en-ZA', { year: 'numeric', month: 'short', day: 'numeric' });
-}
 
 const styles = {
   statusSelect: {
