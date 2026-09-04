@@ -50,8 +50,17 @@ const CAPS_TOPICS = {
   // (tests/rc1-lessonplan-dispatch.test.js,
   // tests/feature2-lessonplan-homework-e2e-journey.test.js) pin that exact
   // string as the resolved topic for Grade 7 Mathematics, 2026-08-05 — it
-  // is the same real ATP topic, just a repository naming choice. FET
-  // (10-12) below was already term-specific and is unchanged.
+  // is the same real ATP topic, just a repository naming choice.
+  // FET (10-12): Grade 10 had the SAME term-misplacement defect as the
+  // original Grade 7 problem (e.g. "Euclidean geometry" was listed under
+  // Term 1 when the official ATP places it in Term 2) plus unsupported
+  // Term 4 content that isn't in the ATP at all — it was NOT "already
+  // term-specific and unchanged" as a prior version of this comment
+  // claimed. Grade 10 has now been corrected against a directly
+  // gov.za-hosted Grade 10 Mathematics ATP (2023/24 official prior-year
+  // evidence — no 2026-dated official Grade 10 document was located).
+  // Grades 11-12 have NOT been audited or corrected and their accuracy is
+  // unverified.
   mathematics: {
     7: {
       1: ['Whole numbers','Common fractions','Decimal fractions'],
@@ -72,10 +81,10 @@ const CAPS_TOPICS = {
       4: ['Geometry of 3D objects','Surface area and volume of 3D objects','Transformation geometry'],
     },
     10: {
-      1: ['Algebraic expressions','Exponents','Equations & inequalities','Euclidean geometry','Trigonometry','Functions'],
-      2: ['Equations & inequalities','Trigonometry','Functions','Euclidean geometry','Analytical geometry','Finance & growth'],
-      3: ['Functions','Finance & growth','Trigonometry','Euclidean geometry','Probability','Statistics'],
-      4: ['Trigonometry','Euclidean geometry','Analytical geometry','Statistics','Probability'],
+      1: ['Algebraic expressions','Exponents','Equations & inequalities','Trigonometry'],
+      2: ['Euclidean geometry','Analytical geometry','Functions'],
+      3: ['Trigonometry','Statistics','Probability','Finance & growth'],
+      4: ['Measurement','Number patterns'],
     },
     11: {
       1: ['Exponents & surds','Equations & inequalities','Number patterns','Functions','Trigonometry','Euclidean geometry'],
