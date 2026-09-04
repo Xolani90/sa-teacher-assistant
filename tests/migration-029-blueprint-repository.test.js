@@ -171,6 +171,45 @@ async function run() {
   assert(created.blueprintId > 0, 'valid create returns a positive blueprintId');
   assertEq(created.questionCount, 2, 'valid create reports correct questionCount');
 
+  console.log('\nTest BP-05b: createBlueprint rejects duplicate question_number in the input set');
+  assertThrows(
+    () => createBlueprint(PHONE, { title: 'Dup Test', subject: 'Mathematics', grade: 6, totalMarks: 20 }, [
+      { questionNumber: 1, topic: 'Fractions', maxMarks: 10 },
+      { questionNumber: 1, topic: 'Decimals', maxMarks: 10 },
+    ]),
+    'duplicate question_number 1',
+    'duplicate question_number across two questions in one create call throws'
+  );
+
+  console.log('\nTest BP-05c: createBlueprintVersion rejects duplicate question_number in the input set');
+  assertThrows(
+    () => createBlueprintVersion(created.blueprintId, PHONE, {}, [
+      { questionNumber: 1, topic: 'Fractions', maxMarks: 10 },
+      { questionNumber: 1, topic: 'Decimals', maxMarks: 10 },
+    ]),
+    'duplicate question_number 1',
+    'duplicate question_number across two questions in one version call throws'
+  );
+
+  console.log('\nTest BP-05d: addQuestion rejects a question_number that already exists on the blueprint');
+  assertThrows(
+    () => addQuestion(created.blueprintId, PHONE, { questionNumber: 1, topic: 'Ratios', maxMarks: 5 }),
+    'question_number 1 already exists',
+    'addQuestion throws when question_number collides with an existing row'
+  );
+
+  console.log('\nTest BP-05e: updateQuestion rejects renumbering into an existing question_number');
+  const dupTarget = createBlueprint(PHONE, { title: 'Renumber Test', subject: 'Mathematics', grade: 6, totalMarks: 20 }, [
+    { questionNumber: 1, topic: 'Fractions', maxMarks: 10 },
+    { questionNumber: 2, topic: 'Decimals', maxMarks: 10 },
+  ]);
+  const q2Id = getBlueprintById(dupTarget.blueprintId).questions.find((q) => q.questionNumber === 2).id;
+  assertThrows(
+    () => updateQuestion(q2Id, PHONE, { questionNumber: 1 }),
+    'question_number 1 already exists',
+    'updateQuestion throws when renumbering collides with a sibling question'
+  );
+
   // ═══════════════════════════════════════════════════════════════════════
   // SECTION 3: getBlueprintById() round trip
   // ═══════════════════════════════════════════════════════════════════════

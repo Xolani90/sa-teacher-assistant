@@ -76,10 +76,15 @@ function createBlueprint(phoneHash, header, questions) {
   if (!Array.isArray(questions) || questions.length === 0) {
     throw new Error('createBlueprint: questions must be a non-empty array');
   }
+  const seenNumbers = new Set();
   for (const q of questions) {
     if (q.questionNumber == null || !q.topic || q.maxMarks == null) {
       throw new Error('createBlueprint: every question requires questionNumber, topic, and maxMarks');
     }
+    if (seenNumbers.has(q.questionNumber)) {
+      throw new Error(`createBlueprint: duplicate question_number ${q.questionNumber} in question set`);
+    }
+    seenNumbers.add(q.questionNumber);
   }
 
   try {
@@ -165,6 +170,18 @@ function createBlueprintVersion(priorBlueprintId, phoneHash, headerUpdates = {},
   }
   if (!Array.isArray(questions) || questions.length === 0) {
     throw new Error('createBlueprintVersion: questions must be a non-empty array');
+  }
+  {
+    const seenNumbers = new Set();
+    for (const q of questions) {
+      if (q.questionNumber == null || !q.topic || q.maxMarks == null) {
+        throw new Error('createBlueprintVersion: every question requires questionNumber, topic, and maxMarks');
+      }
+      if (seenNumbers.has(q.questionNumber)) {
+        throw new Error(`createBlueprintVersion: duplicate question_number ${q.questionNumber} in question set`);
+      }
+      seenNumbers.add(q.questionNumber);
+    }
   }
 
   const prior = db.prepare(`SELECT * FROM assessment_blueprints WHERE id = ?`).get(priorBlueprintId);
@@ -404,6 +421,13 @@ function addQuestion(blueprintId, phoneHash, question) {
     throw new Error('addQuestion: question requires questionNumber, topic, and maxMarks');
   }
 
+  const existing = db.prepare(
+    `SELECT id FROM blueprint_questions WHERE blueprint_id = ? AND question_number = ?`
+  ).get(blueprintId, question.questionNumber);
+  if (existing) {
+    throw new Error(`addQuestion: question_number ${question.questionNumber} already exists on this blueprint`);
+  }
+
   try {
     const result = db.prepare(`
       INSERT INTO blueprint_questions (blueprint_id, question_number, topic, subtopic, bloom_level, atp_reference, expected_misconception, max_marks)
@@ -457,6 +481,14 @@ function updateQuestion(questionId, phoneHash, updates = {}) {
   }
   if (row.status !== 'draft') {
     throw new Error(`updateQuestion: cannot edit a question on a ${row.status} blueprint`);
+  }
+  if (updates.questionNumber !== undefined && updates.questionNumber !== row.question_number) {
+    const collision = db.prepare(
+      `SELECT id FROM blueprint_questions WHERE blueprint_id = ? AND question_number = ? AND id != ?`
+    ).get(row.blueprint_id, updates.questionNumber, questionId);
+    if (collision) {
+      throw new Error(`updateQuestion: question_number ${updates.questionNumber} already exists on this blueprint`);
+    }
   }
 
   const columnMap = {
