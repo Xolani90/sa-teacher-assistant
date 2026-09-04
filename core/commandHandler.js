@@ -475,20 +475,41 @@ async function handleCommand(from, text, deps) {
       // the confirmation from session state without issuing a second INSERT.
       if (last.saveState === 'RECOVERABLE') {
         deps.saveLock.add(phoneHash);
-        const gradeStr2   = last.intent.grade != null                                  ? ` · ${deps.gradeLabel(last.intent.grade)}`   : '';
-        const subjectStr2 = last.intent.subject && last.intent.subject !== 'general'   ? ` · ${last.intent.subject}`       : '';
-        const topicPart2  = last.intent.topic ? last.intent.topic : 'Untitled';
-        const typeLabel2  = deps.intentLabel(last.intent.type);
-        const title2      = `${topicPart2} — ${typeLabel2}`;
         try {
-          await deps.safeSendMessage(from,
-            `✅ *Saved!*\n\n📄 *${title2}*${gradeStr2}${subjectStr2}\n\nReply *MY RESOURCES* to see all your saved resources.\n_Resource #${last.lastSavedId}_`
-          );
-          deps.lastGeneratedState.delete(phoneHash);
-          console.log(`[Workspace] Resource #${last.lastSavedId} re-confirmed on retry (generationId: ${last.generationId || 'n/a'})`);
-        } catch (sendErr) {
-          // WhatsApp still down — keep RECOVERABLE state for next retry attempt.
-          console.error('[Workspace] retry confirmation send failed:', sendErr.message);
+          // Cycle 19 fix: the row committed successfully (that's what put us
+          // in RECOVERABLE in the first place), but the WhatsApp confirmation
+          // that failed to send is exactly what a teacher needs to discover
+          // the row exists — it's also the only notice they'd act on to open
+          // the dashboard and delete it if they don't recognise it yet. That
+          // window can stay open indefinitely (WhatsApp can keep failing
+          // across many retries), so re-verify the row is still there before
+          // re-confirming, rather than blindly resending "Saved!" for a
+          // resource that reality no longer has.
+          const stillExists = getSavedResource(last.lastSavedId, phoneHash);
+          if (!stillExists) {
+            await deps.safeSendMessage(from,
+              `This resource was removed before we could confirm the save — nothing to do here. Generate it again if you still need it.`
+            );
+            deps.lastGeneratedState.delete(phoneHash);
+            console.log(`[Workspace] Resource #${last.lastSavedId} no longer exists on RECOVERABLE retry — sent honest not-found notice instead of a false confirmation (generationId: ${last.generationId || 'n/a'})`);
+            return true;
+          }
+
+          const gradeStr2   = last.intent.grade != null                                  ? ` · ${deps.gradeLabel(last.intent.grade)}`   : '';
+          const subjectStr2 = last.intent.subject && last.intent.subject !== 'general'   ? ` · ${last.intent.subject}`       : '';
+          const topicPart2  = last.intent.topic ? last.intent.topic : 'Untitled';
+          const typeLabel2  = deps.intentLabel(last.intent.type);
+          const title2      = `${topicPart2} — ${typeLabel2}`;
+          try {
+            await deps.safeSendMessage(from,
+              `✅ *Saved!*\n\n📄 *${title2}*${gradeStr2}${subjectStr2}\n\nReply *MY RESOURCES* to see all your saved resources.\n_Resource #${last.lastSavedId}_`
+            );
+            deps.lastGeneratedState.delete(phoneHash);
+            console.log(`[Workspace] Resource #${last.lastSavedId} re-confirmed on retry (generationId: ${last.generationId || 'n/a'})`);
+          } catch (sendErr) {
+            // WhatsApp still down — keep RECOVERABLE state for next retry attempt.
+            console.error('[Workspace] retry confirmation send failed:', sendErr.message);
+          }
         } finally {
           deps.saveLock.delete(phoneHash);
         }
