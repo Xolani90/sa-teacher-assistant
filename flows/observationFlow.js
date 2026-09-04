@@ -189,6 +189,21 @@ async function handleObservationFlow(from, text, preClassifiedIntent, deps) {
       }
 
       if (saveError) {
+        // Cycle 20: "already been corrected by another submission" (the
+        // observationRepository guard against a duplicate corrector) is
+        // a PERMANENT rejection, not a transient save failure — the
+        // generic "reply DONE to try again" below would loop forever on
+        // this exact error since correctsAssessmentId never changes.
+        // Clear state and point the teacher at the version that already
+        // won, instead of preserving state for a retry that can't succeed.
+        if (saveError.message && saveError.message.includes('already been corrected')) {
+          observationState.delete(phoneHash);
+          await safeSendMessage(from,
+            `⚠️ *This observation was already corrected.*\n\nSomeone beat you to it — a newer version was saved in the meantime. Reply *BACK* to see your other observations and open the latest version instead of resubmitting this one.`
+          );
+          return true;
+        }
+
         // Preserve state (records, header, and — critically for
         // correction integrity — correctsAssessmentId) so a retry
         // resubmits the same correction rather than silently becoming

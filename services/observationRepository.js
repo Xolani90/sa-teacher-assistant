@@ -75,6 +75,24 @@ function saveObservationSubmission(phoneHash, header, records, classId = null, c
     if (original.phone_hash !== phoneHash) {
       throw new Error("saveObservationSubmission: cannot correct another teacher's assessment");
     }
+    // Cycle 20 fix: the flow layer (flows/observationFlow.js) only blocks
+    // re-correcting an already-superseded assessment using a CACHED
+    // supersededByAssessmentId captured when the detail view was shown —
+    // that cache goes stale the moment a first correction lands while a
+    // second correction of the same original is already in flight (e.g.
+    // a duplicate/rapid resend of DONE). Without this check both
+    // succeeded, leaving the original with two undistinguished
+    // "corrector" rows — the older one silently visible in
+    // getObservationHistory() as if it were current, with nothing
+    // marking it stale. Re-check here, inside the same authoritative
+    // path every caller goes through, rather than trusting the flow's
+    // cached read.
+    const existingCorrector = db.prepare(`
+      SELECT id FROM observation_assessments WHERE corrects_assessment_id = ?
+    `).get(correctsAssessmentId);
+    if (existingCorrector) {
+      throw new Error('saveObservationSubmission: this assessment has already been corrected by another submission');
+    }
   }
 
   try {
@@ -190,9 +208,10 @@ function getObservationAssessment(assessmentId) {
       SELECT * FROM observation_records WHERE assessment_id = ? ORDER BY id ASC
     `).all(assessmentId);
 
-    // A given assessment can be corrected at most once in normal usage
-    // (the flow blocks re-correcting an already-superseded one), but if
-    // that were ever violated, the most recent corrector wins here.
+    // A given assessment can be corrected at most once — enforced in
+    // saveObservationSubmission (Cycle 20), not just by the flow's
+    // cached check — so this LIMIT 1 is a defensive tiebreak only,
+    // not a fallback for a reachable multi-corrector state.
     const supersededByRow = db.prepare(`
       SELECT id FROM observation_assessments WHERE corrects_assessment_id = ? ORDER BY id DESC LIMIT 1
     `).get(assessmentId);
