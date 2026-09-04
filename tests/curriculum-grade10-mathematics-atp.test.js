@@ -145,7 +145,7 @@ for (const [term, dates] of Object.entries(REPRESENTATIVE_DATES)) {
 
   const g12t1 = getTermTopics(12, 'mathematics', 1);
   check(
-    JSON.stringify(g12t1) === JSON.stringify(['Patterns, sequences & series', 'Functions', 'Logarithms', 'Finance', 'Trigonometry', 'Euclidean geometry']),
+    JSON.stringify(g12t1) === JSON.stringify(['Patterns, sequences & series', 'Functions', 'Trigonometry']),
     'Grade 12 Term 1 taxonomy is unchanged by the Grade 10 correction',
     JSON.stringify(g12t1)
   );

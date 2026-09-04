@@ -66,8 +66,10 @@ const CAPS_TOPICS = {
   // now been corrected against a directly gov.za-hosted Grade 11
   // Mathematics ATP (2023/24 official prior-year evidence — no 2026-dated
   // official Grade 11 document was located/checked).
-  // Grade 12 has NOT been audited or corrected and its accuracy is
-  // unverified.
+  // Grade 12 has now been reconciled against a directly
+  // education.gov.za-hosted DBE Grade 12 Mathematics ATP (2023/24
+  // official prior-year evidence — no 2026-dated official Grade 12
+  // document was located/checked).
   mathematics: {
     7: {
       1: ['Whole numbers','Common fractions','Decimal fractions'],
@@ -100,10 +102,10 @@ const CAPS_TOPICS = {
       4: ['Number patterns','Revision of measurement','Revision of Algebra','Revision of Trigonometry'],
     },
     12: {
-      1: ['Patterns, sequences & series','Functions','Logarithms','Finance','Trigonometry','Euclidean geometry'],
-      2: ['Finance','Sequences & series','Functions','Trigonometry','Analytical geometry','Euclidean geometry','Statistics'],
-      3: ['Trigonometry','Euclidean geometry','Analytical geometry','Statistics','Probability'],
-      4: ['Trigonometry','Euclidean geometry','Analytical geometry','Statistics','Probability','Calculus'],
+      1: ['Patterns, sequences & series','Functions','Trigonometry'],
+      2: ['Euclidean geometry','Analytical geometry','Differential Calculus'],
+      3: ['Finance, growth & decay','Statistics','Counting & probability'],
+      4: ['Revision'],
     },
   },
   english: {
