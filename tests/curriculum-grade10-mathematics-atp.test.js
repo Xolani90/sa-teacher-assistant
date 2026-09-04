@@ -131,9 +131,14 @@ for (const [term, dates] of Object.entries(REPRESENTATIVE_DATES)) {
     JSON.stringify(g9t3)
   );
 
+  // Note: Grade 11's Term 1 taxonomy was itself corrected in Cycle 39
+  // (a separate defect/fix). This assertion is updated only to reflect
+  // that corrected value, so this file continues to prove Grade 10's
+  // change didn't touch Grade 11 — not to re-verify Grade 11's own fix
+  // (see curriculum-grade11-mathematics-atp.test.js for that).
   const g11t1 = getTermTopics(11, 'mathematics', 1);
   check(
-    JSON.stringify(g11t1) === JSON.stringify(["Exponents & surds", "Equations & inequalities", "Number patterns", "Functions", "Trigonometry", "Euclidean geometry"]),
+    JSON.stringify(g11t1) === JSON.stringify(['Exponents & surds', 'Equations & inequalities', 'Trigonometry']),
     'Grade 11 Term 1 taxonomy is unchanged by the Grade 10 correction',
     JSON.stringify(g11t1)
   );

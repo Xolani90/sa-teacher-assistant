@@ -59,7 +59,14 @@ const CAPS_TOPICS = {
   // claimed. Grade 10 has now been corrected against a directly
   // gov.za-hosted Grade 10 Mathematics ATP (2023/24 official prior-year
   // evidence — no 2026-dated official Grade 10 document was located).
-  // Grades 11-12 have NOT been audited or corrected and their accuracy is
+  // Grade 11 had the same class of term-misplacement defect (e.g.
+  // "Euclidean geometry" and "Functions" listed under Term 1 when the
+  // official ATP places them in Term 2) plus a fabricated Term 4 taxonomy
+  // that didn't match the ATP's actual revision-term content. Grade 11 has
+  // now been corrected against a directly gov.za-hosted Grade 11
+  // Mathematics ATP (2023/24 official prior-year evidence — no 2026-dated
+  // official Grade 11 document was located/checked).
+  // Grade 12 has NOT been audited or corrected and its accuracy is
   // unverified.
   mathematics: {
     7: {
@@ -87,10 +94,10 @@ const CAPS_TOPICS = {
       4: ['Measurement','Number patterns'],
     },
     11: {
-      1: ['Exponents & surds','Equations & inequalities','Number patterns','Functions','Trigonometry','Euclidean geometry'],
-      2: ['Equations & inequalities','Functions','Finance, growth & decay','Trigonometry','Analytical geometry','Statistics'],
-      3: ['Functions','Trigonometry','Finance, growth & decay','Euclidean geometry','Probability','Statistics'],
-      4: ['Trigonometry','Euclidean geometry','Analytical geometry','Statistics','Probability'],
+      1: ['Exponents & surds','Equations & inequalities','Trigonometry'],
+      2: ['Euclidean geometry','Analytical geometry','Functions'],
+      3: ['Trigonometry','Statistics','Probability','Finance, growth & decay'],
+      4: ['Number patterns','Revision of measurement','Revision of Algebra','Revision of Trigonometry'],
     },
     12: {
       1: ['Patterns, sequences & series','Functions','Logarithms','Finance','Trigonometry','Euclidean geometry'],
