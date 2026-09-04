@@ -27,21 +27,37 @@ const SA_SCHOOL_CALENDAR = {
 
 // ── CAPS Topics — expanded to cover all common SA subjects & grades ──────────
 const CAPS_TOPICS = {
-  // NOTE (fixed — see PROJECT_STATUS.md "ATP/lesson-plan topic drift"):
+  // NOTE (Grades 8-9 fixed — see PROJECT_STATUS.md "ATP/lesson-plan topic
+  // drift"; Grade 7 corrected in Cycle 33):
   // Grades 7-9 previously repeated almost the SAME full-year topic list in
   // all 4 terms (e.g. "Algebraic equations" appeared in every term's array
   // for Grade 7), so any code trusting this table as "what's the current
-  // topic" could return a topic from the wrong term entirely. Re-derived
-  // from the official 2026 DBE Senior Phase Mathematics ATPs
-  // (education.gov.za) so each topic appears only in the term it is
-  // actually taught in. FET (10-12) below was already term-specific and is
-  // unchanged.
+  // topic" could return a topic from the wrong term entirely. Grades 8-9
+  // were re-derived from the official 2026 DBE Senior Phase Mathematics
+  // ATPs (education.gov.za) and directly verified term-by-term against
+  // those documents — each topic appears only in the term it is actually
+  // taught in. Grade 7's original "re-derivation" claimed the same but was
+  // NOT actually correct: it de-duplicated topics across terms but placed
+  // several of them in the wrong term (e.g. "Integers" was listed under
+  // Term 1 when the ATP places it in Term 2) and included topics that
+  // don't belong to Grade 7 at all ("Algebraic expressions"/"Graphs" are
+  // Grade 8/9 topics; "Measurement — time/distance/speed" and
+  // "Probability" aren't in the Grade 7 ATP). Grade 7 below has now been
+  // corrected against a directly gov.za-hosted Grade 7 Mathematics ATP
+  // (2023/24, content confirmed unchanged into 2026 via a corroborating
+  // 2026 copy). "Geometric constructions" is kept as-worded (rather than
+  // the ATP's "Construction of geometric figures") because existing tests
+  // (tests/rc1-lessonplan-dispatch.test.js,
+  // tests/feature2-lessonplan-homework-e2e-journey.test.js) pin that exact
+  // string as the resolved topic for Grade 7 Mathematics, 2026-08-05 — it
+  // is the same real ATP topic, just a repository naming choice. FET
+  // (10-12) below was already term-specific and is unchanged.
   mathematics: {
     7: {
-      1: ['Integers','Common fractions','Numeric and geometric patterns','Functions and relationships'],
-      2: ['Decimal fractions','Exponents','Algebraic expressions','Graphs'],
-      3: ['Geometry of 2D shapes','Geometric constructions','Transformation geometry','Area and perimeter of 2D shapes','Surface area and volume'],
-      4: ['Measurement — time, distance and speed','Data handling','Probability'],
+      1: ['Whole numbers','Common fractions','Decimal fractions'],
+      2: ['Exponents','Integers','Numeric and geometric patterns','Functions and relationships'],
+      3: ['Geometric constructions','Geometry of straight lines','Geometry of 2D shapes','Transformation geometry'],
+      4: ['Area and perimeter of 2D shapes','Surface area and volume of 3D objects','Data handling'],
     },
     8: {
       1: ['Whole numbers','Integers','Common fractions','Decimal fractions','Numeric and geometric patterns'],

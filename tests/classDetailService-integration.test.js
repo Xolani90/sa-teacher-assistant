@@ -103,8 +103,11 @@ function run() {
   `).run(assessment2.lastInsertRowid, ayanda.id, 'Ayanda Nkosi', 9, 10, 90);
 
   // One curriculum topic marked covered, so coverage is > 0% but < 100%.
+  // "Integers" is a Term 2 (not Term 1) Grade 7 Mathematics ATP topic —
+  // see Cycle 33 CAPS_TOPICS.mathematics[7] correction in
+  // curriculumIntelligenceService.js.
   const { markTopicCovered } = require('../services/curriculumCoverageService');
-  markTopicCovered(PHONE_HASH, 7, 'Mathematics', 1, 'Integers');
+  markTopicCovered(PHONE_HASH, 7, 'Mathematics', 2, 'Integers');
 
   // One observation session covering two learners.
   const obsAssessment = db.prepare(`

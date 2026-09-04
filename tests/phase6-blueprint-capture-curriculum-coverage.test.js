@@ -244,7 +244,11 @@ function makeMessage(from, body, id) { return { from, id, type: 'text', text: { 
       questions: [
         { questionNumber: 1, topic: CAPS_TOPIC, maxMarks: 5 },
         { questionNumber: 2, topic: CAPS_TOPIC, maxMarks: 5 },
-        { questionNumber: 3, topic: 'Integers', maxMarks: 5 },
+        // "Integers" is a Term 2 (not Term 1) Grade 7 Mathematics ATP topic
+        // — see Cycle 33 CAPS_TOPICS.mathematics[7] correction in
+        // curriculumIntelligenceService.js. Use "Whole numbers", a real
+        // Term 1 topic, so this stays a valid same-term dedup scenario.
+        { questionNumber: 3, topic: 'Whole numbers', maxMarks: 5 },
       ],
     });
 
@@ -258,7 +262,7 @@ function makeMessage(from, body, id) { return { from, id, type: 'text', text: { 
     const report = getTeacherProgressReport(phoneHash);
     const term1 = report && (report.termResults || []).find(t => t.term === 1);
     check(!!term1, 'a progress result exists for the dedup capture');
-    check(!!term1 && term1.coveredTopicList.includes(CAPS_TOPIC) && term1.coveredTopicList.includes('Integers'),
+    check(!!term1 && term1.coveredTopicList.includes(CAPS_TOPIC) && term1.coveredTopicList.includes('Whole numbers'),
       'both distinct topics are marked covered', JSON.stringify(term1));
 
     const assessmentRow = db.prepare(
