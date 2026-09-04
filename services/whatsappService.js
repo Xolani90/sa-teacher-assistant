@@ -121,7 +121,18 @@ function graphPost(url, payload) {
     });
 
     req.setTimeout(GRAPH_TIMEOUT_MS, () => {
-      req.destroy(new Error(`WhatsApp API request timed out after ${GRAPH_TIMEOUT_MS / 1000}s`));
+      // A client-side timeout is the textbook ambiguous outcome: the request
+      // may already have reached Meta and been accepted before we gave up
+      // waiting on the response. It must be treated as retryable exactly
+      // like ECONNRESET/ETIMEDOUT — but isRetryableError() below keys off
+      // err.code, and destroy() does not attach one to a plain Error, so
+      // this specific failure was silently falling through to the
+      // non-retryable branch and being thrown to the caller on attempt 1
+      // with the other 2 backoff attempts never used. Tag it explicitly so
+      // it's classified the same as the native network-timeout errors.
+      const timeoutErr = new Error(`WhatsApp API request timed out after ${GRAPH_TIMEOUT_MS / 1000}s`);
+      timeoutErr.code = 'ETIMEDOUT';
+      req.destroy(timeoutErr);
     });
 
     req.on('error', reject);
