@@ -382,6 +382,89 @@ function succeededEvent(checkoutId, amountCents = 9900) {
     }
   }
 
+  console.log('\n── Cycle 45 Test F: underpayment is rejected BEFORE entitlement ────────');
+  {
+    // PRO_PRICE_ZAR is 99 in this test env (process.env.PRO_PRICE_ZAR set at
+    // the top of this file) => floor is 9900 cents. A webhook claiming a
+    // lower paid amount for a real, valid, correctly-signed-equivalent
+    // checkout must not grant Pro.
+    const phone = '+27821110011';
+    const checkoutId = 'co-cycle45-f';
+    const phoneHash = seedPendingCheckout({ checkoutId, phone });
+
+    const result = await handleWebhookEvent(succeededEvent(checkoutId, 1000)); // R10, below the R99 floor
+    const teacher = getTeacher(phoneHash);
+
+    check(result.upgraded === false, 'C45-F-01: underpayment does not report upgraded=true');
+    check(teacher.is_pro === 0, 'C45-F-02: underpayment grants no Pro entitlement');
+    const ledgerRow = db.prepare(`SELECT status, reason FROM payment_ledger WHERE checkout_id = ?`).get(checkoutId);
+    check(ledgerRow.status === 'ignored' && ledgerRow.reason === 'underpayment_or_invalid_amount',
+      'C45-F-03: ledger records the specific underpayment reason, not a silent no-op');
+
+    // A later legitimate-amount duplicate for the SAME checkout must still
+    // be blocked once terminal — underpayment is a terminal ('ignored')
+    // status, so a second delivery claiming the correct amount cannot
+    // retroactively grant entitlement for a checkout already resolved as
+    // an underpayment.
+    const result2 = await handleWebhookEvent(succeededEvent(checkoutId, 9900));
+    const teacherAfter = getTeacher(phoneHash);
+    check(result2.upgraded === false, 'C45-F-04: a later full-amount delivery for an already-ignored checkout is treated as a duplicate, not re-processed');
+    check(teacherAfter.is_pro === 0, 'C45-F-05: no entitlement is granted retroactively');
+  }
+
+  console.log('\n── Cycle 45 Test G: overpayment is accepted (documented floor, not exact-match) ──');
+  {
+    const phone = '+27821110012';
+    const checkoutId = 'co-cycle45-g';
+    const phoneHash = seedPendingCheckout({ checkoutId, phone });
+
+    const result = await handleWebhookEvent(succeededEvent(checkoutId, 20000)); // R200, above the R99 floor
+    const teacher = getTeacher(phoneHash);
+
+    check(result.upgraded === true, 'C45-G-01: an amount at/above the required floor is accepted (intentional floor semantics, not a defect)');
+    check(teacher.is_pro === 1, 'C45-G-02: entitlement is granted exactly once for the overpayment');
+  }
+
+  console.log('\n── Cycle 45 Test H: unknown checkout ID grants no entitlement ──────────');
+  {
+    // A validly-shaped payment.succeeded event whose checkoutId does not
+    // correspond to any locally-created pending subscription — e.g. a
+    // stale/expired checkout, a checkout for a different merchant
+    // integration sharing the same Yoco account, or an attacker-guessed
+    // checkout ID. No teacher/phoneHash can be resolved, so no entitlement
+    // must be granted to anyone.
+    const result = await handleWebhookEvent(succeededEvent('co-cycle45-does-not-exist'));
+
+    check(result.phoneHash === null, 'C45-H-01: unknown checkout resolves to no phoneHash');
+    check(result.upgraded === false, 'C45-H-02: unknown checkout grants no entitlement to any teacher');
+    const ledgerRow = db.prepare(`SELECT status, reason FROM payment_ledger WHERE checkout_id = ?`).get('co-cycle45-does-not-exist');
+    check(ledgerRow.status === 'failed' && ledgerRow.reason === 'no_pending_subscription_found',
+      'C45-H-03: ledger records why no entitlement was applied, rather than silently dropping the event');
+  }
+
+  console.log('\n── Cycle 45 Test I: entitlement/user binding is server-controlled, not webhook-controlled ──');
+  {
+    // The webhook payload never carries phoneHash (confirmed against
+    // Yoco's own official payment.succeeded example payload, which only
+    // echoes back metadata.checkoutId) — handleWebhookEvent must resolve
+    // the beneficiary from the LOCALLY created subscriptions row, not from
+    // any field an attacker could place in a crafted metadata object. This
+    // test proves that even if a payload carries an unrelated/attacker-
+    // supplied phoneHash-shaped field, it has no effect on who is upgraded.
+    const phone = '+27821110013';
+    const checkoutId = 'co-cycle45-i';
+    const phoneHash = seedPendingCheckout({ checkoutId, phone });
+
+    const event = succeededEvent(checkoutId);
+    event.payload.metadata.phoneHash = 'attacker-controlled-value-should-be-ignored';
+
+    const result = await handleWebhookEvent(event);
+    const teacher = getTeacher(phoneHash);
+
+    check(result.phoneHash === phoneHash, 'C45-I-01: the beneficiary is resolved from the local subscriptions row, matching the real checkout owner');
+    check(teacher.is_pro === 1, 'C45-I-02: entitlement is correctly granted to the real checkout owner despite a forged metadata.phoneHash field being present');
+  }
+
   console.log('\n─────────────────────────────────');
   console.log(`✅ Passed: ${passed}`);
   console.log(`❌ Failed: ${failed}`);

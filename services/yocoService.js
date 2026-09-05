@@ -160,6 +160,16 @@ async function buildPaymentUrl(phoneNumber, teacherName = '') {
   // via the real checkout ID instead. See handleWebhookEvent for details.
   const payload = {
     amount:     getProPriceCents(),
+    // Currency cross-check note (Cycle 45 audit): handleWebhookEvent below
+    // does not validate event.payload.currency against this value. Per
+    // Yoco's own Create Checkout reference ("The 3-letter currency code in
+    // ISO 4217 format. Currently we only support ZAR."), no other currency
+    // can currently be returned for any checkout on this platform, so
+    // there is no live cross-currency substitution path today. If Yoco
+    // ever adds multi-currency support, this checkout-creation constant
+    // and the webhook handler's amount floor would both need an explicit
+    // currency check added — this is a documented forward-looking gap,
+    // not a currently-exploitable one.
     currency:   'ZAR',
     cancelUrl:  `${appUrl}/payment/cancel`,
     successUrl: `${appUrl}/payment/return`,
