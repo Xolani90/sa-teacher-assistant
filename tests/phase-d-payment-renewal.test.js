@@ -233,6 +233,155 @@ function succeededEvent(checkoutId, amountCents = 9900) {
     check(ledgerRow.status === 'failed' && ledgerRow.reason === 'teacher_row_not_found', 'D-18: payment_ledger records the failure reason explaining the no-op (no silent failure)');
   }
 
+  // ── Cycle 44: stale payment_ledger 'received'-row reclaim coverage ──────
+  // Helper: seeds a payment_ledger row directly at a given age, simulating
+  // an earlier delivery for the same checkout that reached 'received' but
+  // never reached a terminal status (see Cycle 43/44's documented
+  // rationale in services/yocoService.js for why this is the only way such
+  // a row can exist — an abandoned prior invocation, not a live one).
+  function seedReceivedLedgerRow(checkoutId, ageSeconds) {
+    const { v4: uuidv4 } = require('uuid');
+    db.prepare(`
+      INSERT INTO payment_ledger (id, checkout_id, amount, status, created_at, updated_at)
+      VALUES (?, ?, NULL, 'received', datetime('now', ?), datetime('now', ?))
+    `).run(uuidv4(), checkoutId, `-${ageSeconds} seconds`, `-${ageSeconds} seconds`);
+  }
+
+  console.log('\n── Cycle 44 Test A: fresh received row (well inside 2min) is NOT reclaimed ──');
+  {
+    const phone = '+27821110006';
+    const checkoutId = 'co-cycle44-a';
+    const phoneHash = seedPendingCheckout({ checkoutId, phone });
+    seedReceivedLedgerRow(checkoutId, 10); // 10s old — well inside the 2-minute window
+
+    const result = await handleWebhookEvent(succeededEvent(checkoutId));
+    const teacher = getTeacher(phoneHash);
+
+    check(result.upgraded === false, 'C44-A-01: fresh in-flight-looking received row is not reclaimed (upgraded=false)');
+    check(teacher.is_pro === 0, 'C44-A-02: no business effect occurred — teacher was not upgraded');
+    const ledgerRow = db.prepare(`SELECT status FROM payment_ledger WHERE checkout_id = ?`).get(checkoutId);
+    check(ledgerRow.status === 'received', 'C44-A-03: ledger row remains at received, untouched');
+  }
+
+  console.log('\n── Cycle 44 Test B: stale received row (well past 2min) IS reclaimed ───');
+  {
+    const phone = '+27821110007';
+    const checkoutId = 'co-cycle44-b';
+    const phoneHash = seedPendingCheckout({ checkoutId, phone });
+    seedReceivedLedgerRow(checkoutId, 300); // 5 minutes old — well past the threshold
+
+    const result = await handleWebhookEvent(succeededEvent(checkoutId));
+    const teacher = getTeacher(phoneHash);
+
+    check(result.upgraded === true, 'C44-B-01: stale received row is reclaimed and payment processes (upgraded=true)');
+    check(teacher.is_pro === 1, 'C44-B-02: business effect occurred exactly once — teacher is now Pro');
+    const ledgerRow = db.prepare(`SELECT status, id FROM payment_ledger WHERE checkout_id = ?`).get(checkoutId);
+    check(ledgerRow.status === 'applied', 'C44-B-03: ledger reaches the applied terminal state');
+    const allRowsForCheckout = db.prepare(`SELECT COUNT(*) AS n FROM payment_ledger WHERE checkout_id = ?`).get(checkoutId);
+    check(allRowsForCheckout.n === 1, 'C44-B-04: exactly one ledger row exists for this checkout (reclaim reused it, did not duplicate it)');
+  }
+
+  console.log('\n── Cycle 44 Test C: just-inside the 2min boundary is NOT reclaimed ────');
+  {
+    const phone = '+27821110008';
+    const checkoutId = 'co-cycle44-c';
+    const phoneHash = seedPendingCheckout({ checkoutId, phone });
+    seedReceivedLedgerRow(checkoutId, 110); // 1min50s old — inside the 2-minute window
+
+    const result = await handleWebhookEvent(succeededEvent(checkoutId));
+    const teacher = getTeacher(phoneHash);
+
+    check(result.upgraded === false, 'C44-C-01: just-inside-threshold received row is NOT reclaimed');
+    check(teacher.is_pro === 0, 'C44-C-02: no business effect occurred at the just-inside boundary');
+  }
+
+  console.log('\n── Cycle 44 Test D: just-outside the 2min boundary IS reclaimed ───────');
+  {
+    const phone = '+27821110009';
+    const checkoutId = 'co-cycle44-d';
+    const phoneHash = seedPendingCheckout({ checkoutId, phone });
+    seedReceivedLedgerRow(checkoutId, 130); // 2min10s old — just past the 2-minute window
+
+    const result = await handleWebhookEvent(succeededEvent(checkoutId));
+    const teacher = getTeacher(phoneHash);
+
+    check(result.upgraded === true, 'C44-D-01: just-outside-threshold received row IS reclaimed');
+    check(teacher.is_pro === 1, 'C44-D-02: business effect occurred exactly once at the just-outside boundary');
+    const ledgerRow = db.prepare(`SELECT status FROM payment_ledger WHERE checkout_id = ?`).get(checkoutId);
+    check(ledgerRow.status === 'applied', 'C44-D-03: ledger reaches the applied terminal state at the boundary');
+  }
+
+  console.log('\n── Cycle 44 Test E: recovery after an interrupted prior delivery ──────');
+  {
+    // Simulates the documented recovery scenario: an earlier delivery for
+    // this checkout reached 'received' but never reached a terminal status
+    // (the only way that can happen per the invariant documented in
+    // services/yocoService.js — an abandoned prior invocation, not a live
+    // one). A later delivery (Yoco's own retry, or an operator-triggered
+    // resend) must be able to recover it to exactly one applied business
+    // effect.
+    const phone = '+27821110010';
+    const checkoutId = 'co-cycle44-e';
+    const phoneHash = seedPendingCheckout({ checkoutId, phone });
+    seedReceivedLedgerRow(checkoutId, 400); // well past threshold — abandoned row
+
+    sentMessages.length = 0;
+    const result = await handleWebhookEvent(succeededEvent(checkoutId));
+    const teacher = getTeacher(phoneHash);
+
+    check(result.upgraded === true, 'C44-E-01: interrupted-then-retried delivery is recoverable');
+    check(teacher.is_pro === 1, 'C44-E-02: subscription is extended — the entitlement mutation actually applies');
+    const expiry = parseSqliteUtc(teacher.pro_expires);
+    const expectedExpiry = new Date(Date.now() + 31 * 24 * 60 * 60 * 1000);
+    check(Math.abs(expiry.getTime() - expectedExpiry.getTime()) < 5000, 'C44-E-03: pro_expires reflects exactly one 31-day extension, not zero or double');
+    check(sentMessages.length === 1, 'C44-E-04: exactly one WhatsApp confirmation is sent for the recovered payment');
+
+    // A further duplicate of the same checkout (e.g. Yoco's own later
+    // redelivery arriving after recovery already completed) must not
+    // apply a second time.
+    sentMessages.length = 0;
+    const resultDup = await handleWebhookEvent(succeededEvent(checkoutId));
+    const teacherAfterDup = getTeacher(phoneHash);
+    check(resultDup.upgraded === false, 'C44-E-05: a further duplicate after recovery does not upgrade again');
+    check(teacherAfterDup.pro_expires === teacher.pro_expires, 'C44-E-06: pro_expires is unchanged by the further duplicate — no second business effect');
+    check(sentMessages.length === 0, 'C44-E-07: no second confirmation message sent for the further duplicate');
+  }
+
+  console.log('\n── Cycle 44 Phase 5: no-await critical-section invariant (structural) ──');
+  {
+    // Cycle 43 established that the 2-minute reclaim window's safety rests
+    // on there being zero `await` between the payment_ledger claim and the
+    // terminal status write in handleWebhookEvent — not on any assumption
+    // about Yoco's retry timing. A live concurrent-request race test is
+    // not constructible here (Node's single-threaded, synchronous-db
+    // execution model means such a race cannot be manufactured against
+    // the real code), so per Cycle 44 Phase 5 this is instead a structural
+    // regression on the invariant itself: if a future change introduces
+    // an `await` inside this span, the safety argument this reclaim
+    // window relies on no longer holds, and this check will fail loudly
+    // rather than silently regressing. Deliberately source-text-based
+    // (same convention as tests/routing-order-assessment-session-priority.test.js),
+    // not measured/timed.
+    const fs = require('fs');
+    const path = require('path');
+    const source = fs.readFileSync(path.resolve(__dirname, '../services/yocoService.js'), 'utf8');
+
+    const claimMarker = `INSERT OR IGNORE INTO payment_ledger`;
+    const terminalMarker = `SET status = 'applied', phone_hash = ?`;
+    const claimIdx = source.indexOf(claimMarker);
+    const terminalIdx = source.indexOf(terminalMarker);
+
+    check(claimIdx !== -1 && terminalIdx !== -1 && claimIdx < terminalIdx,
+      'C44-INV-01: both the ledger claim and the applied-terminal-write markers were found, in the expected order');
+
+    if (claimIdx !== -1 && terminalIdx !== -1 && claimIdx < terminalIdx) {
+      const criticalSection = source.slice(claimIdx, terminalIdx);
+      const awaitMatches = criticalSection.match(/\bawait\b/g) || [];
+      check(awaitMatches.length === 0,
+        `C44-INV-02: no 'await' appears between the ledger claim and the applied-terminal write (found ${awaitMatches.length})`);
+    }
+  }
+
   console.log('\n─────────────────────────────────');
   console.log(`✅ Passed: ${passed}`);
   console.log(`❌ Failed: ${failed}`);

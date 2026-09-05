@@ -329,19 +329,39 @@ async function handleWebhookEvent(event) {
   // logic, status 'received', so every webhook delivery is recorded even
   // before we know whether it will apply.
   //
-  // Phase E fix: a process crash between this INSERT and the renewal
-  // transaction below (both fully synchronous, zero await between them,
-  // so the only way to land here is an abrupt process kill, not a race)
-  // would otherwise strand the row at 'received' forever — INSERT OR
-  // IGNORE would then silently reject EVERY future delivery of that same
-  // checkout_id, with no reconciliation path anywhere in this codebase
-  // (confirmed: nothing else queries payment_ledger). A 'received' row
-  // older than 2 minutes is treated as abandoned and reclaimed for retry.
-  // 2 minutes is far longer than this function's own worst-case duration
-  // (no external network calls before the WhatsApp send at the very end,
-  // itself bounded by sendSingleMessage's ~3.5s retry ceiling), so a
-  // genuinely in-flight concurrent call's row — created milliseconds
-  // earlier — is never mistakenly reclaimed.
+  // Stale-reclaim rationale (Cycle 43 audit — see docs/releases history for
+  // the full evidence trail):
+  //
+  //   External fact: Yoco's own developer docs (verifying-events) confirm
+  //   webhook retries happen and recommend a 3-minute signature-replay
+  //   threshold, but do NOT publish an exact retry schedule (attempt count,
+  //   interval, or backoff) — there is no official source to size this
+  //   2-minute value against.
+  //
+  //   Internal safety property (this is what actually justifies 2 minutes,
+  //   not any assumption about Yoco's retry timing): the path from this
+  //   INSERT to the terminal ledger status write below (`applied` /
+  //   `ignored` / `failed`) contains zero `await` — confirmed by direct
+  //   inspection, not measured/timed — so within one invocation nothing
+  //   else can run between them. A second concurrent delivery for the same
+  //   checkout_id therefore either arrives before this invocation starts
+  //   (blocked by the UNIQUE constraint, ordinary duplicate) or after it
+  //   has already reached a terminal status (also blocked). The only way a
+  //   row can be found sitting at `received` by a later delivery is if the
+  //   invocation that created it never reached a terminal status at all —
+  //   an abrupt process kill, or an uncaught exception mid-function that
+  //   this file's own catch-all (server.js) logs without terminal-marking
+  //   the row. In either case that invocation is over; there is no live
+  //   request left to "resume" after a later delivery reclaims the row.
+  //
+  //   So the 2-minute value is a recovery window for abandoned `received`
+  //   rows, not a synchronization mechanism protecting one live request
+  //   from a second one — it does not need to be sized against Yoco's
+  //   retry cadence, only against this function's own execution shape.
+  //   INSERT OR IGNORE would otherwise silently reject EVERY future
+  //   delivery of that same checkout_id, with no reconciliation path
+  //   anywhere in this codebase (confirmed: nothing else queries
+  //   payment_ledger).
   const ledgerId = uuidv4();
   const insertResult = db.prepare(`
     INSERT OR IGNORE INTO payment_ledger (id, checkout_id, amount, status, created_at, updated_at)
