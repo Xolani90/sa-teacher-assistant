@@ -198,13 +198,8 @@ app.get('/pdf/:fileId', (req, res) => {
     return res.status(403).json({ error: 'Missing token' });
   }
 
-  const crypto = require('crypto');
-  const expectedToken = crypto.createHmac('sha256', process.env.PDF_SECRET)
-    .update(fileId)
-    .digest('hex')
-    .slice(0, 16);
-
-  if (t !== expectedToken) {
+  const { verifyPdfToken } = require('./utils/pdfTokenAuth');
+  if (!verifyPdfToken(fileId, t, process.env.PDF_SECRET)) {
     return res.status(403).json({ error: 'Invalid token' });
   }
 

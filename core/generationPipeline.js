@@ -152,8 +152,8 @@ const ATP_GROUNDED_TYPES = ['lessonPlan', 'worksheet', 'test', 'examPaper', 'sba
  * @returns {string} full URL, e.g. `${APP_URL}/pdf/${fileId}?t=${token}`
  */
 function buildPdfUrl(fileId) {
-  const crypto = require('crypto');
-  const token = crypto.createHmac('sha256', process.env.PDF_SECRET).update(fileId).digest('hex').slice(0, 16);
+  const { computePdfToken } = require('../utils/pdfTokenAuth');
+  const token = computePdfToken(fileId, process.env.PDF_SECRET);
   return `${process.env.APP_URL}/pdf/${fileId}?t=${token}`;
 }
 
