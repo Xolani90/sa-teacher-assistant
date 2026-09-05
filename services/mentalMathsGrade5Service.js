@@ -101,9 +101,17 @@ function generateC12(rand) {
       if (result < 10 || result > 9999) continue;
     }
 
+    // MM-C12-01 fix (per docs/governance/Grade5_C12_MM-C12-01_Consistency_Decision.md):
+    // the derived/"therefore" clause must evaluate to the same canonicalAnswer
+    // as the primary clause (`result`), not to `a`. Previously the derived
+    // clause used the inverse operation against `result` and `b`, which
+    // algebraically recovers `a` — a different value from canonicalAnswer
+    // whenever b !== 0. The derived clause now restates the identical
+    // primary computation, which is guaranteed by construction to equal
+    // `result` for both operations.
     const prompt = op === 'add'
-      ? `${a} + ${b} = □ therefore □ = ${result} - ${b}`
-      : `${a} - ${b} = □ therefore □ = ${result} + ${b}`;
+      ? `${a} + ${b} = □ therefore □ = ${a} + ${b}`
+      : `${a} - ${b} = □ therefore □ = ${a} - ${b}`;
 
     return { candidate: 'C12', op, tier, a, b, result, prompt, canonicalAnswer: result };
   }

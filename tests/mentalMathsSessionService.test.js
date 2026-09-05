@@ -48,13 +48,17 @@ function throws(label, fn) {
 function verifyByReparsing({ prompt, canonicalAnswer }) {
   let m;
 
-  // Grade 5 C12 — "a + b = □ therefore □ = r - b" / "a - b = □ therefore □ = r + b"
+  // Grade 5 C12 — post-MM-C12-01 form: "a + b = □ therefore □ = a + b" /
+  // "a - b = □ therefore □ = a - b" (see
+  // docs/governance/Grade5_C12_MM-C12-01_Consistency_Decision.md — both
+  // clauses must evaluate to the same canonicalAnswer; no longer an
+  // inverse-operation relationship between the two clauses).
   m = prompt.match(/^(-?\d+) ([+-]) (-?\d+) = □ therefore □ = (-?\d+) ([+-]) (-?\d+)$/);
   if (m) {
-    const [, a, op, b, r, invOp, invB] = m;
-    const expected = op === '+' ? Number(a) + Number(b) : Number(a) - Number(b);
-    const inverseOk = invOp === (op === '+' ? '-' : '+') && Number(invB) === Number(b);
-    return expected === Number(r) && inverseOk && canonicalAnswer === expected;
+    const [, a, op, b, r, op2, b2] = m;
+    const primary = op === '+' ? Number(a) + Number(b) : Number(a) - Number(b);
+    const derived = op2 === '+' ? Number(r) + Number(b2) : Number(r) - Number(b2);
+    return primary === canonicalAnswer && derived === canonicalAnswer;
   }
 
   // Foundation and Intermediate Phase addition/subtraction facts.

@@ -43,6 +43,64 @@ console.log('C12 — frozen invariants (bulk generation)');
   ok('all three tiers populated (no empty tier)', tierCounts[2] > 0 && tierCounts[3] > 0 && tierCounts[4] > 0);
 }
 
+console.log('\nC12 — MM-C12-01 paired-clause consistency (docs/governance/Grade5_C12_MM-C12-01_Consistency_Decision.md)');
+{
+  // Independently re-derive both clauses from the raw operands/op — do not
+  // rely on the generator's own `result`/`prompt` fields as the oracle.
+  const rand = mulberry32(2024);
+  const items = [];
+  for (let i = 0; i < N; i++) items.push(generateC12(rand));
+
+  const addItems = items.filter(it => it.op === 'add');
+  const subItems = items.filter(it => it.op === 'sub');
+  ok('sample contains addition items', addItems.length > 0);
+  ok('sample contains subtraction items', subItems.length > 0);
+
+  // Cases that expose the original MM-C12-01 defect: a !== canonicalAnswer.
+  const addExposing = addItems.filter(it => it.a !== it.canonicalAnswer);
+  const subExposing = subItems.filter(it => it.a !== it.canonicalAnswer);
+  ok('addition sample includes a !== canonicalAnswer cases (defect-exposing)', addExposing.length > 0);
+  ok('subtraction sample includes a !== canonicalAnswer cases (defect-exposing)', subExposing.length > 0);
+
+  function independentPrimaryValue(it) {
+    return it.op === 'add' ? it.a + it.b : it.a - it.b;
+  }
+
+  function independentDerivedValue(it) {
+    // Parse the literal displayed "therefore □ = X" clause and evaluate it
+    // independently of the generator's internal arithmetic, so the prompt
+    // string itself — what the teacher/learner actually sees — is what's
+    // being checked, not just the generator's internal state.
+    const m = it.prompt.match(/therefore\s*□\s*=\s*(.+)$/);
+    if (!m) throw new Error(`could not parse derived clause from prompt: ${it.prompt}`);
+    // eslint-disable-next-line no-new-func
+    return Function(`"use strict"; return (${m[1]});`)();
+  }
+
+  ok('addition: primary clause === canonicalAnswer (all samples)',
+    addItems.every(it => independentPrimaryValue(it) === it.canonicalAnswer));
+  ok('addition: derived clause === canonicalAnswer (all samples, incl. a!==canonicalAnswer cases)',
+    addItems.every(it => independentDerivedValue(it) === it.canonicalAnswer));
+
+  ok('subtraction: primary clause === canonicalAnswer (all samples)',
+    subItems.every(it => independentPrimaryValue(it) === it.canonicalAnswer));
+  ok('subtraction: derived clause === canonicalAnswer (all samples, incl. a!==canonicalAnswer cases)',
+    subItems.every(it => independentDerivedValue(it) === it.canonicalAnswer));
+
+  ok('canonicalAnswer === result for all C12 items (unchanged invariant)',
+    items.every(it => it.canonicalAnswer === it.result));
+}
+
+console.log('\nC13 — regression guard (must remain unchanged by MM-C12-01)');
+{
+  const rand = mulberry32(99);
+  const items = [];
+  for (let i = 0; i < N; i++) items.push(generateC13(rand));
+  ok('C13 canonicalAnswer === a (unchanged convention)', items.every(it => it.canonicalAnswer === it.a));
+  ok('C13 quotient === a (unchanged convention)', items.every(it => it.quotient === it.a));
+  ok('C13 exact division holds (unchanged)', items.every(it => it.product % it.b === 0));
+}
+
 console.log('\nC13 — frozen invariants (bulk generation)');
 {
   const rand = mulberry32(99);
