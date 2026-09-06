@@ -62,8 +62,18 @@ function getTeacherClasses(phoneHash) {
   const db = getDb();
 
   try {
+    // Numbered selectors (e.g. "CLASS INTERVENTION 2") are meant to mean
+    // "my 2nd class" — i.e. the order teachers created their classes in,
+    // oldest first (id 1 == class 1). created_at DESC ("newest first")
+    // inverted that, so "2" resolved to the teacher's *oldest* class
+    // whenever they had exactly 2, and got worse with more classes.
+    // On top of that, created_at only has second-level resolution
+    // (datetime('now')), so classes created in the same second tied on
+    // the sort key with no defined tiebreak order — the same selector
+    // could resolve to a different class run to run. id ASC fixes both:
+    // deterministic, and numbered in actual creation order.
     const classes = db.prepare(`
-      SELECT * FROM classes WHERE phone_hash = ? ORDER BY created_at DESC
+      SELECT * FROM classes WHERE phone_hash = ? ORDER BY id ASC
     `).all(phoneHash);
 
     logger.debug('Retrieved teacher classes', { phoneHash, count: classes.length });
