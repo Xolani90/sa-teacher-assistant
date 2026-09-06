@@ -22,8 +22,11 @@
 ## 1. Decision Subject
 
 `docs/specs/mental-maths/Senior_Phase_Generation_Policy_v1_0_PROPOSED.md`
-("Generation Policy v1.0"), currently at repository `HEAD`
-`8867602f16407e7b14aca0a6ebdce18c6dfdf38b`, Status:
+("Generation Policy v1.0"). Its content was last reconciled through
+commit `8867602f16407e7b14aca0a6ebdce18c6dfdf38b` (Cycle 66); this
+Decision Act draft was itself prepared and committed during Cycle 68,
+whose resulting repository baseline is `29002d8dad076fe5d6af6d6dacd343bf75bd9e50`.
+Neither commit changed the policy's Status, which remains:
 `PROPOSED FRAMEWORK — NOT YET FROZEN — NOT IMPLEMENTATION-AUTHORITATIVE`.
 
 ## 2. Decision Requested
@@ -31,7 +34,15 @@
 Whether the Project Owner accepts Generation Policy v1.0 **as
 governance methodology** — i.e., accepts:
 
-- the candidate taxonomy consolidation in §1 (seven named candidates),
+- the candidate taxonomy consolidation in §1 (seven table rows,
+  covering six distinct generation-specification candidates —
+  `estimation`, `roundingOffAndCompensating`, `multiplicationFactFluency`,
+  `ratioSharing`, `powersRootsFluency` [counted twice, once per
+  domain: integer and rational], and `ratioRate`; `mulDivFluency` is
+  separately accepted as the umbrella/family containing
+  `multiplicationFactFluency` as its governed sub-construct — CY54-PO-01,
+  CY56-PO-01 — but has no independent row in §1 and no independent
+  generation authority of its own, per policy §7),
 - the grade-authorization table in §2,
 - the six-condition generation-eligibility gate proposed in §4,
 - the ten-point Policy Completeness Review proposed in §10, and
@@ -101,9 +112,21 @@ decision:
 - Generation-eligibility gate's ADR-022 lifecycle status — deferred.
 - All six generation-eligibility conditions (policy §4) — unsatisfied
   for every candidate.
-- All ten Policy Completeness Review items (policy §10) — as
-  disclosed in the policy itself; items 1–3, 5, 7 (partial), 8, and
-  10 remain open.
+- Policy Completeness Review (policy §10), per the Cycle 67 audit:
+  items 1 (item forms), 2 (numeric/operand ranges), 3 (rational-domain
+  generation spec), 7 (ratioSharing↔ratioRate pedagogical justification,
+  partial), 8 (ratioSharing G9 status), and 10 (whether the
+  generation-eligibility gate becomes an ADR-022-recognized lifecycle
+  concept) remain genuinely open. Item 5 (resolver/dispatch
+  implications) is not analyzed by this policy and is an
+  implementation-layer concern, not a blocker to this policy's own
+  readiness for review. Item 4 (difficulty bands) is not applicable —
+  explicitly out of scope per ADR-022 §5 Governance Rule 3. Item 6
+  (the §7 excluded-candidates table) was found complete as a
+  documentation matter as of Cycle 67. Item 9 (ADR-023's own stale §1
+  body text) is an unrelated mechanical ADR-023 issue, not a defect in
+  this policy. None of items 4, 5, 6, or 9 block Project Owner review
+  of this policy as methodology.
 
 ## 6. Evidence / Provenance
 
