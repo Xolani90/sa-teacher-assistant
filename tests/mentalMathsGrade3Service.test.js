@@ -173,7 +173,7 @@ console.log('\nOther grades unaffected by Grade 3\'s addition');
 ok('Grade 2 unaffected (still its own 20-limit generator)', mm.isSupportedGrade(2) && mm.topicsForGrade(2).length === grade2.TOPICS.length);
 ok('Grade 4 unaffected', mm.isSupportedGrade(4));
 ok('Grade 5 still supported', mm.isSupportedGrade(5));
-ok('Grade 9 still unsupported', !mm.isSupportedGrade(9));
+ok('Grade 9 supported (ratioRate, D2 freeze act) — unaffected by Grade 3 addition', mm.isSupportedGrade(9));
 
 console.log('\n─────────────────────────────────');
 console.log(`✅ Passed: ${passed}`);

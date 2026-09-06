@@ -121,6 +121,25 @@ function verifyByReparsing({ prompt, canonicalAnswer }) {
       && shareA > 0 && shareB > 0;
   }
 
+  // Senior ratioRate (G9, D1) — RR-1/RR-2/RR-3.
+  m = prompt.match(/^A car travels at (\d+(?:\.\d+)?) km\/h for (\d+(?:\.\d+)?) (h|min)\. How far does it travel, in km\?$/);
+  if (m) {
+    const [, speed, time, unit] = m;
+    const hours = unit === 'h' ? Number(time) : Number(time) / 60;
+    return canonicalAnswer === Math.round((Number(speed) * hours + Number.EPSILON) * 100) / 100;
+  }
+  m = prompt.match(/^A car travels (\d+(?:\.\d+)?) km in (\d+(?:\.\d+)?) (h|min)\. What is its speed, in km\/h\?$/);
+  if (m) {
+    const [, distance, time, unit] = m;
+    const hours = unit === 'h' ? Number(time) : Number(time) / 60;
+    return canonicalAnswer === Math.round((Number(distance) / hours + Number.EPSILON) * 100) / 100;
+  }
+  m = prompt.match(/^A car travels (\d+(?:\.\d+)?) km at a speed of (\d+(?:\.\d+)?) km\/h\. How long does the journey take, in hours\?$/);
+  if (m) {
+    const [, distance, speed] = m;
+    return canonicalAnswer === Math.round((Number(distance) / Number(speed) + Number.EPSILON) * 100) / 100;
+  }
+
   return null; // unrecognised form
 }
 
@@ -131,7 +150,10 @@ function verifyByReparsing({ prompt, canonicalAnswer }) {
 // authorization data — while still failing loudly if that data changes.
 console.log('Grades R-12 availability sweep');
 {
-  const expectedAvailable = new Set([1, 2, 3, 4, 5, 6, 7, 8]);
+  // Grade 9 is available: ratioRate (D2, G9-only) has a Project Owner
+  // acceptance / ADR-023 §6 freeze act on record (6 September 2026,
+  // Project Owner: Xolani Tshabalala).
+  const expectedAvailable = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9]);
 
   // Grade R is 0 in this codebase (utils/capsPhase.js).
   const ALL_GRADES = Array.from({ length: 13 }, (_, i) => i);
@@ -176,8 +198,8 @@ console.log('Grades R-12 availability sweep');
 
   ok('SUPPORTED_GRADES is exactly the derived set, ascending',
     JSON.stringify(mm.SUPPORTED_GRADES) === JSON.stringify([...expectedAvailable].sort((a, b) => a - b)));
-  ok('Grade 9 is absent (Senior Phase family authorization lists no grade 9)',
-    !mm.SUPPORTED_GRADES.includes(9));
+  ok('Grade 9 is present (ratioRate D2 freeze act — G9 only)',
+    mm.SUPPORTED_GRADES.includes(9));
   console.log(`     (info) available grades: ${mm.SUPPORTED_GRADES.join(', ')}`);
 }
 
@@ -392,8 +414,12 @@ console.log('\nValidation and error handling');
 
   // Error messages must name the supported grades / available topics so the
   // dispatch layer's fallback message can never be silently wrong.
+  // Grade 9 is now a supported Senior Phase grade (ratioRate, D2) — it
+  // still requires an explicit topic (no invented default), but that's a
+  // different error than "unsupported grade" now. Use grade 20, which
+  // has no generator at all, to exercise the unsupported-grade message.
   let msg = '';
-  try { mm.generateSession({ grade: 9, count: 4 }); } catch (e) { msg = e.message; }
+  try { mm.generateSession({ grade: 20, count: 4 }); } catch (e) { msg = e.message; }
   ok('unsupported-grade error lists the supported grades', msg.includes(mm.SUPPORTED_GRADES.join(', ')));
   try { mm.generateSession({ grade: 5, topic: 'zzz', count: 4 }); } catch (e) { msg = e.message; }
   ok('unknown-topic error lists the grade\'s available topics', msg.includes('C12') && msg.includes('C13'));

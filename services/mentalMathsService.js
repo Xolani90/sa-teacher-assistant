@@ -296,7 +296,7 @@ function generateMentalMathsSet({ grade, count = 12, seed } = {}) {
 //    taxonomy (not rejected, not yet authorized) — their generators and
 //    tests are untouched; they are simply unreachable from here.
 
-const AUTHORIZED_FAMILIES = ['mulDivFluency', 'powersRootsFluency', 'ratioSharing'];
+const AUTHORIZED_FAMILIES = ['mulDivFluency', 'powersRootsFluency', 'ratioSharing', 'ratioRate'];
 
 // Family x grade matrix as shipped. See the PROVENANCE NOTICE above: this
 // is the live, as-built matrix, not a matrix traceable to a frozen policy
@@ -310,6 +310,11 @@ const FAMILY_GRADE_AUTHORIZATION = {
   mulDivFluency: [7, 8],
   powersRootsFluency: [7, 8],
   ratioSharing: [7],
+  // ratioRate: D2, ADR-023 §6 freeze act (Project Owner: Xolani
+  // Tshabalala, 6 September 2026) — see
+  // docs/specs/mental-maths/CY79_PO_01_Decision_Act__PROPOSED.md, now
+  // recorded as ACCEPTED / FROZEN.
+  ratioRate: [9],
 };
 
 function isAuthorizedFamilyGrade(family, grade) {
@@ -412,6 +417,13 @@ const GENERATORS_FAMILY = {
   mulDivFluency: genMulDivFlat,
   powersRootsFluency: genPowersRootsUniform,
   ratioSharing: genRatioSharing,
+  // genRatioRateItem is defined further below (function declaration —
+  // hoisted, so this reference is safe) and returns { prompt,
+  // canonicalAnswer, form }; generateFamilySession() below only reads
+  // prompt/canonicalAnswer from whatever gen() returns, so the extra
+  // `form` field is simply ignored for this family, same as every
+  // other family here.
+  ratioRate: (rand) => genRatioRateItem(rand),
 };
 
 /**
@@ -460,37 +472,23 @@ function generateFamilySession({ grade, family, count = 12, seed } = {}) {
   return { grade, family, questions };
 }
 
-// ── ratioRate (PROPOSED — NOT AUTHORIZED) ───────────────────────────────
+// ── ratioRate (ACCEPTED / FROZEN — AUTHORIZED, G9 only) ─────────────────
 //
-// STATUS: PROPOSED — AWAITING PROJECT OWNER ACCEPTANCE under ADR-023 §5.
-// See docs/specs/mental-maths/CY79_RatioRate_Generation_Specification_DESIGN_PROPOSAL.md
-// and docs/specs/mental-maths/CY79_PO_01_Decision_Act__PROPOSED.md (CY80
-// revision) for the full design record and D1–D7 decisions.
+// STATUS: ACCEPTED — Project Owner acceptance and ADR-023 §6 freeze act
+// recorded 6 September 2026 (Project Owner: Xolani Tshabalala) over the
+// D1–D7 design in
+// docs/specs/mental-maths/CY79_RatioRate_Generation_Specification_DESIGN_PROPOSAL.md
+// and docs/specs/mental-maths/CY79_PO_01_Decision_Act__PROPOSED.md (see
+// that file's own header/footer for the acceptance record). This freeze
+// act does NOT extend to ratioSharing or to any other candidate; D7
+// explicitly leaves ratioSharing separate and unresolved.
 //
-// Per ADR-022 §5 Governance Rule 1 ("No implementation without a frozen
-// specification"), this code MUST NOT be treated as authoritative or
-// wired into any production dispatch path until the Project Owner
-// records an explicit acceptance/freeze act. Concretely, that means:
-//
-//   - 'ratioRate' is listed in PROPOSED_FAMILIES, a structurally SEPARATE
-//     list from AUTHORIZED_FAMILIES. It is never added to
-//     AUTHORIZED_FAMILIES or FAMILY_GRADE_AUTHORIZATION by this change.
-//   - generateFamilySession() — the one production entry point used by
-//     mentalMathsGrade7Service.js / mentalMathsGrade8Service.js — is left
-//     completely untouched above and has no reference to ratioRate or to
-//     any of the functions below. There is no G9 senior-phase dispatch
-//     file in this repository at all, so there is nothing for this
-//     candidate to be (even accidentally) wired into today.
-//   - generateProposedFamilySession() below is a separate function,
-//     exported only for direct testing (see tests/ratioRate.test.js), and
-//     is not called from anywhere else in this codebase.
-//
-// Once the Project Owner accepts CY79/CY80 and records a freeze act, the
-// remaining production step is: move 'ratioRate' from PROPOSED_FAMILIES
-// into AUTHORIZED_FAMILIES, add its entry to FAMILY_GRADE_AUTHORIZATION
-// (D2: G9 only), and move genRatioRateItem into GENERATORS_FAMILY. No
-// generation-logic rewrite is required — only that wiring change, which
-// should itself be its own small, reviewable commit distinct from this one.
+// 'ratioRate' is listed in AUTHORIZED_FAMILIES and
+// FAMILY_GRADE_AUTHORIZATION (G9 only, per D2) above, and genRatioRateItem
+// is wired into GENERATORS_FAMILY above — so generateFamilySession() is
+// its one production entry point, same as mulDivFluency/
+// powersRootsFluency/ratioSharing. No separate "proposed" code path
+// exists for it any more.
 //
 // D1 — item forms (deterministic resolver, no LLM arithmetic):
 //   RR-1: distance = speed × time   (distance unknown)
@@ -606,69 +604,6 @@ function genRatioRateItem(rand) {
   throw new Error('genRatioRateItem: could not construct an exact ratioRate item within the configured ranges after 100 attempts');
 }
 
-// Structurally separate from AUTHORIZED_FAMILIES — see the PROPOSED
-// notice above. Never merged into AUTHORIZED_FAMILIES by this change.
-const PROPOSED_FAMILIES = ['ratioRate'];
-
-// D2: conservative G9-only scope for this first production candidate,
-// within the wider G7–G9 governance scope accepted under CY62-PO-01.
-const PROPOSED_FAMILY_GRADE_AUTHORIZATION = {
-  ratioRate: [9],
-};
-
-function isProposedFamilyGrade(family, grade) {
-  const grades = PROPOSED_FAMILY_GRADE_AUTHORIZATION[family];
-  return Array.isArray(grades) && grades.includes(grade);
-}
-
-const GENERATORS_PROPOSED = {
-  ratioRate: genRatioRateItem,
-};
-
-/**
- * Test/preview-only counterpart to generateFamilySession(), for the
- * PROPOSED (not-yet-authorized) family set. Deliberately NOT called
- * generateFamilySession and NOT merged into it — see the PROPOSED notice
- * above for why this must stay unreachable from production dispatch
- * until a Project Owner freeze act occurs.
- *
- * @param {Object} opts
- * @param {number} opts.grade
- * @param {string} opts.family - one of PROPOSED_FAMILIES
- * @param {number} [opts.count=12]
- * @param {number} [opts.seed]
- */
-function generateProposedFamilySession({ grade, family, count = 12, seed } = {}) {
-  if (!PROPOSED_FAMILIES.includes(family)) {
-    throw new Error(`generateProposedFamilySession: unknown or unauthorized family "${family}" — must be one of ${PROPOSED_FAMILIES.join(', ')}`);
-  }
-  if (!isProposedFamilyGrade(family, grade)) {
-    throw new Error(`generateProposedFamilySession: family "${family}" is not (even provisionally) scoped for grade "${grade}" — grades listed for it are ${PROPOSED_FAMILY_GRADE_AUTHORIZATION[family].join(', ')}`);
-  }
-  if (!Number.isInteger(count) || count < 1) {
-    throw new Error(`generateProposedFamilySession: count must be a positive integer, got "${count}"`);
-  }
-
-  const gen = GENERATORS_PROPOSED[family];
-  const rand = mulberry32(seed != null ? seed : Date.now() ^ (grade * 2654435761));
-  const seenPrompts = new Set();
-  const questions = [];
-
-  for (let i = 0; i < count; i++) {
-    let attempt = 0;
-    let question;
-    do {
-      const { prompt, canonicalAnswer, form } = gen(rand);
-      question = { strand: family, prompt, canonicalAnswer, form };
-      attempt++;
-    } while (seenPrompts.has(question.prompt) && attempt < 25);
-    seenPrompts.add(question.prompt);
-    questions.push(question);
-  }
-
-  return { grade, family, questions };
-}
-
 module.exports = {
   STRANDS,
   MIN_GRADE,
@@ -679,15 +614,9 @@ module.exports = {
   AUTHORIZED_FAMILIES,
   FAMILY_GRADE_AUTHORIZATION,
   generateFamilySession,
-  // ratioRate — PROPOSED, NOT AUTHORIZED. See the PROPOSED notice above.
-  // Not part of AUTHORIZED_FAMILIES / generateFamilySession. Exported for
-  // direct testing only.
-  PROPOSED_FAMILIES,
-  PROPOSED_FAMILY_GRADE_AUTHORIZATION,
-  generateProposedFamilySession,
   // exported for direct/unit testing of individual strand generators
   _internal: {
     mulberry32, randInt, generateQuestion, GENERATORS, NICE_FRACTIONS, GENERATORS_FAMILY, gcd,
-    genRatioRateItem, roundTo2dp, isExactTo2dp, RATIO_RATE_RANGES, GENERATORS_PROPOSED,
+    genRatioRateItem, roundTo2dp, isExactTo2dp, RATIO_RATE_RANGES,
   },
 };

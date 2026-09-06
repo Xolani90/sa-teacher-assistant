@@ -18,9 +18,9 @@
 // expectations about the older single-step flow, not regressions:
 //   - Grade 5 now gets the same topic choice every other grade gets (its
 //     two frozen candidates C12/C13, plus Mixed = the previous behaviour).
-//   - The gate message no longer claims Grade 9 is available. Grade 9 has
-//     no authorized family under the Senior Phase policy and never had a
-//     generation path, so advertising it was simply wrong.
+//   - Grade 9 is now genuinely available (ratioRate, D2, ADR-023 §6 freeze
+//     act, Project Owner: Xolani Tshabalala, 6 Sept 2026), so it correctly
+//     appears in the grade menu below.
 // The frozen Grade 5 C12/C13 GENERATION POLICY is untouched by all of
 // this — see tests/mentalMathsGrade5Service.test.js for that coverage,
 // and the C12/C13 item-shape assertions below.
@@ -240,8 +240,8 @@ const C13_SHAPE = /□\s*=\s*\d+\s*÷\s*\d+/;
     check(/which grade/i.test(allText()), 'S4: grade menu is shown', allText());
     check(/1\. Grade 1/.test(allText()) && /Grade 6/.test(allText()) && /Grade 8/.test(allText()),
       'S4: grade menu offers every supported grade', allText());
-    check(!/Grade 9/.test(allText()),
-      'S4: Grade 9 is NOT offered — it has no authorized family and no generation path', allText());
+    check(/Grade 9/.test(allText()),
+      'S4: Grade 9 IS now offered in the grade menu (ratioRate, D2 freeze act) — this menu lists every supported grade regardless of the teacher\'s own profile grade', allText());
   }
 
   // ── Scenario 5: SAVE persists a Grade 5 Mental Maths session ──

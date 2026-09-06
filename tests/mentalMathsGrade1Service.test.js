@@ -132,7 +132,7 @@ console.log('\nOther grades unaffected by Grade 1 addition');
   ok('Grade 2 unaffected by Grade 1 (still supported, its own 20-limit generator)', mm.isSupportedGrade(2));
   ok('Grade 5 still supported', mm.isSupportedGrade(5));
   ok('Grade 7 still supported', mm.isSupportedGrade(7));
-  ok('Grade 9 still unsupported', !mm.isSupportedGrade(9));
+  ok('Grade 9 supported (ratioRate, D2 freeze act) — unaffected by Grade 1 addition', mm.isSupportedGrade(9));
 }
 
 console.log('\n─────────────────────────────────');

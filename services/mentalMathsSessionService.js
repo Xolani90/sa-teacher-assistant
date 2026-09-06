@@ -17,20 +17,27 @@
 //      ADR-023 §6 freeze act, docs/governance/Grade5_C12_C13_ADR023_
 //      Section6_Freeze_Act.md)
 //   - services/mentalMathsService.js         — Senior Phase families
-//     (AUTHORIZED_FAMILIES x FAMILY_GRADE_AUTHORIZATION). NOTE: unlike
-//     Grade 5, this path's specification status is unresolved — see the
-//     PROVENANCE NOTICE in that file. This module reads that matrix as the
-//     live authorization data and neither widens nor narrows it; if the
-//     Project Owner re-scopes or gates it, the grades and topics offered
-//     here follow automatically, with no change needed in this file.
+//     (AUTHORIZED_FAMILIES x FAMILY_GRADE_AUTHORIZATION), Grades 7-9. NOTE:
+//     unlike Grade 5, most of this path's specification status is
+//     unresolved — see the PROVENANCE NOTICE in that file. ratioRate (G9)
+//     is the one family in this path with a recorded Project Owner
+//     acceptance / ADR-023 §6 freeze act (6 September 2026). This module
+//     reads FAMILY_GRADE_AUTHORIZATION as the live authorization data and
+//     neither widens nor narrows it; if the Project Owner re-scopes or
+//     gates any family, the grades and topics offered here follow
+//     automatically, with no change needed in this file.
 //
 // ── What this module deliberately does NOT do ─────────────────────────
 //
 //  * It does not introduce a grade. SUPPORTED_GRADES is DERIVED from the
-//    two generator services at load time — never hard-coded here. A grade
-//    with no authorized generator simply does not appear, which is why
-//    Grade 9 and Grades R-4/6/10-12 are absent: they have no frozen
-//    specification authorizing generation (ADR-022 §5 Governance Rule 1).
+//    generator services at load time — never hard-coded here. A grade
+//    with no authorized generator simply does not appear. Grade 9 is now
+//    present because ratioRate (D2, G9-only) has a Project Owner
+//    acceptance / ADR-023 §6 freeze act on record (6 September 2026,
+//    Project Owner: Xolani Tshabalala) — see the PROVENANCE NOTICE in
+//    mentalMathsService.js. Grades R-4/6/10-12 remain absent: they have
+//    no frozen specification authorizing generation (ADR-022 §5
+//    Governance Rule 1).
 //  * It does not introduce a candidate, family, item form, operand range
 //    or magnitude envelope.
 //  * It does not introduce ANY difficulty concept. There is no band, no
@@ -59,6 +66,7 @@ const gradeServices = {
   6: require('./mentalMathsGrade6Service'),
   7: require('./mentalMathsGrade7Service'),
   8: require('./mentalMathsGrade8Service'),
+  9: require('./mentalMathsGrade9Service'),
 };
 const { gradeLabel } = require('../utils/capsPhase');
 
@@ -114,6 +122,7 @@ const FAMILY_LABELS = {
   mulDivFluency: 'Multiplication & Division',
   powersRootsFluency: 'Powers & Roots',
   ratioSharing: 'Ratio & Sharing',
+  ratioRate: 'Ratio & Rate (speed/distance/time)',
 };
 
 /**

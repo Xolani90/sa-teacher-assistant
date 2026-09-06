@@ -1,14 +1,26 @@
 # CY79-PO-01 — `ratioRate` Generation Specification Decision Package
 
-**STATUS: PROPOSED — AWAITING PROJECT OWNER ACCEPTANCE**
+**STATUS: ACCEPTED — FROZEN (ADR-023 §6 freeze act recorded below)**
+
+**Acceptance record:**
+- **Project Owner:** Xolani Tshabalala
+- **Date:** 6 September 2026
+- **Scope of acceptance:** D1–D6 below, exactly as CY80-finalized, plus
+  an explicit ADR-023 §6 freeze act over that same scope. D7
+  (ratioSharing G9) is explicitly excluded — this acceptance does NOT
+  authorize ratioSharing at any grade.
+- This acceptance was given directly, in conversation with the
+  engineering assistant carrying out this change, and is recorded here
+  as stated by the Project Owner. It supersedes the "PROPOSED —
+  AWAITING PROJECT OWNER ACCEPTANCE" status this document previously
+  carried.
 
 **Revision:** CY80 finalized D1–D7 below as the working production
 design (see `CY79_RatioRate_Generation_Specification_DESIGN_PROPOSAL.md`,
-CY80 revision, for full detail) and a gated implementation + tests have
-been prepared against it (§"Implementation status" below). Finalizing
-the design and preparing code does **not** constitute Project Owner
-acceptance. This document still contains no "ACCEPTED", "FROZEN", or
-"AUTHORIZED" status of any kind.
+CY80 revision, for full detail); a gated implementation + tests were
+then prepared against it, and — per the acceptance above — that
+implementation has now been wired into production (see "Implementation
+status" below, updated post-acceptance).
 
 > This document is PROPOSED and does not constitute Project Owner
 > acceptance. It exists to give the Project Owner a single, itemized
@@ -120,56 +132,63 @@ to act on this.
 
 ---
 
-## Implementation status (CY80)
+## Implementation status (post-acceptance, wired into production)
 
-Per CY80's instruction to prepare implementation without bypassing
-ADR-023, the following has been written **behind an explicit
-governance gate**, not wired into any production dispatch path:
+Following the Project Owner acceptance recorded above, `ratioRate` has
+been moved from its prior gated/PROPOSED state into production:
 
-- `services/mentalMathsService.js`: a `PROPOSED_FAMILIES = ['ratioRate']`
-  list, structurally separate from `AUTHORIZED_FAMILIES`; a
-  `PROPOSED_FAMILY_GRADE_AUTHORIZATION` map (G9 only, per D2); the
-  deterministic RR-1/2/3 resolver (`genRatioRateItem`); and a
-  `generateProposedFamilySession()` entry point used only by tests.
-  `generateFamilySession()` — the function actually called by
-  `mentalMathsGrade7Service.js` / `mentalMathsGrade8Service.js` — is
-  untouched and has no reference to any of this.
-- `tests/ratioRate.test.js`: 32 tests covering RR-1/2/3 correctness
-  (independently re-derived from each prompt, not just checked against
-  the generator's own output), D3 ranges, D4 exactness, D5 constraints,
-  D6 exclusions, session determinism/reproducibility, and the
-  governance gating itself (`ratioRate` is asserted to be absent from
-  `AUTHORIZED_FAMILIES`).
-
-This code exists so that, if and when the Project Owner performs an
-ADR-023 §6 freeze act, the only remaining production step is moving
-`ratioRate` from `PROPOSED_FAMILIES` into `AUTHORIZED_FAMILIES` (and
-its grade entry into `FAMILY_GRADE_AUTHORIZATION`) — a small, separate,
-reviewable commit — rather than a design-and-build cycle. Writing and
-testing this code is not itself a decision act and does not change any
-item's status above.
-
----
-
-## What accepting D1–D6 in full would still NOT do
-
-Even full approval of every item above would:
-
-- NOT constitute an ADR-023 §6 freeze act;
-- NOT grant implementation authority;
-- NOT itself move `ratioRate` into `AUTHORIZED_FAMILIES` — that wiring
-  change still requires its own dedicated commit, made only after a
-  freeze act;
-- NOT resolve `ratioSharing` G9;
-
-A subsequent, separate ADR-023 §6 freeze act — performed by the
-Project Owner, in its own dedicated commit, explicitly distinguishing
-evidence-derived findings from governance judgment per ADR-023 §9 —
-would still be required before the prepared implementation could be
-wired into production.
+- `services/mentalMathsService.js`: `ratioRate` is now listed in
+  `AUTHORIZED_FAMILIES` and in `FAMILY_GRADE_AUTHORIZATION` (`[9]`, per
+  D2); `genRatioRateItem` (the deterministic RR-1/2/3 resolver,
+  unchanged from the CY80 gated version) is wired into
+  `GENERATORS_FAMILY`. The prior `PROPOSED_FAMILIES` /
+  `PROPOSED_FAMILY_GRADE_AUTHORIZATION` / `generateProposedFamilySession`
+  scaffolding has been removed — `generateFamilySession()` is now the
+  one production entry point for `ratioRate`, same as
+  `mulDivFluency`/`powersRootsFluency`/`ratioSharing`.
+- `services/mentalMathsGrade9Service.js` (new): mirrors
+  `mentalMathsGrade7Service.js` / `mentalMathsGrade8Service.js` exactly,
+  exposing only the families `FAMILY_GRADE_AUTHORIZATION` lists for
+  grade 9 (currently just `ratioRate`).
+- `services/mentalMathsSessionService.js`: grade 9 added to the
+  session-layer's grade-service map and to `FAMILY_LABELS`. Grade 9 now
+  appears in `SUPPORTED_GRADES` (derived automatically, not
+  hard-coded) and in the teacher-facing grade menu.
+- `tests/ratioRate.test.js`: rewritten to exercise the production
+  `generateFamilySession()` / Grade 9 dispatch path instead of the
+  removed PROPOSED wrapper; RR-1/2/3 correctness, D3–D6 checks, and
+  session determinism are all still independently re-verified from the
+  prompt text, not just against the generator's own output.
+- `tests/mentalMathsSessionService.test.js`,
+  `tests/rc1-mentalmaths-dispatch.test.js`,
+  `tests/rc1-mentalmaths-grade5-dispatch.test.js`: updated to reflect
+  that Grade 9 is now genuinely available (these previously asserted,
+  correctly at the time, that Grade 9 had no generation path at all).
+- `ratioSharing` (D7) is untouched: still `[7]` only in
+  `FAMILY_GRADE_AUTHORIZATION`, no G9 entry, no change to its generator.
 
 ---
 
-*End of decision package. PROPOSED ONLY. No item in this document has
-been accepted, rejected, or amended by any authority other than the
-Project Owner, and no such action is recorded here.*
+## What accepting D1–D6 has done, and what it still does NOT do
+
+The acceptance recorded above:
+
+- IS an ADR-023 §6 freeze act over D1–D6;
+- DID grant implementation authority for `ratioRate` at G9;
+- DID move `ratioRate` into `AUTHORIZED_FAMILIES` (see "Implementation
+  status" above) and wire it into production dispatch;
+
+It still does NOT:
+
+- resolve `ratioSharing` G9 (D7) — that remains separate and
+  unresolved, and is explicitly excluded from this acceptance;
+- authorize `ratioRate` at any grade other than 9;
+- retroactively validate any other Senior Phase family's specification
+  status (see the PROVENANCE NOTICE in `mentalMathsService.js`).
+
+---
+
+*End of decision package. D1–D6 ACCEPTED and FROZEN under ADR-023 §6 by
+the Project Owner (Xolani Tshabalala, 6 September 2026), as recorded
+above. D7 (ratioSharing) remains unresolved and outside this
+acceptance's scope.*

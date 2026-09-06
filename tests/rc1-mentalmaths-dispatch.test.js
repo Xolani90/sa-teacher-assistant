@@ -24,7 +24,8 @@
 // about the authorization matrix is preserved and extended below:
 //   - the topic option set is still derived from AUTHORIZED_FAMILIES x
 //     FAMILY_GRADE_AUTHORIZATION, so Ratio & Sharing is still absent at G8
-//   - Grade 9 still has no generation path whatsoever
+//   - Grade 9 now has exactly one generation path: ratioRate (D2, G9-only,
+//     ADR-023 §6 freeze act, Project Owner: Xolani Tshabalala, 6 Sept 2026)
 //   - pending state is still consumed exactly once, and Back still clears it
 //
 // Evidence level: full webhook/message-processing path throughout. A
@@ -143,10 +144,12 @@ function detectFamilySignature(text) {
   const hasRatio = /in the ratio/i.test(text);
   const hasPowersRoots = /[²³√∛]/.test(text);
   const hasMulDiv = /\d\s*[×÷]\s*\d/.test(text);
+  const hasRatioRate = /km\/h|A car travels/i.test(text);
+  if (hasRatioRate && !hasRatio && !hasPowersRoots && !hasMulDiv) return 'ratioRate';
   if (hasRatio && !hasPowersRoots) return 'ratioSharing';
   if (hasPowersRoots && !hasRatio) return 'powersRootsFluency';
   if (hasMulDiv && !hasPowersRoots && !hasRatio) return 'mulDivFluency';
-  return `ambiguous(ratio=${hasRatio},powersRoots=${hasPowersRoots},mulDiv=${hasMulDiv})`;
+  return `ambiguous(ratio=${hasRatio},powersRoots=${hasPowersRoots},mulDiv=${hasMulDiv},ratioRate=${hasRatioRate})`;
 }
 
 // aiCallCount alone is NOT sufficient proof that Mental Maths generation
@@ -309,39 +312,43 @@ function isMentalMathsGeneration(prompt) {
   }
 
   // ══════════════════════════════════════════════════════════════════════
-  // GRADE 9 — no authorized family, no generation path, no fallback
+  // GRADE 9 — ratioRate only (D2, G9-only, ADR-023 §6 freeze act)
   // ══════════════════════════════════════════════════════════════════════
-  console.log('\n── Grade 9: unavailable, zero generation, no legacy fallback ──');
+  console.log('\n── Grade 9: ratioRate authorized, single-topic menu ──');
   {
+    const expectedFamilies = AUTHORIZED_FAMILIES.filter(f => FAMILY_GRADE_AUTHORIZATION[f].includes(9));
+    check(expectedFamilies.length === 1 && expectedFamilies[0] === 'ratioRate',
+      'G9: policy authorizes exactly ratioRate', JSON.stringify(expectedFamilies));
+    check(mentalMathsSession.SUPPORTED_GRADES.includes(9), 'G9: appears in SUPPORTED_GRADES', JSON.stringify(mentalMathsSession.SUPPORTED_GRADES));
+    check(mentalMathsSession.topicsForGrade(9).length === 1 && mentalMathsSession.topicsForGrade(9)[0].key === 'ratioRate',
+      'G9: has exactly one authorized topic (ratioRate)', JSON.stringify(mentalMathsSession.topicsForGrade(9)));
+
     const from = '27822220007';
     insertTeacher(hashPhone(from), { grade: 9 });
+    await openTopicMenuViaMainMenu(from, 9);
 
-    await send(from, 'MENU');
-    await send(from, '1');
-    await send(from, '6');
+    await send(from, '1'); // ratioRate — the only option
+    await send(from, '1'); // delivery: Oral
+    check(aiCallCount === 1, 'G9: exactly one generation call', `got ${aiCallCount}`);
+    const sig = detectFamilySignature(lastPrompt || '');
+    check(sig === 'ratioRate', 'G9: generates ratioRate content', sig);
+    check(/Grade 9/.test(lastPrompt || ''), 'G9: original grade (9) preserved into generation');
 
-    check(aiCallCount === 0, 'G9: zero generation calls on menu dispatch', `got ${aiCallCount}`);
-    // Menu-driven Mental Maths no longer consults the saved profile grade
-    // at all, so a profile grade of 9 has no special effect here — the
-    // teacher just sees the ordinary generic grade menu, not a message
-    // about grade 9 specifically (that only happens on the explicit,
-    // grade-stated route exercised below).
-    check(/which grade/i.test(allText()), 'G9: menu dispatch shows the ordinary grade menu', allText());
-    check(!mentalMathsSession.SUPPORTED_GRADES.includes(9), 'G9: never appears in SUPPORTED_GRADES', JSON.stringify(mentalMathsSession.SUPPORTED_GRADES));
-    check(mentalMathsSession.topicsForGrade(9).length === 0, 'G9: has no authorized topics at all', JSON.stringify(mentalMathsSession.topicsForGrade(9)));
-
-    // The grade menu opened here offers only authorized grades — answering
-    // it must switch the teacher to one of those, never generate for 9.
-    await send(from, '1'); // "Grade 1" — the first authorized grade in the menu
-    check(!isMentalMathsGeneration(lastPrompt), 'G9: answering the grade menu does not generate immediately (topic still needed)', `aiCallCount=${aiCallCount}, prompt=${(lastPrompt || '').slice(0, 120)}`);
-    check(/Grade 1 Mental Maths/.test(allText()), 'G9: grade menu redirects to an authorized grade', allText());
-
-    // Natural-language entry must be gated identically — no NL bypass.
+    // Ratio Sharing / mulDiv / powers-roots must not leak into Grade 9's menu.
     const from2 = '27822220008';
-    insertTeacher(hashPhone(from2), { grade: null });
-    await send(from2, 'mental maths grade 9');
-    check(!isMentalMathsGeneration(lastPrompt), 'G9: natural-language entry also generates nothing', `aiCallCount=${aiCallCount}, prompt=${(lastPrompt || '').slice(0, 120)}`);
-    check(/Grade 9/.test(allText()), 'G9: natural-language entry names the unsupported grade', allText());
+    insertTeacher(hashPhone(from2), { grade: 9 });
+    await openTopicMenuViaMainMenu(from2, 9);
+    const menuText = allText();
+    check(!/in the ratio \d/i.test(menuText), 'G9: topic menu does not mention ratioSharing wording', menuText);
+
+    await send(from2, '2'); // guessing a nonexistent 2nd option
+    check(!isMentalMathsGeneration(lastPrompt), 'G9: guessing option 2 (nonexistent) generates no Mental Maths content', `aiCallCount=${aiCallCount}, prompt=${(lastPrompt || '').slice(0, 120)}`);
+
+    // Natural-language entry reaches the same authorized path — no NL bypass.
+    const from3 = '27822229009';
+    insertTeacher(hashPhone(from3), { grade: null });
+    await send(from3, 'mental maths grade 9');
+    check(/Grade 9/.test(allText()), 'G9: natural-language entry recognizes the now-authorized grade', allText());
   }
 
   // ══════════════════════════════════════════════════════════════════════
