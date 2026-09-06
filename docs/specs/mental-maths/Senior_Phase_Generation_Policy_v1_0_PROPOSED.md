@@ -42,8 +42,12 @@ drafting and again during this revision (Item 4 factual reconciliation,
 - `ratioSharing_Supersession_Record.md` — **committed**, `2ac6b93`. This
   document closes one specific factual premise (that no `ratioRate`
   evidence document existed in the repository); it does **not** resolve
-  the `ratioSharing`↔`ratioRate` split-justification question, which
-  remains open — see §7, §10 item 8.
+  whether the pre-existing `ratioSharing`/`ratioRate` split was ever
+  pedagogically justified — that narrower question remains open — see
+  §6, §7. **[Reconciled, CY65]** The separate, narrower question of
+  candidate *identity* — whether they should be governed as one
+  candidate or two — is resolved: CY59-PO-02 (`a8b35e97`) accepts them
+  as distinct sibling candidates. See §7, §10 item 7.
 
 **Correction from the previous draft of this policy — verified this
 revision (Item 4 factual reconciliation record, `821e16b`):**
@@ -114,15 +118,17 @@ still excludes.
 | `ratioSharing` | Separate named candidate | `ratioSharing_Grade_Scope_Decision_Record.md` | **Yes**, `6312ec8` |
 | `powersRootsFluency`, integer domain | Separate named candidate | `Powersrootsfluency_grade_scope_decision_record.md` | **Yes**, `27dd88a` |
 | `powersRootsFluency`, rational domain | Separate named candidate | Same | **Yes**, `27dd88a` |
+| `ratioRate` | Separate named candidate, distinct sibling of `ratioSharing` (CY59-PO-02, `a8b35e97`); grade-scope accepted (CY62-PO-01, `e2c0c8c`) | CY59-PO-02 (`CY59_PO_02_Decision_Act__PROPOSED.md`) and CY62-PO-01 (`CY62_PO_01_Decision_Act__PROPOSED.md`), both ADR-023 Decision Acts | **Yes**, `a8b35e97` (identity) / `e2c0c8c` (grade scope) |
 
-`ratioRate` is **not** included in this table — see §7. Its evidence
-has been reviewed in two committed checkpoints
-(`ratioRate_Retrieval_Exhaustion_Checkpoint.md`,
-`ratioRate_Evidence_Review_Checkpoint.md` — `880b081`), but no
-grade-scope decision record for `ratioRate` itself is committed, so
-this policy does not treat it as a settled candidate. An evidence
-checkpoint is not a grade-scope decision record and is not treated as
-one anywhere in this policy.
+**[Reconciliation note, CY65]** `ratioRate` was previously omitted from
+this table (see §7 history) pending a grade-scope decision record of
+its own. That gap has since been closed by two accepted ADR-023
+Decision Acts — CY59-PO-02 (candidate identity: distinct sibling of
+`ratioSharing`) and CY62-PO-01 (grade scope: G7–G9). It is added above
+using the same committed-decision-record test already applied to every
+other row. This addition reflects **candidate identity and grade scope
+only** — it does not, and this policy does not otherwise, establish any
+generation-eligibility content for `ratioRate` (see §4).
 
 Every taxonomy name above is this project's own abstraction. No name
 listed is asserted to be a CAPS term or CAPS-given unit.
@@ -139,6 +145,7 @@ listed is asserted to be a CAPS term or CAPS-given unit.
 | `ratioSharing` | Authorized (scope) | Authorized (scope) | Not authorized / unresolved (verbatim source wording — see below) | Scope-authorized G7–G8, G9 not authorized / unresolved |
 | `powersRootsFluency`, integer domain | Authorized (scope) | Authorized (scope) | Not authorized | Scope-authorized G7–G8 |
 | `powersRootsFluency`, rational domain | Not authorized | Authorized (scope) | Not authorized | Scope-authorized G8-only |
+| `ratioRate` | Authorized (scope) | Authorized (scope) | Authorized (scope) | Scope-authorized G7–G9 (CY62-PO-01, `e2c0c8c`) |
 
 **G9 for `multiplicationFactFluency` reads "Not authorized under
 current decision," not simply "Not authorized."** This wording is
@@ -162,8 +169,15 @@ selecting one.
 says it means and nothing more** — see §4 for what it explicitly does
 not mean.
 
-`ratioRate` is omitted from this table for the same reason given in
-§1: it has no committed grade-scope decision record. See §7.
+**[Reconciliation note, CY65]** `ratioRate`'s G7–G9 row reflects only
+the accepted grade scope (CY62-PO-01). As with every other row in this
+table, "Authorized (scope)" means exactly what the source Decision Act
+says and nothing more — it does not mean generation-eligible (§4), and
+the disclosed G9 curricular-structure caveat recorded in CY62-PO-01
+(whether G9's "Ratio and rate" material is a continuation, a
+broadened/restructured construct, or a distinct treatment relative to
+G7/G8) is preserved as unresolved by that Decision Act and is not
+resolved here.
 
 ---
 
@@ -254,8 +268,12 @@ whether it should become one.
   It is evidence made available, not a scope conclusion — see §0, §1,
   §7.
 - **`ratioSharing_Supersession_Record.md` (`2ac6b93`) is not treated as
-  resolving the `ratioSharing`↔`ratioRate` split-justification
-  question.** That question remains open — see §7, §10 item 8.
+  resolving whether the pre-existing `ratioSharing`/`ratioRate` split
+  was ever pedagogically justified.** That narrower question remains
+  open — see §6, §7. **[Reconciled, CY65]** It also does not, by
+  itself, resolve candidate identity — but CY59-PO-02 (`a8b35e97`),
+  a separate accepted Decision Act, does: `ratioSharing` and
+  `ratioRate` are distinct sibling candidates. See §7, §10 item 7.
 - **`roundEstimate_Evidence_Review_Checkpoint.md` is not treated as
   authorizing or scoping `estimation`/`roundingOffAndCompensating`
   beyond what their own committed decision record states.** It is
@@ -276,13 +294,19 @@ whether it should become one.
 
 ## 6. Scope Enforcement
 
-This policy's authority is limited to the six candidates named in §1.
+This policy's authority is limited to the candidates named in §1
+(**[Reconciled, CY65]** now seven, following `ratioRate`'s addition).
 It does not extend, by implication or by omission, to:
 
 - Any Grade 5 candidate or specification.
 - Any Foundation, Intermediate, or FET phase content.
-- `ratioRate` — see §7; not included pending commit of its own
-  grade-scope decision record.
+- **[Reconciled, CY65]** `ratioRate`'s *generation specification* —
+  it is now included in §1–§2 as an identity- and grade-scope-accepted
+  candidate (CY59-PO-02, CY62-PO-01), but this policy's authority over
+  it, like every other candidate here, does not extend to item forms,
+  numeric ranges, exactness, canonicalAnswer, or any other
+  generation-eligibility content (§4) — none of that is authorized by
+  its inclusion.
 - `mulDivFluency`, `addSub`, `fracDecPercent` as their own named
   candidates. **The incorporation of the rational-domain merge
   decision (`5b4c964`, accepted at the scope level) into
@@ -310,20 +334,39 @@ It does not extend, by implication or by omission, to:
 
 | Candidate/question | Status | Why excluded here |
 |---|---|---|
-| `ratioRate` | Named as standalone candidate, G9-only, Round 1 item 2. Two evidence checkpoints committed: `ratioRate_Retrieval_Exhaustion_Checkpoint.md` and `ratioRate_Evidence_Review_Checkpoint.md` (`880b081`) | No committed grade-scope decision record of its own — evidence checkpoints alone do not constitute one |
-| `mulDivFluency` | Assessed, scope open (Option C) | No committed grade-scope decision record |
+| `mulDivFluency` | Assessed, scope open (Option C) at the time this policy was drafted | No committed grade-scope decision record **as of this policy's original drafting**; see reconciliation note below |
 | `addSub` ↔ `mulDivFluency` inverse-operations boundary | Proposed (not frozen) merge decision exists, `b6dba51` | Boundary decision exists; grade-scope/authorization decision does not |
 | `addSub`'s other 6 sibling properties | Unresolved/unstatused | No candidate name, no evidence review at candidate level |
 | `fracDecPercent` (as a whole) | Assessed, scope not yet reviewed | No committed grade-scope decision record |
-| `ratioSharing` ↔ `ratioRate` split justification | Open question per Cross-Candidate Scope Matrix; `ratioSharing_Supersession_Record.md` (`2ac6b93`) closes one factual premise of this question (that no `ratioRate` evidence document existed) but does not resolve the question itself | Unresolved, separate question — `ratioSharing`'s own inclusion in §1–§2 as an authorized candidate does not resolve whether the `ratioSharing`/`ratioRate` split was ever justified |
+
+**[Reconciliation note, CY65]** Two rows previously in this table have
+been removed because the accepted governance state changed after this
+policy was originally drafted:
+
+- **`ratioRate`** is no longer excluded. CY59-PO-02 (`a8b35e97`)
+  accepted it as a distinct sibling candidate to `ratioSharing`, and
+  CY62-PO-01 (`e2c0c8c`) accepted its grade scope as G7–G9. It now
+  appears in §1–§2 above, on the same identity-and-scope basis as
+  every other included candidate — nothing about its generation
+  eligibility (§4) has changed.
+- **The `ratioSharing` ↔ `ratioRate` split-justification question** is
+  resolved as to candidate identity: CY59-PO-02 establishes them as
+  distinct sibling candidates, not one candidate improperly split.
+  This does not retroactively validate any earlier reasoning for why
+  the split existed in the first place — it is simply no longer an
+  open identity question this policy needs to carry as unresolved.
 
 **This policy does not authorize, deny, or take any position on the
-mathematical merits of any row above.** `ratioRate`, `mulDivFluency`,
-and `fracDecPercent` remain excluded solely because their own
-grade-scope decision records are not committed — the same test applied
-throughout this policy. The split-justification row remains a distinct,
-open governance question, not a commit-status gap, and is not resolved
-by anything in this policy.
+mathematical merits of the remaining rows above.** `mulDivFluency` and
+`fracDecPercent` remain excluded solely because their own grade-scope
+decision records are not committed — the same test applied throughout
+this policy. `mulDivFluency`'s own status is now further qualified by
+CY54-PO-01 (umbrella/sub-construct structure) and CY56-PO-01 (no
+separate umbrella-level scope record required) — those Decision Acts
+are not reconciled into this row's wording in this cycle, as doing so
+is not required to correct the `ratioRate`/`ratioSharing` staleness
+this cycle addresses; a future reconciliation pass should still update
+this row for full consistency.
 
 ---
 
@@ -334,7 +377,7 @@ by anything in this policy.
 | Evidence | What CAPS says | Established, per source checkpoint |
 | Evidence-review conclusion | What tier the evidence occupies | Established, per source checkpoint |
 | Project Owner judgment | Taxonomy/scope/separation decisions | Established, per source decision record |
-| Authorization | Scope-level "may eventually be generated" | Established (scope only) for `multiplicationFactFluency`, `ratioSharing`, `powersRootsFluency` (both domains); not authorized for `estimation`/`roundingOffAndCompensating` |
+| Authorization | Scope-level "may eventually be generated" | Established (scope only) for `multiplicationFactFluency`, `ratioSharing`, `powersRootsFluency` (both domains), and **[Reconciled, CY65]** `ratioRate` (G7–G9, CY62-PO-01); not authorized for `estimation`/`roundingOffAndCompensating` |
 | Generation Policy | This document | **Proposed framework, not frozen** |
 | Freeze | ADR-023 §6 act | **Not performed** |
 | Implementation | Code, resolver, tests | **Not authorized; existing `AUTHORIZED_FAMILIES` entries are not retroactively validated by this policy** (Round 1 item 13 stands unmodified) |
@@ -388,9 +431,15 @@ implied by this document.**
 5. Resolver/dispatch implications — not analyzed in this policy.
 6. The §7 excluded-candidates table generally — none of those rows are
    resolved by this policy.
-7. The `ratioSharing`↔`ratioRate` split-justification question —
-   unresolved. `ratioSharing_Supersession_Record.md` (`2ac6b93`) closes
-   one factual premise of this question but does not resolve it.
+7. **[Reconciled, CY65]** The `ratioSharing`↔`ratioRate` *candidate-
+   identity* question is resolved: CY59-PO-02 (`a8b35e97`) accepts them
+   as distinct sibling candidates. `ratioRate`'s grade scope is
+   separately accepted as G7–G9 (CY62-PO-01, `e2c0c8c`). Neither
+   Decision Act resolves — nor does this reconciliation resolve —
+   `ratioRate`'s generation specification (item forms, ranges,
+   constraints, exclusions, canonicalAnswer, exactness): those remain
+   unresolved per §4, and the disclosed G9 curricular-structure caveat
+   recorded in CY62-PO-01 remains open.
 8. `ratioSharing`'s own G9 status — recorded as "unresolved" in its
    source decision record, distinct from "not authorized"; this policy
    does not attempt to resolve it, only to preserve the distinction.
@@ -439,6 +488,11 @@ rests on:
   — same commit
 - `ratioSharing_Grade_Scope_Decision_Record.md` — `6312ec8`
 - `Powersrootsfluency_grade_scope_decision_record.md` — `27dd88a`
+- **[Added, CY65]** `CY59_PO_02_Decision_Act__PROPOSED.md` — `a8b35e97`
+  (ADR-023 Decision Act; `ratioRate` accepted as distinct sibling
+  candidate to `ratioSharing`)
+- **[Added, CY65]** `CY62_PO_01_Decision_Act__PROPOSED.md` — `e2c0c8c`
+  (ADR-023 Decision Act; `ratioRate` grade scope accepted as G7–G9)
 
 Reviewed and cited, but not treated as authorizing content on its own:
 
