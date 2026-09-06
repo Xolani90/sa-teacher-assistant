@@ -32,6 +32,53 @@
  * }
  */
 
+// Command/imperative words teachers commonly open a parentMessage request
+// with ("Write a message about...", "Draft a note for...", "Send home a
+// message..."). English sentences are capitalized at the start regardless
+// of content, so a bare "first capitalized word wins" extraction picks up
+// the teacher's own verb as the "learner name" whenever the sentence opens
+// with one of these — which most natural phrasings do. This list exists
+// only to stop those specific false positives, not to be an exhaustive
+// grammar; the extraction below always prefers a real contextual signal
+// (possessive "'s", or a preposition introducing the learner) over this
+// fallback, so the list only matters as a last resort.
+const LEADING_COMMAND_WORDS = new Set([
+  'write', 'draft', 'send', 'compose', 'create', 'generate', 'make',
+  'tell', 'please', 'can', 'could', 'need', 'i', 'help', 'message',
+  'the', 'a', 'an', 'this', 'kindly', 'let', 'give', 'prepare',
+]);
+
+/**
+ * Extracts a learner's name from a free-form parentMessage request.
+ *
+ * Prefers, in order:
+ *   1. A name directly tied to a parent-related noun ("Thabo's parent",
+ *      "Sipho's mom") — highest confidence, name and context co-occur.
+ *   2. A name introduced by a preposition ("about Thabo", "for Sipho",
+ *      "regarding Lindiwe") — still contextual, no co-occurring noun needed.
+ *   3. The first capitalized word/phrase in the message that isn't a
+ *      known leading command word (see LEADING_COMMAND_WORDS above) —
+ *      covers "Sipho was absent yesterday" while skipping "Write a
+ *      message about Sipho" style requests without a strong signal.
+ *
+ * Returns null if nothing plausible is found.
+ *
+ * @param {string} text
+ * @returns {string|null}
+ */
+function extractLearnerName(text) {
+  const possessive = text.match(/\b([A-Z][a-z]+)'s\s+(?:parent|mother|mom|mum|father|dad|guardian)\b/i);
+  if (possessive) return possessive[1];
+
+  const prepositional = text.match(/\b(?:about|for|to|regarding)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/);
+  if (prepositional) return prepositional[1];
+
+  const candidates = text.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/g);
+  if (!candidates) return null;
+  const firstPlausible = candidates.find(c => !LEADING_COMMAND_WORDS.has(c.split(/\s+/)[0].toLowerCase()));
+  return firstPlausible || null;
+}
+
 /**
  * Handles the multi-turn parent message conversation.
  * Returns true if handled (skip normal processing), false otherwise.
@@ -89,8 +136,7 @@ async function handleParentMessageFlow(from, text, preClassifiedIntent = null, d
       }
 
       // Try to extract learner name from the message
-      const nameMatch = text.match(/\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\b/g);
-      const learnerName = nameMatch ? nameMatch[0] : null;
+      const learnerName = extractLearnerName(text);
 
       if (learnerName) {
         // Quota check before generating
@@ -257,4 +303,4 @@ async function handleParentMessageFlow(from, text, preClassifiedIntent = null, d
   return false;
 }
 
-module.exports = { handleParentMessageFlow };
+module.exports = { handleParentMessageFlow, extractLearnerName };
