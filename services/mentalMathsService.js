@@ -460,6 +460,215 @@ function generateFamilySession({ grade, family, count = 12, seed } = {}) {
   return { grade, family, questions };
 }
 
+// ── ratioRate (PROPOSED — NOT AUTHORIZED) ───────────────────────────────
+//
+// STATUS: PROPOSED — AWAITING PROJECT OWNER ACCEPTANCE under ADR-023 §5.
+// See docs/specs/mental-maths/CY79_RatioRate_Generation_Specification_DESIGN_PROPOSAL.md
+// and docs/specs/mental-maths/CY79_PO_01_Decision_Act__PROPOSED.md (CY80
+// revision) for the full design record and D1–D7 decisions.
+//
+// Per ADR-022 §5 Governance Rule 1 ("No implementation without a frozen
+// specification"), this code MUST NOT be treated as authoritative or
+// wired into any production dispatch path until the Project Owner
+// records an explicit acceptance/freeze act. Concretely, that means:
+//
+//   - 'ratioRate' is listed in PROPOSED_FAMILIES, a structurally SEPARATE
+//     list from AUTHORIZED_FAMILIES. It is never added to
+//     AUTHORIZED_FAMILIES or FAMILY_GRADE_AUTHORIZATION by this change.
+//   - generateFamilySession() — the one production entry point used by
+//     mentalMathsGrade7Service.js / mentalMathsGrade8Service.js — is left
+//     completely untouched above and has no reference to ratioRate or to
+//     any of the functions below. There is no G9 senior-phase dispatch
+//     file in this repository at all, so there is nothing for this
+//     candidate to be (even accidentally) wired into today.
+//   - generateProposedFamilySession() below is a separate function,
+//     exported only for direct testing (see tests/ratioRate.test.js), and
+//     is not called from anywhere else in this codebase.
+//
+// Once the Project Owner accepts CY79/CY80 and records a freeze act, the
+// remaining production step is: move 'ratioRate' from PROPOSED_FAMILIES
+// into AUTHORIZED_FAMILIES, add its entry to FAMILY_GRADE_AUTHORIZATION
+// (D2: G9 only), and move genRatioRateItem into GENERATORS_FAMILY. No
+// generation-logic rewrite is required — only that wiring change, which
+// should itself be its own small, reviewable commit distinct from this one.
+//
+// D1 — item forms (deterministic resolver, no LLM arithmetic):
+//   RR-1: distance = speed × time   (distance unknown)
+//   RR-2: speed    = distance ÷ time (speed unknown)
+//   RR-3: time     = distance ÷ speed (time unknown)
+// D2 — grade scope: G9 only (conservative narrowing of the accepted
+//   G7–G9 governance scope from CY62-PO-01 — NOT a claim that CAPS
+//   requires G9-only).
+// D3 — numeric ranges (implementation constraints, not CAPS claims):
+//   speed 1–200 (km/h), time 1–180 min or 1–12 h, distance 1–1000 (km).
+// D4 — exactness: canonical answer must be an exact terminating decimal,
+//   max 2 decimal places; items that cannot resolve exactly within the
+//   configured ranges are discarded and regenerated (bounded attempts).
+// D5/D6 — generation constraints & exclusions: exactly one unknown,
+//   exactly two knowns, positive quantities only, single compatible
+//   time unit per item, no ratioSharing content, no direct/indirect
+//   proportion content, no multi-unknown items.
+
+const RATIO_RATE_RANGES = Object.freeze({
+  speed: Object.freeze({ min: 1, max: 200 }),        // km/h
+  timeMinutes: Object.freeze({ min: 1, max: 180 }),  // minutes
+  timeHours: Object.freeze({ min: 1, max: 12 }),     // hours
+  distance: Object.freeze({ min: 1, max: 1000 }),    // km
+});
+
+const RATIO_RATE_FORMS = Object.freeze(['RR-1', 'RR-2', 'RR-3']);
+
+/**
+ * Rounds to at most 2 decimal places using integer-cent-style arithmetic
+ * to avoid the usual binary floating point drift.
+ * @param {number} n
+ */
+function roundTo2dp(n) {
+  return Math.round((n + Number.EPSILON) * 100) / 100;
+}
+
+/**
+ * True if n, once rounded to 2dp, is indistinguishable from its exact
+ * value to within floating-point tolerance — i.e. n is a terminating
+ * decimal of at most 2 decimal places (D4's exactness rule).
+ * @param {number} n
+ */
+function isExactTo2dp(n) {
+  return Math.abs(n - roundTo2dp(n)) < 1e-9;
+}
+
+/**
+ * Generates a single deterministic ratioRate (speed/distance/time) item.
+ * The LLM never computes or alters this — prompt and canonicalAnswer are
+ * both derived here with plain arithmetic, matching this file's overall
+ * "deterministic generation" design (see file header).
+ *
+ * Draws candidate (speed, time) pairs and only accepts a form/pair
+ * combination whose resulting canonical answer is an exact terminating
+ * decimal within D3's configured ranges (D4). Bounded retry, not
+ * unbounded — an exhausted budget throws rather than silently returning
+ * an inexact or out-of-range item.
+ *
+ * @param {() => number} rand
+ * @returns {{ prompt: string, canonicalAnswer: number, form: string }}
+ */
+function genRatioRateItem(rand) {
+  const MAX_ATTEMPTS = 100;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const form = pick(rand, RATIO_RATE_FORMS);
+    const useHours = rand() < 0.5;
+    const timeRange = useHours ? RATIO_RATE_RANGES.timeHours : RATIO_RATE_RANGES.timeMinutes;
+    const unitLabel = useHours ? 'h' : 'min';
+
+    const speed = randInt(rand, RATIO_RATE_RANGES.speed.min, RATIO_RATE_RANGES.speed.max);
+    const time = randInt(rand, timeRange.min, timeRange.max);
+    const timeInHours = useHours ? time : time / 60;
+
+    const rawDistance = speed * timeInHours;
+    if (!isExactTo2dp(rawDistance)) continue;
+    const distance = roundTo2dp(rawDistance);
+    if (distance < RATIO_RATE_RANGES.distance.min || distance > RATIO_RATE_RANGES.distance.max) continue;
+
+    if (form === 'RR-1') {
+      // Distance unknown: given speed and time.
+      return {
+        form,
+        prompt: `A car travels at ${speed} km/h for ${time} ${unitLabel}. How far does it travel, in km?`,
+        canonicalAnswer: distance,
+      };
+    }
+
+    if (form === 'RR-2') {
+      // Speed unknown: given distance and time.
+      const rawSpeed = distance / timeInHours;
+      if (!isExactTo2dp(rawSpeed)) continue;
+      const computedSpeed = roundTo2dp(rawSpeed);
+      if (computedSpeed < RATIO_RATE_RANGES.speed.min || computedSpeed > RATIO_RATE_RANGES.speed.max) continue;
+      return {
+        form,
+        prompt: `A car travels ${distance} km in ${time} ${unitLabel}. What is its speed, in km/h?`,
+        canonicalAnswer: computedSpeed,
+      };
+    }
+
+    // RR-3: time unknown: given distance and speed. Always express the
+    // answer in hours so the unit is unambiguous regardless of which
+    // time unit was drawn for the underlying construction.
+    const rawTimeHours = distance / speed;
+    if (!isExactTo2dp(rawTimeHours)) continue;
+    const computedTimeHours = roundTo2dp(rawTimeHours);
+    return {
+      form,
+      prompt: `A car travels ${distance} km at a speed of ${speed} km/h. How long does the journey take, in hours?`,
+      canonicalAnswer: computedTimeHours,
+    };
+  }
+  throw new Error('genRatioRateItem: could not construct an exact ratioRate item within the configured ranges after 100 attempts');
+}
+
+// Structurally separate from AUTHORIZED_FAMILIES — see the PROPOSED
+// notice above. Never merged into AUTHORIZED_FAMILIES by this change.
+const PROPOSED_FAMILIES = ['ratioRate'];
+
+// D2: conservative G9-only scope for this first production candidate,
+// within the wider G7–G9 governance scope accepted under CY62-PO-01.
+const PROPOSED_FAMILY_GRADE_AUTHORIZATION = {
+  ratioRate: [9],
+};
+
+function isProposedFamilyGrade(family, grade) {
+  const grades = PROPOSED_FAMILY_GRADE_AUTHORIZATION[family];
+  return Array.isArray(grades) && grades.includes(grade);
+}
+
+const GENERATORS_PROPOSED = {
+  ratioRate: genRatioRateItem,
+};
+
+/**
+ * Test/preview-only counterpart to generateFamilySession(), for the
+ * PROPOSED (not-yet-authorized) family set. Deliberately NOT called
+ * generateFamilySession and NOT merged into it — see the PROPOSED notice
+ * above for why this must stay unreachable from production dispatch
+ * until a Project Owner freeze act occurs.
+ *
+ * @param {Object} opts
+ * @param {number} opts.grade
+ * @param {string} opts.family - one of PROPOSED_FAMILIES
+ * @param {number} [opts.count=12]
+ * @param {number} [opts.seed]
+ */
+function generateProposedFamilySession({ grade, family, count = 12, seed } = {}) {
+  if (!PROPOSED_FAMILIES.includes(family)) {
+    throw new Error(`generateProposedFamilySession: unknown or unauthorized family "${family}" — must be one of ${PROPOSED_FAMILIES.join(', ')}`);
+  }
+  if (!isProposedFamilyGrade(family, grade)) {
+    throw new Error(`generateProposedFamilySession: family "${family}" is not (even provisionally) scoped for grade "${grade}" — grades listed for it are ${PROPOSED_FAMILY_GRADE_AUTHORIZATION[family].join(', ')}`);
+  }
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error(`generateProposedFamilySession: count must be a positive integer, got "${count}"`);
+  }
+
+  const gen = GENERATORS_PROPOSED[family];
+  const rand = mulberry32(seed != null ? seed : Date.now() ^ (grade * 2654435761));
+  const seenPrompts = new Set();
+  const questions = [];
+
+  for (let i = 0; i < count; i++) {
+    let attempt = 0;
+    let question;
+    do {
+      const { prompt, canonicalAnswer, form } = gen(rand);
+      question = { strand: family, prompt, canonicalAnswer, form };
+      attempt++;
+    } while (seenPrompts.has(question.prompt) && attempt < 25);
+    seenPrompts.add(question.prompt);
+    questions.push(question);
+  }
+
+  return { grade, family, questions };
+}
+
 module.exports = {
   STRANDS,
   MIN_GRADE,
@@ -470,6 +679,15 @@ module.exports = {
   AUTHORIZED_FAMILIES,
   FAMILY_GRADE_AUTHORIZATION,
   generateFamilySession,
+  // ratioRate — PROPOSED, NOT AUTHORIZED. See the PROPOSED notice above.
+  // Not part of AUTHORIZED_FAMILIES / generateFamilySession. Exported for
+  // direct testing only.
+  PROPOSED_FAMILIES,
+  PROPOSED_FAMILY_GRADE_AUTHORIZATION,
+  generateProposedFamilySession,
   // exported for direct/unit testing of individual strand generators
-  _internal: { mulberry32, randInt, generateQuestion, GENERATORS, NICE_FRACTIONS, GENERATORS_FAMILY, gcd },
+  _internal: {
+    mulberry32, randInt, generateQuestion, GENERATORS, NICE_FRACTIONS, GENERATORS_FAMILY, gcd,
+    genRatioRateItem, roundTo2dp, isExactTo2dp, RATIO_RATE_RANGES, GENERATORS_PROPOSED,
+  },
 };
