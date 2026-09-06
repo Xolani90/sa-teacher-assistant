@@ -308,10 +308,15 @@ It does not extend, by implication or by omission, to:
   generation-eligibility content (§4) — none of that is authorized by
   its inclusion.
 - `mulDivFluency`, `addSub`, `fracDecPercent` as their own named
-  candidates. **The incorporation of the rational-domain merge
-  decision (`5b4c964`, accepted at the scope level) into
-  `powersRootsFluency`'s rational-domain authorization does not
-  authorize `fracDecPercent` as a candidate in its own right.**
+  candidates for generation purposes. **[Reconciled, CY66]**
+  `mulDivFluency`'s candidate *identity* (umbrella/family status) is
+  separately accepted under CY54-PO-01/CY56-PO-01 — see §7 — but that
+  acceptance does not bring it into this policy's generation-authority
+  scope; it remains outside §1–§2 for the reasons stated in §7. The
+  incorporation of the rational-domain merge decision (`5b4c964`,
+  accepted at the scope level) into `powersRootsFluency`'s
+  rational-domain authorization does not authorize `fracDecPercent` as
+  a candidate in its own right.
   `fracDecPercent` itself has no committed grade-scope decision record
   and is not authorized, scoped, or otherwise addressed by anything in
   this policy — only the specific rational-squares/roots material that
@@ -334,7 +339,7 @@ It does not extend, by implication or by omission, to:
 
 | Candidate/question | Status | Why excluded here |
 |---|---|---|
-| `mulDivFluency` | Assessed, scope open (Option C) at the time this policy was drafted | No committed grade-scope decision record **as of this policy's original drafting**; see reconciliation note below |
+| `mulDivFluency` | **[Reconciled, CY66]** Candidate identity accepted as umbrella/family (CY54-PO-01, `ca23918`), containing `multiplicationFactFluency` as its governed sub-construct; no separate umbrella-level scope record required (CY56-PO-01, `dda9db0`) | No independent umbrella-level grade scope, generation content, or evidence exists beyond the already-authorized `multiplicationFactFluency` sub-construct (itself already in §1–§2) and the CY54-PO-02-unresolved inverse-operation content — see below |
 | `addSub` ↔ `mulDivFluency` inverse-operations boundary | Proposed (not frozen) merge decision exists, `b6dba51` | Boundary decision exists; grade-scope/authorization decision does not |
 | `addSub`'s other 6 sibling properties | Unresolved/unstatused | No candidate name, no evidence review at candidate level |
 | `fracDecPercent` (as a whole) | Assessed, scope not yet reviewed | No committed grade-scope decision record |
@@ -357,16 +362,24 @@ policy was originally drafted:
   open identity question this policy needs to carry as unresolved.
 
 **This policy does not authorize, deny, or take any position on the
-mathematical merits of the remaining rows above.** `mulDivFluency` and
-`fracDecPercent` remain excluded solely because their own grade-scope
-decision records are not committed — the same test applied throughout
-this policy. `mulDivFluency`'s own status is now further qualified by
-CY54-PO-01 (umbrella/sub-construct structure) and CY56-PO-01 (no
-separate umbrella-level scope record required) — those Decision Acts
-are not reconciled into this row's wording in this cycle, as doing so
-is not required to correct the `ratioRate`/`ratioSharing` staleness
-this cycle addresses; a future reconciliation pass should still update
-this row for full consistency.
+mathematical merits of the remaining rows above.** `fracDecPercent`
+remains excluded solely because its own grade-scope decision record is
+not committed — the same test applied throughout this policy.
+**[Reconciled, CY66]** `mulDivFluency`'s row above is now accurate as
+of two accepted Decision Acts: CY54-PO-01 (`ca23918`) accepted its
+identity as the umbrella/family containing `multiplicationFactFluency`
+as a governed sub-construct, and CY56-PO-01 (`dda9db0`) accepted that
+no separate umbrella-level scope record is required, since the umbrella
+currently carries no independently authorized content beyond that
+sub-construct (already reflected in §1–§2) and the CY54-PO-02-unresolved
+inverse-operation content. `mulDivFluency` therefore remains correctly
+absent from the §1–§2 authorized-candidate tables **not** for lack of
+governance work, but because both accepted Decision Acts establish that
+there is currently nothing independent for those tables to authorize
+under that name. This does not authorize, imply, or establish any
+generation specification, generation eligibility, or implementation
+authority for `mulDivFluency` or `multiplicationFactFluency` beyond
+what §1–§2 and §4 already state.
 
 ---
 
