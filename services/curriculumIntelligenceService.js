@@ -270,6 +270,32 @@ function getCurrentATPWeek(date = new Date()) {
     cumWeeks += termData.weeks;
   }
 
+  // The loop above only detects the holiday BETWEEN two terms of the same
+  // configured year (term < 4). A date after Term 4 ends (the December
+  // summer holidays) never matches any term and isn't caught by that
+  // lookahead either, so `result` was left at its all-null default —
+  // producing broken teacher-facing text like "Term null holiday" for
+  // several weeks every year. Treat it as the Term-4-to-next-Term-1 holiday.
+  if (result.term === null) {
+    const term4 = calendar[4];
+    const term4End = new Date(year, term4.end[0], term4.end[1]);
+    if (date > term4End) {
+      const nextYearCalendar = SA_SCHOOL_CALENDAR[year + 1] || SA_SCHOOL_CALENDAR[2026];
+      const nextYearTerm1 = nextYearCalendar[1];
+      const nextStart = new Date(year + 1, nextYearTerm1.start[0], nextYearTerm1.start[1]);
+      result = {
+        year, term: 4, weekInTerm: term4.weeks,
+        schoolWeeksElapsed: cumWeeks,
+        totalWeeksInTerm: term4.weeks,
+        daysUntilTermEnd: null,
+        isInTerm: false,
+        schoolHoliday: true,
+        nextTermStart: nextStart,
+        nextTerm: 1,
+      };
+    }
+  }
+
   return result;
 }
 
