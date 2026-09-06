@@ -13,11 +13,18 @@ take: it proposes actual design content, but labels every rule with
 its provenance so the Project Owner can see exactly which lines are
 curriculum fact and which are this document's own invention.
 
-This document does not implement anything, modify resolver/dispatch,
-modify `AUTHORIZED_FAMILIES` or `FAMILY_GRADE_AUTHORIZATION`, add
-tests, or constitute an ADR-023 §6 freeze act. It is a design artifact
-for Project Owner review, paired with a separate decision package
-(`CY79_PO_01_Decision_Act__PROPOSED.md`).
+This document does not modify `AUTHORIZED_FAMILIES` or
+`FAMILY_GRADE_AUTHORIZATION`, or constitute an ADR-023 §6 freeze act.
+It is a design artifact for Project Owner review, paired with a
+separate decision package (`CY79_PO_01_Decision_Act__PROPOSED.md`).
+
+**CY80 update:** D1–D6 below were finalized as the working production
+design, and a gated (not production-wired) implementation and test
+suite were prepared against them — see the "Implementation status"
+section of `CY79_PO_01_Decision_Act__PROPOSED.md` for exactly what was
+written and where. This is downstream engineering preparation, not a
+Project Owner decision act; the status lines above remain accurate and
+unchanged by it.
 
 **Provenance labels used throughout:**
 

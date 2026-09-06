@@ -1,13 +1,20 @@
 # CY79-PO-01 — `ratioRate` Generation Specification Decision Package
 
-**STATUS: PROPOSED — DOES NOT CONSTITUTE PROJECT OWNER ACCEPTANCE**
+**STATUS: PROPOSED — AWAITING PROJECT OWNER ACCEPTANCE**
+
+**Revision:** CY80 finalized D1–D7 below as the working production
+design (see `CY79_RatioRate_Generation_Specification_DESIGN_PROPOSAL.md`,
+CY80 revision, for full detail) and a gated implementation + tests have
+been prepared against it (§"Implementation status" below). Finalizing
+the design and preparing code does **not** constitute Project Owner
+acceptance. This document still contains no "ACCEPTED", "FROZEN", or
+"AUTHORIZED" status of any kind.
 
 > This document is PROPOSED and does not constitute Project Owner
-> acceptance. It contains no "ACCEPTED", "FROZEN", or "AUTHORIZED"
-> status of any kind. It exists to give the Project Owner a single,
-> itemized list of the actual decisions required to move
-> `ratioRate` toward generation eligibility, each traceable to the
-> corresponding section of `CY79_RatioRate_Generation_Specification_DESIGN_PROPOSAL.md`.
+> acceptance. It exists to give the Project Owner a single, itemized
+> list of the actual decisions required to move `ratioRate` toward
+> generation eligibility, each traceable to the corresponding section
+> of `CY79_RatioRate_Generation_Specification_DESIGN_PROPOSAL.md`.
 
 Accepting, rejecting, or amending any single item below does not
 accept, reject, or amend any other item. There is no bundled
@@ -19,62 +26,72 @@ resolved.
 
 ---
 
-## Decision items
+## Decision items (CY80-finalized production design)
 
-### D1 — Item forms (spec §4)
+### D1 — Item forms (spec §4) — FINALIZED PROPOSAL
 
-Approve / reject / amend the proposed item-form taxonomy:
+Three deterministic forms, each with exactly one unknown solved by a
+plain-arithmetic resolver (never the LLM):
 
-- RR-1: given speed & time, find distance (G9)
-- RR-2: given distance & time, find speed (G9)
-- RR-3: given distance & speed, find time (G9)
-- Whether unit conversion is mandatory (spec §4.2, option a) or
-  optional (spec §4.2, option b — this document's default proposal)
-- Whether constant-speed/average-speed framing must be explicit in
-  every generated item (spec §4.3)
+- **RR-1**: given speed & time, find distance (`distance = speed × time`)
+- **RR-2**: given distance & time, find speed (`speed = distance ÷ time`)
+- **RR-3**: given distance & speed, find time (`time = distance ÷ speed`)
+
+Unit conversion is **not** required within a single item: each
+generated item draws one time unit (minutes or hours) and stays
+internally consistent in that unit throughout, per CY80 §2/D1.
+Constant/average-speed framing is implicit in the "travels at X km/h"
+phrasing used by every generated item.
 
 **Decision required:** APPROVE / REJECT / AMEND, per sub-item if
 desired.
 
-### D2 — Grade restriction (spec §5)
+### D2 — Grade restriction (spec §5) — FINALIZED PROPOSAL
 
-Approve / reject the proposal to restrict generation-eligible item
-forms to **G9 only**, despite the accepted G7–G9 scope authorization
-permitting generation at G7/G8 in principle.
+Restrict generation-eligible item forms to **G9 only**, despite the
+accepted G7–G9 scope authorization (CY62-PO-01) permitting generation
+at G7/G8 in principle. This is recorded as a conservative
+implementation-scope choice for production safety, not a claim that
+CAPS requires G9-only treatment.
 
 **Decision required:** APPROVE (generate G9 only) / REJECT (require
 further evidence work to justify G7/G8 generation) / AMEND.
 
-### D3 — Numeric/value ranges (spec §6)
+### D3 — Numeric/value ranges (spec §6) — FINALIZED PROPOSAL
 
-Approve / reject / amend the proposed ranges:
+- Speed: 1–200 (km/h)
+- Time: 1–180 minutes, or 1–12 hours (one unit per item)
+- Distance: 1–1000 (km)
 
-- Speed: 1–200
-- Time: 1–180 minutes or 1–12 hours
-- Distance: 1–1000
-
-**Decision required:** APPROVE / REJECT / AMEND.
-
-### D4 — Rational/decimal domain (spec §7)
-
-Approve / reject the proposal that generated quantities be
-constrained so the unknown resolves to an exact terminating decimal
-to at most 2 decimal places, with that exact decimal as the
-canonical answer (no rounding, no fractional form).
+These are implementation-generation constraints, not CAPS claims, and
+are held in one versioned constant block
+(`RATIO_RATE_RANGES` in `services/mentalMathsService.js`) rather than
+scattered through the generator.
 
 **Decision required:** APPROVE / REJECT / AMEND.
 
-### D5 — Generation constraints (spec §8)
+### D4 — Rational/decimal domain (spec §7) — FINALIZED PROPOSAL
 
-Approve / reject the proposed constraint set (positive time/distance/
-speed; internally consistent units before final calculation; exact-
-to-2dp answer policy per D4).
+Generated quantities are constrained so the unknown resolves to an
+exact terminating decimal at at most 2 decimal places, used as-is as
+the canonical answer (no rounding of an inexact value, no fractional
+form). An item whose resolver output cannot satisfy this exactly,
+within the configured D3 ranges, is discarded and regenerated (bounded
+retry — 100 attempts — after which generation raises rather than
+returning an inexact item).
 
 **Decision required:** APPROVE / REJECT / AMEND.
 
-### D6 — Exclusions (spec §9)
+### D5 — Generation constraints (spec §8) — FINALIZED PROPOSAL
 
-Approve / reject the proposed exclusion table:
+Every generated item satisfies: exactly one unknown; exactly two known
+quantities; all quantities positive; a single consistent time unit;
+deterministic formula resolution and canonical answer; the D4
+precision rule; and the D6 exclusions below.
+
+**Decision required:** APPROVE / REJECT / AMEND.
+
+### D6 — Exclusions (spec §9) — FINALIZED PROPOSAL
 
 - Direct/indirect proportion excluded from `ratioRate`
 - `ratioSharing` content excluded from `ratioRate` (already governed
@@ -83,23 +100,54 @@ Approve / reject the proposed exclusion table:
 - Ratio-only (non-rate) items excluded from `ratioRate`
 - Zero/negative physical quantities excluded
 - Multi-unknown / algebraic-manipulation items excluded
+- Ambiguous or incompatible units excluded
+- Items requiring uncontrolled rounding excluded
 
 **Decision required:** APPROVE / REJECT / AMEND, per sub-item if
 desired.
 
-### D7 — `ratioSharing` G9 (not part of this specification, flagged for awareness only)
+### D7 — `ratioSharing` G9 (not part of this specification, informational only)
 
-CY78 confirmed the "sharing in a given ratio" skill is absent from
-the G9 solving-problems list entirely. This is new factual context,
-not a proposal. The Project Owner may treat this as informative for
-a separate `ratioSharing` decision act, but **no decision on this
-point is requested as part of accepting or rejecting the `ratioRate`
-specification** — `ratioRate`'s generation eligibility does not
-depend on resolving it.
+Unchanged from the original CY79 package. `ratioSharing` G9 status
+remains **unresolved / not authorized**. No decision on this point is
+requested or made as part of this document, and no authorization is
+inferred merely because the G9 CAPS section presents ratio-and-rate
+material together.
 
 **Decision required:** NONE (informational only). A separate,
 dedicated decision act would be needed if the Project Owner chooses
 to act on this.
+
+---
+
+## Implementation status (CY80)
+
+Per CY80's instruction to prepare implementation without bypassing
+ADR-023, the following has been written **behind an explicit
+governance gate**, not wired into any production dispatch path:
+
+- `services/mentalMathsService.js`: a `PROPOSED_FAMILIES = ['ratioRate']`
+  list, structurally separate from `AUTHORIZED_FAMILIES`; a
+  `PROPOSED_FAMILY_GRADE_AUTHORIZATION` map (G9 only, per D2); the
+  deterministic RR-1/2/3 resolver (`genRatioRateItem`); and a
+  `generateProposedFamilySession()` entry point used only by tests.
+  `generateFamilySession()` — the function actually called by
+  `mentalMathsGrade7Service.js` / `mentalMathsGrade8Service.js` — is
+  untouched and has no reference to any of this.
+- `tests/ratioRate.test.js`: 32 tests covering RR-1/2/3 correctness
+  (independently re-derived from each prompt, not just checked against
+  the generator's own output), D3 ranges, D4 exactness, D5 constraints,
+  D6 exclusions, session determinism/reproducibility, and the
+  governance gating itself (`ratioRate` is asserted to be absent from
+  `AUTHORIZED_FAMILIES`).
+
+This code exists so that, if and when the Project Owner performs an
+ADR-023 §6 freeze act, the only remaining production step is moving
+`ratioRate` from `PROPOSED_FAMILIES` into `AUTHORIZED_FAMILIES` (and
+its grade entry into `FAMILY_GRADE_AUTHORIZATION`) — a small, separate,
+reviewable commit — rather than a design-and-build cycle. Writing and
+testing this code is not itself a decision act and does not change any
+item's status above.
 
 ---
 
@@ -109,16 +157,16 @@ Even full approval of every item above would:
 
 - NOT constitute an ADR-023 §6 freeze act;
 - NOT grant implementation authority;
-- NOT satisfy Ten-Point Review items 7, 8, 9, or 10 (§12 of the
-  design proposal), which are independent of this candidate's
-  generation content;
+- NOT itself move `ratioRate` into `AUTHORIZED_FAMILIES` — that wiring
+  change still requires its own dedicated commit, made only after a
+  freeze act;
 - NOT resolve `ratioSharing` G9;
-- NOT authorize resolver/dispatch, generator, or test changes.
 
 A subsequent, separate ADR-023 §6 freeze act — performed by the
 Project Owner, in its own dedicated commit, explicitly distinguishing
 evidence-derived findings from governance judgment per ADR-023 §9 —
-would still be required before implementation could begin.
+would still be required before the prepared implementation could be
+wired into production.
 
 ---
 
