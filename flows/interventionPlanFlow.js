@@ -102,7 +102,7 @@ async function handleInterventionPlanFlow(from, text, preClassifiedIntent = null
 
     const knownGrade = teacher?.grade;
     const knownSubject = teacher?.subject;
-    if (knownGrade && knownSubject) {
+    if (knownGrade != null && knownSubject) {
       const st = interventionPlanState.get(phoneHash);
       st.step = isSba ? 'ask_sba_context' : 'ask_focus_area';
       interventionPlanState.set(phoneHash, st);
