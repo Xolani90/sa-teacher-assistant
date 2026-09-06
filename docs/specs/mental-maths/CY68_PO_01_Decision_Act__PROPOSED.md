@@ -35,7 +35,7 @@
 ("Generation Policy v1.0").
 
 The policy was reconciled through Cycle 66 at policy-reconciliation
-commit `8867602f16407e7b14aca0a6ebdce18c6dfdf38c`. The Cycle 68
+commit `8867602f16407e7b14aca0a6ebdce18c6dfdf38b`. The Cycle 68
 repository baseline was subsequently advanced to `29002d8` and then,
 after this Decision Act correction pass, to the current repository
 baseline `7fec7749481ced0ca864fc55039822fcc8108195`.
@@ -207,7 +207,7 @@ This Decision Act relies on already-committed repository governance
 state and the preceding Cycle 68 review/correction work:
 
 * Generation Policy v1.0, reconciled through Cycle 66 at
-  `8867602f16407e7b14aca0a6ebdce18c6dfdf38c`;
+  `8867602f16407e7b14aca0a6ebdce18c6dfdf38b`;
 * Cycle 68 review baseline `29002d8`;
 * Cycle 68 Decision Act correction baseline `7fec7749481ced0ca864fc55039822fcc8108195`;
 * ADR-023 — Accepted, bootstrap commit `580fa45`;
