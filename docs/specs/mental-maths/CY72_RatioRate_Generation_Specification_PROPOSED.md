@@ -62,10 +62,13 @@ Repository evidence (`ratioRate_Evidence_Review_Checkpoint.md`,
 ("comparing two quantities of different kinds," combined "ratio and
 rate" at G9) and records two worked examples at G9 involving
 speed/distance/time, but does not itself define a generation-ready
-item-form taxonomy (e.g. "given rate and time, find distance," "given
-two rates, compare," etc.). The evidence checkpoint explicitly states
-it does not establish a generation range, item form, or difficulty
-band (§8 of that document).
+item-form taxonomy. (Illustrative only, not proposed rules — the kind
+of thing a taxonomy would need to specify includes item shapes such as
+"given rate and time, find distance" or "given two rates, compare";
+neither of these, nor any other item form, is proposed, endorsed, or
+established by this document.) The evidence checkpoint explicitly
+states it does not establish a generation range, item form, or
+difficulty band (§8 of that document).
 
 No item form is proposed here as a design judgment either — this
 section is left unpopulated by design, per the instruction to prefer
