@@ -250,7 +250,7 @@ function getCurrentATPWeek(date = new Date()) {
 
     // Between terms
     const nextTermData = calendar[term + 1];
-    if (term < 4 && nextTermData) {
+    if (term < 4 && nextTermData && date > termEnd) {
       const nextStart = new Date(year, nextTermData.start[0], nextTermData.start[1]);
       if (date < nextStart) {
         result = {
@@ -271,15 +271,35 @@ function getCurrentATPWeek(date = new Date()) {
   }
 
   // The loop above only detects the holiday BETWEEN two terms of the same
-  // configured year (term < 4). A date after Term 4 ends (the December
-  // summer holidays) never matches any term and isn't caught by that
-  // lookahead either, so `result` was left at its all-null default —
-  // producing broken teacher-facing text like "Term null holiday" for
-  // several weeks every year. Treat it as the Term-4-to-next-Term-1 holiday.
+  // configured year (term < 4, and only once the current term has actually
+  // ended — see the `date > termEnd` guard above). Two boundary cases still
+  // fall through to the all-null default and need explicit handling:
+  //   1. A date after Term 4 ends (the December summer holidays).
+  //   2. A date before Term 1 of the year has even started (the tail of the
+  //      previous December/January break). Before the `date > termEnd`
+  //      guard above existed, case 2 was wrongly caught by the term-1
+  //      iteration of the loop above (any date "< Term 2's start" matched,
+  //      even one before Term 1 itself had started), producing teacher-
+  //      facing text like "Term 1 holiday, Term 2 starts 8 April" on, say,
+  //      5 January — three months and a full term wrong.
   if (result.term === null) {
+    const term1 = calendar[1];
+    const term1Start = new Date(year, term1.start[0], term1.start[1]);
     const term4 = calendar[4];
     const term4End = new Date(year, term4.end[0], term4.end[1]);
-    if (date > term4End) {
+
+    if (date < term1Start) {
+      result = {
+        year, term: null, weekInTerm: null,
+        schoolWeeksElapsed: 0,
+        totalWeeksInTerm: 0,
+        daysUntilTermEnd: null,
+        isInTerm: false,
+        schoolHoliday: true,
+        nextTermStart: term1Start,
+        nextTerm: 1,
+      };
+    } else if (date > term4End) {
       const nextYearCalendar = SA_SCHOOL_CALENDAR[year + 1] || SA_SCHOOL_CALENDAR[2026];
       const nextYearTerm1 = nextYearCalendar[1];
       const nextStart = new Date(year + 1, nextYearTerm1.start[0], nextYearTerm1.start[1]);
@@ -482,10 +502,11 @@ function buildGeneralATPStatus(atpInfo) {
     const nextDate = atpInfo.nextTermStart
       ? atpInfo.nextTermStart.toLocaleDateString('en-ZA', { day: 'numeric', month: 'long' })
       : 'soon';
+    const holidayLabel = atpInfo.term ? `Term ${atpInfo.term} holiday` : 'school holiday';
     return (
       `📅 *School Calendar Update*\n\n` +
-      `You are currently on *Term ${atpInfo.term} holiday*.\n` +
-      `Term ${atpInfo.nextTerm || atpInfo.term + 1} starts on *${nextDate}*.\n\n` +
+      `You are currently on *${holidayLabel}*.\n` +
+      `Term ${atpInfo.nextTerm || (atpInfo.term ? atpInfo.term + 1 : 1)} starts on *${nextDate}*.\n\n` +
       `_Set up your grade and subject profile so I can give you personalised ATP guidance. ` +
       `Reply with your grade and subject (e.g. "Grade 8 Mathematics") to get started._`
     );
