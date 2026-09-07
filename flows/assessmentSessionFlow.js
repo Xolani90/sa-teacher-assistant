@@ -632,7 +632,32 @@ async function handleAssessmentSessionFlow(from, text, message = null, preClassi
         `${completionPrefix}Capture complete.\n\n${result.state.learnerCount} learner${result.state.learnerCount === 1 ? '' : 's'}\n${result.state.questions.length} question${result.state.questions.length === 1 ? '' : 's'}\n\n${formatCompleteMenu()}`
       );
 
-      await safeSendMessage(from, diagnostic.teacherSummary);
+      // The completion message above and the PDF generation below are
+      // each independently guarded against WhatsApp send failure (the
+      // PDF path inside generateAndSendBlueprintPdf() itself). This send
+      // — the actual diagnostic teacherSummary text, frequently the
+      // single largest message in this flow and the one most likely to
+      // need multi-chunk delivery — previously had no equivalent guard:
+      // a failure here (including a failure partway through a
+      // multi-chunk send, where earlier chunks may have already been
+      // delivered) threw uncaught, so generateAndSendBlueprintPdf()
+      // below never even ran and the teacher got only the generic
+      // top-level "please send it again" apology — which is misleading,
+      // since the assessment was already persisted and there is nothing
+      // to "send again" via a retry of this message. Marks are never
+      // lost (already committed above), so this failure mode is
+      // delivery-only; guarding it lets the PDF attempt still proceed
+      // and tells the teacher exactly where to find their results.
+      try {
+        await safeSendMessage(from, diagnostic.teacherSummary);
+      } catch (summaryErr) {
+        console.error('[ASSESSMENT_SESSION_FLOW] Failed to deliver teacher summary:', summaryErr.message);
+        await safeSendMessage(from,
+          `⚠️ Marks were saved, but I couldn't deliver the full summary message. You can view the results any time via MY ASSESSMENTS — the analytics PDF should follow below.`
+        ).catch((fallbackErr) => {
+          console.error('[ASSESSMENT_SESSION_FLOW] Failed to send teacher-summary failure notice:', fallbackErr.message);
+        });
+      }
       await generateAndSendBlueprintPdf(from, diagnostic.assessmentId, deps);
       return true;
     }

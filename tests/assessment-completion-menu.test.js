@@ -273,6 +273,60 @@ async function run() {
   assert(navigationService.getOpenMenu(phoneHash)?.id === 'assessmentSession.complete', 'RESUME does not consume/close the open menu');
   assert(/what would you like to do next/i.test(lastMessage()), 'RESUME re-renders the completion menu');
 
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 9: teacherSummary WhatsApp send failure does not lose the PDF or leave the teacher stranded ─');
+  {
+    assessmentSessionState = new SessionStore('assessmentCompletionMenu', 24 * 60 * 60 * 1000);
+    registerAssessmentSessionFlow(assessmentSessionState, describeAssessmentSessionStatus);
+    assessmentSessionState.delete(phoneHash);
+    navigationService.closeMenu(phoneHash);
+    pdfCalls = [];
+    sendDocumentCalls = [];
+
+    const sentDuringFailure = [];
+    const failingSafeSendMessage = async (to, msg) => {
+      sentDuringFailure.push({ to, msg });
+      if (msg === 'stub summary') {
+        throw new Error('simulated WhatsApp delivery failure');
+      }
+    };
+    const failingDeps = () => ({
+      hashPhone,
+      safeSendMessage: failingSafeSendMessage,
+      assessmentSessionState,
+      listBlueprints: () => blueprintsFixture,
+      getTeacherClasses: () => classesFixture,
+      getBlueprintById,
+      processAssessmentData,
+      parseMarks,
+      generateBlueprintAssessmentPdf,
+      generateBlueprintPaperPdf,
+      buildPdfUrl,
+      sendDocument,
+    });
+    async function sendFailing(text) {
+      return handleAssessmentSessionFlow(PHONE, text, null, null, failingDeps());
+    }
+
+    await sendFailing('NEW TEST');
+    await sendFailing('1'); // blueprint
+    await sendFailing('1'); // class -> ACTIVE
+    let threw = null;
+    try {
+      await sendFailing('Sipho Dlamini 4 8\nLebo Molefe 5 9'); // completes capture; teacherSummary send fails
+    } catch (err) {
+      threw = err;
+    }
+
+    assert(threw === null, 'a teacherSummary delivery failure does not throw uncaught out of the flow');
+    assert(pdfCalls.length === 1, 'the analytics PDF is still generated despite the teacherSummary send failing');
+    assert(sendDocumentCalls.length === 1, 'the analytics PDF document is still sent despite the teacherSummary send failing');
+    const fallbackSent = sentDuringFailure.some((m) => /Marks were saved/i.test(m.msg) && /MY ASSESSMENTS/i.test(m.msg));
+    assert(fallbackSent, 'a "Marks were saved... MY ASSESSMENTS" fallback notice is sent when the teacherSummary itself fails to deliver');
+    state = assessmentSessionState.get(phoneHash);
+    assert(state?.step === STEP.COMPLETE_MENU, 'session still reaches COMPLETE_MENU — the underlying capture/persistence succeeded regardless of this delivery failure');
+  }
+
   // ── Summary ───────────────────────────────────────────────────────────
   console.log('\n' + '─'.repeat(62));
   console.log(`Assessment Completion Menu Results: ${passed} passed, ${failed} failed`);
