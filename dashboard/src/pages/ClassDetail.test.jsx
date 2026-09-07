@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
-import { Route, Routes } from 'react-router-dom';
-import { renderWithProviders, screen, userEvent } from '../test/test-utils';
+import { Link, Route, Routes } from 'react-router-dom';
+import { renderWithProviders, screen, userEvent, waitFor, act } from '../test/test-utils';
 import ClassDetail from './ClassDetail';
 
 /**
@@ -239,5 +239,85 @@ describe('ClassDetail', () => {
 
     expect(await screen.findByText(/it still has 2 learner\(s\) linked to it/)).toBeInTheDocument();
     expect(screen.queryByText('Classes list page')).not.toBeInTheDocument();
+  });
+
+  it('does not let a stale Class A snapshot response overwrite Class B after navigating away before it resolves', async () => {
+    // Regression test for a race in loadSnapshot(): navigating from
+    // /classes/class-1 to /classes/class-2 fires a new snapshot request,
+    // but the previous request (for class-1) is still in flight and can
+    // resolve later. Without a request-id guard, that late class-1
+    // response would overwrite class-2's already-rendered snapshot.
+    const detailFor = (name) => ({ ...DETAIL, class: { ...DETAIL.class, name } });
+    const snapshotFor = (progress) => ({
+      metadata: { partial: false },
+      snapshot: {
+        analytics: { status: 'ok', data: { classSummary: { averageMastery: 70, averageCoverage: 63, averageProgress: progress } } },
+        intervention: { status: 'ok', data: { priorityCounts: { high: 1, medium: 1, low: 0 } } },
+        qms: { status: 'unavailable' },
+      },
+    });
+
+    // A controllable, resolve-on-demand response per URL substring.
+    const pending = new Map(); // key -> { resolve }
+    const fetchMock = vi.fn(
+      (url) =>
+        new Promise((resolve) => {
+          pending.set(url, { resolve });
+        })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const respond = (urlSubstring, body) => {
+      const key = [...pending.keys()].find((k) => k.includes(urlSubstring));
+      const { resolve } = pending.get(key);
+      pending.delete(key);
+      resolve({ ok: true, status: 200, text: async () => JSON.stringify(body) });
+    };
+
+    function Harness() {
+      return (
+        <>
+          <Link to="/classes/class-2">Go to Class B</Link>
+          <Routes>
+            <Route path="/classes/:classId" element={<ClassDetail />} />
+            <Route path="/classes" element={<div>Classes list page</div>} />
+          </Routes>
+        </>
+      );
+    }
+
+    const user = userEvent.setup();
+    renderWithProviders(<Harness />, { route: '/classes/class-1', authenticated: true });
+
+    // Class A's detail resolves normally; its snapshot is left pending.
+    respond('/classes/class-1/detail', detailFor('Class A'));
+    await screen.findByText('Class A');
+
+    // Navigate to Class B before Class A's snapshot ever resolves.
+    await user.click(screen.getByText('Go to Class B'));
+    respond('/classes/class-2/detail', detailFor('Class B'));
+    await screen.findByText('Class B');
+
+    // Class B's snapshot resolves first...
+    respond('/classes/class-2/snapshot', snapshotFor(99));
+    expect(await screen.findByText('99%')).toBeInTheDocument();
+
+    // ...then Class A's stale snapshot finally resolves. It must not
+    // overwrite what's currently displayed for Class B. authedFetch has
+    // a few chained awaits (fetch -> response.text() -> JSON.parse) before
+    // the component's setState runs, so flush several microtask ticks
+    // inside act() rather than asserting immediately after resolve().
+    await act(async () => {
+      respond('/classes/class-1/snapshot', snapshotFor(11));
+      for (let i = 0; i < 10; i += 1) {
+        // eslint-disable-next-line no-await-in-loop
+        await Promise.resolve();
+      }
+    });
+
+    // Give any further re-render a chance to settle, then assert the
+    // final, stable state.
+    await waitFor(() => expect(screen.getByText('99%')).toBeInTheDocument());
+    expect(screen.queryByText('11%')).not.toBeInTheDocument();
   });
 });

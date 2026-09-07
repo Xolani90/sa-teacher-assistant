@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTeacher } from '../auth/TeacherContext';
 import { ApiError } from '../api/client';
@@ -157,14 +157,28 @@ export default function ClassDetail() {
   // snapshot failure never blocks the rest of the page from rendering,
   // and vice versa — same fault-isolation principle classSnapshotService
   // itself applies at the section level.
+  // Guards against out-of-order responses: unlike the /detail effect above
+  // (which uses an effect-scoped `cancelled` flag), loadSnapshot is also
+  // exposed directly as a manual retry callback (onRetry below), so the
+  // guard has to survive outside the effect that first triggered it. A
+  // monotonically increasing request id, compared when each response
+  // resolves, discards any response that isn't from the most recently
+  // started request — e.g. a slow Class A snapshot response arriving
+  // after the teacher has already navigated to Class B must not overwrite
+  // Class B's already-rendered snapshot.
+  const snapshotRequestIdRef = useRef(0);
+
   const loadSnapshot = useCallback(async () => {
+    const requestId = ++snapshotRequestIdRef.current;
     setSnapshotStatus(STATUS_LOADING);
     setSnapshotError(null);
     try {
       const res = await authedFetch(`/api/classes/${classId}/snapshot`);
+      if (snapshotRequestIdRef.current !== requestId) return; // superseded by a newer request
       setSnapshot(res);
       setSnapshotStatus(STATUS_READY);
     } catch (err) {
+      if (snapshotRequestIdRef.current !== requestId) return; // superseded by a newer request
       setSnapshotError(err instanceof ApiError ? err.message : 'Something went wrong loading the class snapshot.');
       setSnapshotStatus(STATUS_ERROR);
     }
