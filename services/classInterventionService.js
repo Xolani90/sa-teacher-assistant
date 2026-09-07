@@ -82,6 +82,16 @@ function getClassInterventionPlan(phoneHash, classId, options = {}) {
   // subject -> topic -> affectedLearners count, accumulated only from
   // evaluated subject plans (ADR-009 §3.5).
   const topicCounts = new Map();
+  // subject -> number of learners with an evaluated (non insufficient-data)
+  // plan for that specific subject. This is the correct commonFocusTopics
+  // percentage denominator: learners are not uniformly evaluated across
+  // every subject (a learner can be evaluated in Mathematics but
+  // insufficient-data in English), so summary.evaluatedLearners — a
+  // class-wide count across all subjects — would understate or fully hide
+  // a topic that is universal within one subject's own evaluated
+  // population, purely because other learners in the class take different
+  // subjects.
+  const subjectEvaluatedCounts = new Map();
 
   for (const learner of roster) {
     let subjectPlans;
@@ -111,6 +121,7 @@ function getClassInterventionPlan(phoneHash, classId, options = {}) {
     });
 
     for (const plan of evaluatedPlans) {
+      subjectEvaluatedCounts.set(plan.subject, (subjectEvaluatedCounts.get(plan.subject) || 0) + 1);
       if (!plan.focusTopics || plan.focusTopics.length === 0) continue;
       if (!topicCounts.has(plan.subject)) topicCounts.set(plan.subject, new Map());
       const subjectTopics = topicCounts.get(plan.subject);
@@ -128,9 +139,10 @@ function getClassInterventionPlan(phoneHash, classId, options = {}) {
 
   const commonFocusTopics = [];
   for (const [subject, topics] of topicCounts) {
+    const subjectEvaluatedLearners = subjectEvaluatedCounts.get(subject) || 0;
     for (const [topic, affectedLearners] of topics) {
-      const percentage = summary.evaluatedLearners > 0
-        ? affectedLearners / summary.evaluatedLearners
+      const percentage = subjectEvaluatedLearners > 0
+        ? affectedLearners / subjectEvaluatedLearners
         : 0;
       if (percentage >= COMMON_TOPIC_THRESHOLD) {
         commonFocusTopics.push({ subject, topic, affectedLearners, percentage });

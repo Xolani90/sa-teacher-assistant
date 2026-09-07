@@ -220,6 +220,42 @@ function testCommonFocusTopicsExcludeInsufficientData() {
   restoreMocks();
 }
 
+function testCommonFocusTopicsPercentageIsSubjectScoped() {
+  console.log('\ncommonFocusTopics percentage is scoped to the subject\'s own evaluated learners, not the whole class');
+  // 4 learners, each evaluated in exactly one of two different subjects.
+  // 2/2 Mathematics-evaluated learners share 'Fractions' (100% of Maths).
+  // 2/2 English-evaluated learners share 'Grammar' (100% of English).
+  // Neither topic would cross COMMON_TOPIC_THRESHOLD if the denominator
+  // were the class-wide evaluatedLearners count (2/4 = 50%, and even that
+  // only just barely clears threshold by coincidence at this class size —
+  // at larger/more mixed sizes it would be hidden entirely). The correct,
+  // subject-scoped denominator must report both at 100%.
+  mockRoster([1, 'Amahle'], [2, 'Bongani'], [3, 'Cebo'], [4, 'Dineo']);
+  mockPlans((learnerId) => {
+    if (learnerId <= 2) {
+      return [
+        makePlan({ learnerId, subject: 'Mathematics', priority: 'high', focusTopics: ['Fractions'] }),
+        makePlan({ learnerId, subject: 'English', priority: 'medium', masteryLevel: 'insufficient-data' }),
+      ];
+    }
+    return [
+      makePlan({ learnerId, subject: 'English', priority: 'medium', focusTopics: ['Grammar'] }),
+      makePlan({ learnerId, subject: 'Mathematics', priority: 'medium', masteryLevel: 'insufficient-data' }),
+    ];
+  });
+
+  const result = classInterventionService.getClassInterventionPlan(PHONE_HASH, CLASS_ID);
+
+  assert(result.summary.evaluatedLearners === 4, 'all 4 learners evaluated (one subject each)');
+  const bySubject = Object.fromEntries(result.commonFocusTopics.map((t) => [t.subject, t]));
+  assert(!!bySubject.Mathematics, 'Mathematics/Fractions surfaced as a common focus topic');
+  assert(bySubject.Mathematics && bySubject.Mathematics.percentage === 1, 'Mathematics percentage is 100% of Maths-evaluated learners, not 50% of the class');
+  assert(!!bySubject.English, 'English/Grammar surfaced as a common focus topic');
+  assert(bySubject.English && bySubject.English.percentage === 1, 'English percentage is 100% of English-evaluated learners, not 50% of the class');
+
+  restoreMocks();
+}
+
 function testPriorityBucketOrdering() {
   console.log('\nPriority bucket ordering: High -> Medium -> Low, alphabetical by learnerName within each bucket');
   mockRoster([1, 'Zanele'], [2, 'Amahle'], [3, 'Mpho']);
@@ -268,6 +304,7 @@ testOneLearnerThrows();
 testMultipleLearnersThrow();
 testMixedSubjectsWorstWins();
 testCommonFocusTopicsExcludeInsufficientData();
+testCommonFocusTopicsPercentageIsSubjectScoped();
 testPriorityBucketOrdering();
 testEmptyRoster();
 
