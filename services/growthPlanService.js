@@ -274,6 +274,23 @@ function deleteGrowthPlan(phoneHash, id) {
     )
     .run(id, phoneHash);
 
+  // PR37, ADR-016 §2 (revised, evidence-event philosophy): a soft-deleted
+  // growth plan drops out of getTaggedGrowthPlans() and therefore out of
+  // evidenceScore/recencyScore/hasActiveGrowthPlan for its topic — a
+  // genuine evidence change, so it triggers a snapshot the same as a
+  // create (see createGrowthPlan above) or a status/topic change (see
+  // updateGrowthPlan above). Only fires if this call actually deleted
+  // something. Mirrors deleteReflection()'s identical fix in
+  // reflectionService.js. Required lazily to avoid a load-order cycle
+  // (coachingSnapshotService -> coachingEngineService -> this module).
+  if (result.changes > 0) {
+    try {
+      require('./coachingSnapshotService').recordSnapshotsForTeacher(phoneHash);
+    } catch (err) {
+      console.error('[coachingSnapshotService] snapshot write failed after deleteGrowthPlan:', err);
+    }
+  }
+
   return result.changes > 0;
 }
 

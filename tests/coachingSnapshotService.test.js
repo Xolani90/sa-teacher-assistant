@@ -25,6 +25,7 @@
  *   6d. reflectionService.updateReflection triggers only when topicId
  *      changes — a content-only edit is not a trigger.
  *   6e. reflectionService.deleteReflection triggers a snapshot.
+ *   6f. growthPlanService.deleteGrowthPlan triggers a snapshot (mirrors 6e).
  *   7. Read paths never write: calling getCoachingInsights (a read) does
  *      not itself create any coaching_snapshots rows (§9 invariant 1).
  *
@@ -244,6 +245,18 @@ async function run() {
     const afterDelete = snapshotRows(PHONE, TOPIC_A);
     assertEq(afterDelete.length, 1, 'still one row (same-day update, not a new insert)');
     assertEq(afterDelete[0].confidence, 0, 'confidence drops to 0 once the only evidence is deleted');
+  }
+
+  console.log('\nTest 7c-2: deleting a growth plan triggers a snapshot, capturing the drop to zero evidence');
+  clearAll();
+  {
+    const plan = growthPlanService.createGrowthPlan(PHONE, { goalText: 'goal', topicId: TOPIC_A });
+    const beforeDelete = snapshotRows(PHONE, TOPIC_A);
+    assert(beforeDelete.length === 1 && beforeDelete[0].confidence > 0, 'sanity: topic has a positive-confidence snapshot before deletion');
+    growthPlanService.deleteGrowthPlan(PHONE, plan.id);
+    const afterDelete = snapshotRows(PHONE, TOPIC_A);
+    assertEq(afterDelete.length, 1, 'still one row (same-day update, not a new insert)');
+    assertEq(afterDelete[0].confidence, 0, 'confidence drops to 0 once the only evidence (the growth plan) is deleted');
   }
 
   console.log('\nTest 7d: a topic the teacher never touches gets no snapshot row at all');
