@@ -440,7 +440,17 @@ function handleCurriculumQuery(text, profile = {}) {
     return buildGeneralATPStatus(atpInfo);
   }
 
-  const term = atpInfo.isInTerm ? atpInfo.term : (atpInfo.nextTerm ? atpInfo.nextTerm - 1 : 4);
+  // Outside term time, prefer the term getCurrentATPWeek() already resolved
+  // (e.g. Term 4 during the December holidays) rather than re-deriving it as
+  // `nextTerm - 1`. That re-derivation breaks whenever nextTerm is 1 — i.e.
+  // exactly the December (post-Term-4) and January (pre-Term-1) year-boundary
+  // cases — producing an invalid term 0, which getTermTopics() can never
+  // resolve, so teachers were wrongly told "no CAPS reference data" for a
+  // grade/subject that has full data, instead of getting Term 4's completed
+  // coverage (December) or Term 1's upcoming topics (January).
+  const term = atpInfo.isInTerm
+    ? atpInfo.term
+    : (atpInfo.term != null ? atpInfo.term : (atpInfo.nextTerm || 4));
   const week = atpInfo.weekInTerm || (atpInfo.isInTerm ? atpInfo.totalWeeksInTerm : null);
 
   const termTopics   = getTermTopics(grade, subject, term);
@@ -453,7 +463,11 @@ function handleCurriculumQuery(text, profile = {}) {
     return buildNoReferenceDataMessage({ grade, subject });
   }
 
-  const weeksElapsed = atpInfo.isInTerm ? atpInfo.weekInTerm : atpInfo.totalWeeksInTerm;
+  // Before Term 1 has started, totalWeeksInTerm is 0 (no term is active yet).
+  // Falling back to 0 here would make getTopicsForWeek() compute a negative
+  // "completed" slice index against the resolved term's topic list. Treat
+  // that case as "week 1, nothing completed yet" instead.
+  const weeksElapsed = atpInfo.isInTerm ? atpInfo.weekInTerm : (atpInfo.totalWeeksInTerm || 1);
   const totalWeeks   = atpInfo.totalWeeksInTerm || 10;
   const { currentTopics, completedTopics, upcomingTopics } = getTopicsForWeek(grade, subject, term, weeksElapsed);
 
