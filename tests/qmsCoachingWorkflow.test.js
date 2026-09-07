@@ -46,7 +46,13 @@ require.cache['better-sqlite3'] = {
   },
 };
 
-process.env.DB_PATH = path.join(__dirname, '..', 'qms-coaching-workflow-test.db');
+// A fixed shared filename here can collide with a leftover file from a
+// prior run that's still locked (e.g. a crashed process, antivirus scan,
+// or a parallel test run on Windows), producing an opaque "disk I/O error"
+// from better-sqlite3/node:sqlite that has nothing to do with this test's
+// own logic. Use a per-run unique filename instead, same convention as
+// tests/migration-036-learner-intervention-writer.test.js.
+process.env.DB_PATH = path.join(__dirname, '..', `qms-coaching-workflow-test-${process.pid}-${Date.now()}.db`);
 if (fs.existsSync(process.env.DB_PATH)) fs.unlinkSync(process.env.DB_PATH);
 _db = new DatabaseSync(process.env.DB_PATH);
 

@@ -153,11 +153,20 @@ async function runInterleavedScenario(simulateFn) {
 
   store.set(phoneHash, { generationId: 'gen-c2-1', saveState: 'GENERATED' });
 
-  // Call A starts first.
+  // Call A starts first. An async function's body runs SYNCHRONOUSLY up to
+  // its first `await` — so by the time this line finishes, A has already
+  // taken the lock, committed to the DB, and is suspended inside
+  // fakeSend(). That is guaranteed by JS semantics, not by scheduling, so
+  // Call B can be started immediately below with no timing dependency.
+  //
+  // (This used to `await new Promise(r => setImmediate(r))` between the two
+  // calls to "let A run first." That extra macrotask hop was never needed
+  // for correctness and introduced a real race under load: if the event
+  // loop is busy enough that the setImmediate callback is delayed past
+  // fakeSend's 15ms timer, Call A can finish and release its lock before
+  // Call B ever starts, so B sees no lock and neither call reports
+  // concurrent_blocked. Removing the hop removes that race entirely.)
   const callA = simulateFn({ store, lockSet, phoneHash, db, fakeSend, sentLog, label: 'A' });
-  // Let Call A run synchronously up to its first await (DB commit already
-  // happened by this point — saveState is now RECOVERABLE in the store).
-  await new Promise(r => setImmediate(r));
   // Call B now lands while Call A is suspended inside fakeSend(), exactly
   // like a second WhatsApp message arriving moments after the first.
   const callB = simulateFn({ store, lockSet, phoneHash, db, fakeSend, sentLog, label: 'B' });
