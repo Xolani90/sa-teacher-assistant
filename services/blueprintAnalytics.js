@@ -170,8 +170,19 @@ function getBlueprintAssessmentAnalytics(assessmentId) {
   // question-number order (Array.sort is stable in Node), so results are
   // reproducible rather than depending on Map iteration happenstance.
   const rankedTopics = [...topics].sort((a, b) => b.classAveragePercentage - a.classAveragePercentage);
-  const strongestTopics = rankedTopics.slice(0, 3).map(({ topic, classAveragePercentage }) => ({ topic, classAveragePercentage }));
-  const weakestTopics = rankedTopics.slice(-3).reverse().map(({ topic, classAveragePercentage }) => ({ topic, classAveragePercentage }));
+
+  // Split the ranked list in half before capping each side at 3, so that
+  // strongestTopics and weakestTopics never overlap for blueprints with a
+  // small number of distinct topics (previously two independent slices of
+  // the same array could overlap, or even be identical, whenever the
+  // blueprint had 5 or fewer distinct topics).
+  const topicCount = rankedTopics.length;
+  const strongestCount = Math.min(3, Math.ceil(topicCount / 2));
+  const weakestCount = Math.min(3, topicCount - strongestCount);
+  const strongestTopics = rankedTopics.slice(0, strongestCount).map(({ topic, classAveragePercentage }) => ({ topic, classAveragePercentage }));
+  const weakestTopics = weakestCount > 0
+    ? rankedTopics.slice(topicCount - weakestCount).reverse().map(({ topic, classAveragePercentage }) => ({ topic, classAveragePercentage }))
+    : [];
 
   return {
     assessmentId,

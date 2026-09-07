@@ -218,6 +218,16 @@ async function run() {
   assertEq(analytics.strongestTopics[0].topic, 'fractions', 'fractions ranks as the strongest topic');
   assertEq(analytics.weakestTopics[0].topic, 'algebra', 'algebra ranks as the weakest topic');
 
+  // Regression: with only 2 distinct topics on the blueprint, strongestTopics
+  // and weakestTopics must not overlap — a topic can't be simultaneously
+  // reported to a teacher as a class strength and a class weakness.
+  const strongestTopicNames = new Set(analytics.strongestTopics.map((t) => t.topic));
+  const weakestTopicNames = new Set(analytics.weakestTopics.map((t) => t.topic));
+  const overlap = [...strongestTopicNames].filter((t) => weakestTopicNames.has(t));
+  assertEq(overlap, [], 'strongestTopics and weakestTopics share no topics (2-topic blueprint)');
+  assertEq(analytics.strongestTopics.length, 1, 'strongestTopics has exactly 1 entry when only 2 topics exist');
+  assertEq(analytics.weakestTopics.length, 1, 'weakestTopics has exactly 1 entry when only 2 topics exist');
+
   // ═══════════════════════════════════════════════════════════════════
   // SECTION 4: Per-learner breakdown, including the incomplete learner
   // ═══════════════════════════════════════════════════════════════════
@@ -235,6 +245,51 @@ async function run() {
   const naledifractions = naledi.topics.find((t) => t.topic === 'fractions');
   assertEq(naledifractions.marksAwarded, 15, "Naledi's fractions marks: Q1(10)+Q2(5) = 15 (full marks)");
   assertClose(naledifractions.percentage, 100, "Naledi's fractions percentage is 100%");
+
+  // ═══════════════════════════════════════════════════════════════════
+  // SECTION 5: 6+ distinct topics — strongest/weakest each keep their
+  // full cap of 3, disjoint, matching pre-fix behavior for larger blueprints
+  // ═══════════════════════════════════════════════════════════════════
+  console.log('\n── Section 5: strongest/weakest with 6 distinct topics ───────────────');
+
+  const wideDraft = createBlueprint(
+    PHONE,
+    { title: 'Wide Topic Test', subject: 'Life Orientation', grade: 6, term: 2, totalMarks: 60 },
+    [
+      { questionNumber: 1, topic: 'topicA', maxMarks: 10 },
+      { questionNumber: 2, topic: 'topicB', maxMarks: 10 },
+      { questionNumber: 3, topic: 'topicC', maxMarks: 10 },
+      { questionNumber: 4, topic: 'topicD', maxMarks: 10 },
+      { questionNumber: 5, topic: 'topicE', maxMarks: 10 },
+      { questionNumber: 6, topic: 'topicF', maxMarks: 10 },
+    ]
+  );
+  const widePublished = publishBlueprint(wideDraft.blueprintId, PHONE);
+
+  // One learner, full marks on A-C, zero on D-F, so ranking is unambiguous.
+  const wideDiagnostic = processAssessmentData(PHONE, {
+    title: 'Wide Topic Test',
+    grade: 6,
+    subject: 'Life Orientation',
+    term: 2,
+    type: 'test',
+    totalMarks: 60,
+    blueprintId: widePublished.blueprintId,
+    blueprintVersion: 1,
+    learnerResults: [
+      { learnerName: 'Wide Learner', questionData: { '1': 10, '2': 10, '3': 10, '4': 0, '5': 0, '6': 0 } },
+    ],
+  });
+  const wideAnalytics = getBlueprintAssessmentAnalytics(wideDiagnostic.assessmentId);
+  assert(!wideAnalytics.error, 'wide-topic analytics computed without error');
+  assertEq(wideAnalytics.strongestTopics.length, 3, 'strongestTopics keeps its full cap of 3 with 6 distinct topics');
+  assertEq(wideAnalytics.weakestTopics.length, 3, 'weakestTopics keeps its full cap of 3 with 6 distinct topics');
+  const wideStrongestNames = new Set(wideAnalytics.strongestTopics.map((t) => t.topic));
+  const wideWeakestNames = new Set(wideAnalytics.weakestTopics.map((t) => t.topic));
+  const wideOverlap = [...wideStrongestNames].filter((t) => wideWeakestNames.has(t));
+  assertEq(wideOverlap, [], 'strongestTopics and weakestTopics share no topics (6-topic blueprint)');
+  assertEq(['topicA', 'topicB', 'topicC'].every((t) => wideStrongestNames.has(t)), true, 'topicA/B/C (full marks) are the strongest topics');
+  assertEq(['topicD', 'topicE', 'topicF'].every((t) => wideWeakestNames.has(t)), true, 'topicD/E/F (zero marks) are the weakest topics');
 
   // ── Summary ─────────────────────────────────────────────────────────
   console.log(`\n${'─'.repeat(55)}`);
