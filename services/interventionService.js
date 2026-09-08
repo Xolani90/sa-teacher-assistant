@@ -91,7 +91,7 @@ function determinePriority(mastery) {
 function extractFocusTopics(coverageReports) {
   if (!coverageReports || coverageReports.length === 0) return [];
   const latest = [...coverageReports].sort(
-    (a, b) => b.term - a.term || b.grade - a.grade
+    (a, b) => b.grade - a.grade || b.term - a.term
   )[0];
   if (!latest || !latest.dataAvailable) return [];
   return latest.missingTopics || [];

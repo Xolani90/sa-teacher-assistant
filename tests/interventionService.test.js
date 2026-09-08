@@ -152,6 +152,29 @@ console.log('\n--- extractFocusTopics ---');
     JSON.stringify(interventionService.extractFocusTopics(multi)) === JSON.stringify(['Newest topic']),
     'multiple groups -> only the highest-term (most recent) group\'s missingTopics'
   );
+
+  // Regression — Pass 6, P1-04. Cross-grade recency: term resets to 1 at
+  // the start of each new grade, so a higher term number in an OLDER
+  // grade must NOT outrank a lower term number in a NEWER grade.
+  const crossGrade = [
+    { subject: 'mathematics', grade: 6, term: 4, dataAvailable: true, missingTopics: ['OLD_GRADE6_T4_TOPIC'] },
+    { subject: 'mathematics', grade: 7, term: 1, dataAvailable: true, missingTopics: ['NEW_GRADE7_T1_TOPIC'] },
+  ];
+  assert(
+    JSON.stringify(interventionService.extractFocusTopics(crossGrade)) === JSON.stringify(['NEW_GRADE7_T1_TOPIC']),
+    'cross-grade: Grade 7 Term 1 (newer grade) selected over Grade 6 Term 4 (older grade, higher term number)'
+  );
+
+  // Same-grade behavior is preserved: within one grade, the higher term
+  // number is genuinely the more recent one.
+  const sameGrade = [
+    { subject: 'mathematics', grade: 7, term: 1, dataAvailable: true, missingTopics: ['G7_T1_TOPIC'] },
+    { subject: 'mathematics', grade: 7, term: 2, dataAvailable: true, missingTopics: ['G7_T2_TOPIC'] },
+  ];
+  assert(
+    JSON.stringify(interventionService.extractFocusTopics(sameGrade)) === JSON.stringify(['G7_T2_TOPIC']),
+    'same-grade: Term 2 selected over Term 1 within the same grade'
+  );
 }
 
 // ── buildRecommendedActions ─────────────────────────────────────────────
