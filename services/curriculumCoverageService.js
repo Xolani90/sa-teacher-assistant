@@ -112,17 +112,24 @@ function analyzeCoverage(phoneHash, grade, subject, term = null) {
     
     const coveredTopicNames = new Set(coveredTopics.map(t => t.topic));
     const outstandingTopics = expectedTopics.filter(t => !coveredTopicNames.has(t));
+    // Numerator must be "current expected topics that have been covered", not the raw
+    // count of covered-topic rows — a persisted row can reference a topic name that no
+    // longer appears in the current CAPS_TOPICS taxonomy (e.g. after a topic rename/
+    // removal), which would otherwise inflate the count past 100%. Deriving it from
+    // expectedTopics.length - outstandingTopics.length keeps it version-drift-safe and
+    // consistent with outstandingTopics, which is already correctly expected-set-scoped.
+    const coveredCount = expectedTopics.length - outstandingTopics.length;
     
-    const coveragePercentage = (coveredTopicNames.size / expectedTopics.length) * 100;
+    const coveragePercentage = (coveredCount / expectedTopics.length) * 100;
     
     results.push({
       term: currentTerm,
       expectedTopics: expectedTopics.length,
-      coveredTopics: coveredTopicNames.size,
+      coveredTopics: coveredCount,
       outstandingTopics: outstandingTopics.length,
       coveragePercentage: Math.round(coveragePercentage),
       outstandingTopicList: outstandingTopics,
-      coveredTopicList: Array.from(coveredTopicNames),
+      coveredTopicList: expectedTopics.filter(t => coveredTopicNames.has(t)),
     });
   }
   
