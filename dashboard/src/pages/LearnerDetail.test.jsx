@@ -212,4 +212,68 @@ describe('LearnerDetail', () => {
     expect(screen.getByText('Sipho Nkosi')).toBeInTheDocument();
     expect(screen.queryByText('Naledi Dube')).not.toBeInTheDocument();
   });
+
+  it('does not let a stale Retry response for a previous learner overwrite the current learner after navigating away', async () => {
+    // Regression test: unlike the effect-triggered fetch above (already
+    // guarded), the Retry button calls load() directly with no
+    // cancellation context of its own. Sequence: learner-1 fails, the
+    // teacher clicks Retry (fetch #2 for learner-1, left pending), then
+    // navigates to learner-2 before the retry resolves. learner-2 loads
+    // fine; the stale retry for learner-1 must not then overwrite it.
+    let learner1CallCount = 0;
+    let resolveLearner1Retry;
+    const learner1RetryPromise = new Promise((res) => { resolveLearner1Retry = res; });
+
+    const fetchMock = vi.fn((url) => {
+      if (url.includes('learner-1')) {
+        learner1CallCount += 1;
+        if (learner1CallCount === 1) {
+          // Initial effect-triggered load for learner-1 fails.
+          return Promise.resolve({ ok: false, status: 500, text: async () => JSON.stringify({ error: 'Server error' }) });
+        }
+        // The Retry click's request — deliberately left pending until
+        // resolveLearner1Retry() is called below.
+        return learner1RetryPromise.then(() => ({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ ...BASE_DETAIL, learner: { ...BASE_DETAIL.learner, name: 'Naledi Dube' } }),
+        }));
+      }
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ ...BASE_DETAIL, learner: { ...BASE_DETAIL.learner, name: 'Sipho Nkosi', classId: 'class-2' } }),
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    renderWithProviders(
+      <>
+        <GoToLearner2Button />
+        <Routes>
+          <Route path="/learners/:learnerId" element={<LearnerDetail />} />
+          <Route path="/classes" element={<div>Classes list page</div>} />
+          <Route path="/classes/:classId" element={<div>Class detail page</div>} />
+          <Route path="/observations/:assessmentId" element={<div>Observation detail page</div>} />
+        </Routes>
+      </>,
+      { route: '/learners/learner-1', authenticated: true }
+    );
+
+    const user = userEvent.setup();
+    await screen.findByText('Server error');
+    await user.click(screen.getByRole('button', { name: 'Retry' }));
+
+    // Navigate to learner-2 while the retry for learner-1 is still pending.
+    await user.click(screen.getByText('go'));
+    await screen.findByText('Sipho Nkosi');
+
+    // Now let the stale retry for learner-1 finally resolve.
+    resolveLearner1Retry();
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(screen.getByText('Sipho Nkosi')).toBeInTheDocument();
+    expect(screen.queryByText('Naledi Dube')).not.toBeInTheDocument();
+  });
 });

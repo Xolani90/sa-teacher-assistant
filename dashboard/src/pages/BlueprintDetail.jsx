@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useTeacher } from '../auth/TeacherContext';
 import { ApiError } from '../api/client';
@@ -39,34 +39,34 @@ export default function BlueprintDetail() {
   const [blueprint, setBlueprint] = useState(null);
   const [error, setError] = useState(null);
 
-  const load = useCallback(
-    async ({ cancelledRef } = {}) => {
-      setStatus(STATUS_LOADING);
-      setError(null);
-      try {
-        const res = await authedFetch(`/api/blueprints/${blueprintId}`);
-        if (cancelledRef?.current) return;
-        setBlueprint(res?.blueprint || null);
-        setStatus(STATUS_READY);
-      } catch (err) {
-        if (cancelledRef?.current) return;
-        setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
-        setStatus(STATUS_ERROR);
-      }
-    },
-    [authedFetch, blueprintId]
-  );
+  // A persistent (not effect-scoped) request token. The previous
+  // effect-scoped `cancelledRef` only guarded the effect-triggered call —
+  // the Retry button below calls `load()` directly with no cancelledRef
+  // at all, so a slow-resolving retry for a previous blueprintId could
+  // still overwrite the currently-viewed state after the teacher
+  // navigated away before the retry resolved. A token that lives in a
+  // ref for the whole component instance closes that gap for both call
+  // sites uniformly.
+  const loadTokenRef = useRef(0);
 
-  // Guard against a slow-resolving request for a previous blueprintId
-  // overwriting the currently-viewed blueprint's state after rapid
-  // navigation between two blueprint detail pages (same pattern as
-  // ClassDetail.jsx / LearnerDetail.jsx, Cycle 14).
+  const load = useCallback(async () => {
+    const token = ++loadTokenRef.current;
+    setStatus(STATUS_LOADING);
+    setError(null);
+    try {
+      const res = await authedFetch(`/api/blueprints/${blueprintId}`);
+      if (loadTokenRef.current !== token) return;
+      setBlueprint(res?.blueprint || null);
+      setStatus(STATUS_READY);
+    } catch (err) {
+      if (loadTokenRef.current !== token) return;
+      setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
+      setStatus(STATUS_ERROR);
+    }
+  }, [authedFetch, blueprintId]);
+
   useEffect(() => {
-    const cancelledRef = { current: false };
-    load({ cancelledRef });
-    return () => {
-      cancelledRef.current = true;
-    };
+    load();
   }, [load]);
 
   const topicRows = blueprint ? buildTopicWeighting(blueprint) : [];
