@@ -216,4 +216,55 @@ describe('IncidentsWorkspace', () => {
     expect(await screen.findByText('createIncident: description is required')).toBeInTheDocument();
     expect(screen.getByText('Log a New Incident')).toBeInTheDocument();
   });
+
+  it('does not let a stale response for a previous filter selection overwrite the list after the filter changes again', async () => {
+    // Regression test: load() previously had no request-token/cancellation
+    // guard at all. Selecting INJURY (slow to resolve) then quickly
+    // switching to DISCIPLINE (resolves fast) must show DISCIPLINE's
+    // results, not have them overwritten when INJURY's stale response
+    // finally arrives.
+    let resolveInjury;
+    const injuryPromise = new Promise((res) => { resolveInjury = res; });
+    const fetchMock = vi.fn((url, options = {}) => {
+      const method = options.method || 'GET';
+      if (method === 'POST') return Promise.resolve({ ok: true, status: 201, text: async () => JSON.stringify({ incident: { id: 'new1' } }) });
+      const params = new URL(url, 'http://localhost').searchParams;
+      const incidentType = params.get('incidentType');
+      if (incidentType === 'INJURY') {
+        return injuryPromise.then(() => ({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ incidents: INCIDENTS.filter((i) => i.incidentType === 'INJURY') }),
+        }));
+      }
+      if (incidentType === 'DISCIPLINE') {
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          text: async () => JSON.stringify({ incidents: INCIDENTS.filter((i) => i.incidentType === 'DISCIPLINE') }),
+        });
+      }
+      return Promise.resolve({ ok: true, status: 200, text: async () => JSON.stringify({ incidents: INCIDENTS }) });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const user = userEvent.setup();
+    renderWorkspace();
+    await screen.findByText(/Learner fell during break/);
+
+    const select = screen.getByLabelText('Filter by incident type');
+    await user.selectOptions(select, 'INJURY'); // fires the slow request, left pending
+    await user.selectOptions(select, 'DISCIPLINE'); // fires a second, fast-resolving request
+
+    await screen.findByText(/arguing during group work/);
+    expect(screen.queryByText(/Learner fell during break/)).not.toBeInTheDocument();
+
+    // Now let the stale INJURY response resolve.
+    resolveInjury();
+    await new Promise((r) => setTimeout(r, 0));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(screen.getByText(/arguing during group work/)).toBeInTheDocument();
+    expect(screen.queryByText(/Learner fell during break/)).not.toBeInTheDocument();
+  });
 });

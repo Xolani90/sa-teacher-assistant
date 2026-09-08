@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTeacher } from '../auth/TeacherContext';
 import { ApiError } from '../api/client';
@@ -59,7 +59,17 @@ export default function IncidentsWorkspace() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState(null);
 
+  // A request token guards against out-of-order responses: unlike the
+  // fixed detail pages, this load() had no guard at all — changing a
+  // filter (or retrying, then changing a filter) before the previous
+  // request resolves could let a stale response for the OLD filter
+  // combination overwrite the incident list currently shown for the NEW
+  // filters, silently displaying results that don't match the visible
+  // filter controls.
+  const loadTokenRef = useRef(0);
+
   const load = useCallback(async () => {
+    const token = ++loadTokenRef.current;
     setStatus(STATUS_LOADING);
     setError(null);
     try {
@@ -69,9 +79,11 @@ export default function IncidentsWorkspace() {
       if (toDate) params.set('toDate', toDate);
       const qs = params.toString();
       const body = await authedFetch(`/api/incidents${qs ? `?${qs}` : ''}`);
+      if (loadTokenRef.current !== token) return;
       setIncidents(body?.incidents || []);
       setStatus(STATUS_READY);
     } catch (err) {
+      if (loadTokenRef.current !== token) return;
       setError(err instanceof ApiError ? err.message : 'Something went wrong. Please try again.');
       setStatus(STATUS_ERROR);
     }
