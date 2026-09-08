@@ -70,7 +70,15 @@ describe('Home', () => {
     expect(await screen.findByText('Server error')).toBeInTheDocument();
     // The hero command bar still renders even when stats failed to load.
     expect(screen.getByText('Copy message')).toBeInTheDocument();
-    expect(screen.getByText('No classes yet')).toBeInTheDocument();
+    // Regression: a failed fetch must not render as an honest empty
+    // result. classes/learnerCount are reset to []/0 on error (see the
+    // catch block in Home.jsx), which previously fell through to the
+    // same "No classes yet" card a teacher with zero real classes would
+    // see — misrepresenting a fetch failure as a successful empty
+    // account. Neither the stats cards nor the classes section (empty
+    // or populated) should render at all while `error` is set.
+    expect(screen.queryByText('No classes yet')).not.toBeInTheDocument();
+    expect(screen.queryByText('My Classes')).not.toBeInTheDocument();
   });
 
   it('falls back to a generic error message when the failure has no message', async () => {

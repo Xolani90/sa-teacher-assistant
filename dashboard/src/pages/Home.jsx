@@ -165,10 +165,18 @@ export default function Home() {
         </div>
       )}
 
-      {/* Real stats */}
+      {/* Real stats. Gated on !error as well as !loading: when the
+          /api/classes or /api/learners fetch fails, `classes`/`learnerCount`
+          are reset to []/0 in the catch block above (see comment there),
+          which would otherwise render as genuine "0 classes, 0 learners"
+          stats and a "No classes yet — create one on WhatsApp" empty state
+          directly below the error banner — presenting a fetch failure as
+          if the teacher's account is simply empty. The ErrorBanner above
+          is the only thing shown for this state; nothing here should imply
+          a successful, empty result. */}
       {loading ? (
         <Spinner label="Loading your overview…" />
-      ) : (
+      ) : !error ? (
         <section className="mb-7 grid grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-4">
           <Card className="p-5" style={{ animation: 'fadeSlideUp var(--duration-base) var(--ease-standard)' }}>
             <div className="flex items-center gap-4">
@@ -189,9 +197,14 @@ export default function Home() {
             </div>
           </Card>
         </section>
-      )}
+      ) : null}
 
-      {/* My Classes — real data */}
+      {/* My Classes — real data. Gated on !error for the same reason as
+          the stats section above: an empty `classes` array caused by a
+          failed fetch must not render the "No classes yet" empty state,
+          which would misleadingly tell a teacher who actually has classes
+          to go create one. */}
+      {!error && (
       <section className="mb-7">
         <SectionHeader
           title="My Classes"
@@ -231,6 +244,7 @@ export default function Home() {
           </div>
         )}
       </section>
+      )}
 
       {/* AI tools — honest roadmap, styled with the same polish */}
       <section>
