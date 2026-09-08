@@ -295,6 +295,57 @@ console.log('\n--- getLearnerMasteryForSubject (mocked seams) ---');
   restoreAll();
 }
 
+// ── buildStrengthsAndConcerns: "most recent (grade, term)" selection ──────
+// Regression — Pass 6, P1-03 (Mastery/Progress). The latestCoverage sort
+// used to pick which coverage group's missing topics to surface in
+// concerns[] sorted by term descending first, so a higher term number in
+// an OLDER grade (e.g. Grade 6 Term 4) outranked a lower term number in a
+// NEWER grade (e.g. Grade 7 Term 1) — term resets each grade, so term
+// alone is not a valid recency key. Fixed: grade is now the primary sort
+// key, term the secondary key within a grade.
+console.log('\n--- buildStrengthsAndConcerns: latestCoverage grade/term recency ---');
+{
+  // Grade transition: Grade 7 Term 1 is chronologically newer than
+  // Grade 6 Term 4, even though 4 > 1.
+  const reports = [
+    coverageReport({ grade: 6, term: 4, missingTopics: ['OLD_GRADE6_T4_TOPIC'] }),
+    coverageReport({ grade: 7, term: 1, missingTopics: ['NEW_GRADE7_T1_TOPIC'] }),
+  ];
+  const { concerns } = masteryService.buildStrengthsAndConcerns(
+    progressReport({ eventCount: 2, trend: 'flat' }), true, 60, reports
+  );
+  const missingLine = concerns.find((c) => c.startsWith('Missing topics'));
+  assert(!!missingLine, 'a missing-topics concern line is produced');
+  assert(missingLine.includes('NEW_GRADE7_T1_TOPIC'), 'grade transition: Grade 7 Term 1 (newer grade) is selected as most recent');
+  assert(!missingLine.includes('OLD_GRADE6_T4_TOPIC'), 'grade transition: Grade 6 Term 4 (older grade, higher term number) is NOT selected');
+}
+{
+  // Same grade: higher term number is genuinely more recent.
+  const reports = [
+    coverageReport({ grade: 7, term: 2, missingTopics: ['OLD_G7_T2_TOPIC'] }),
+    coverageReport({ grade: 7, term: 4, missingTopics: ['NEW_G7_T4_TOPIC'] }),
+  ];
+  const { concerns } = masteryService.buildStrengthsAndConcerns(
+    progressReport({ eventCount: 2, trend: 'flat' }), true, 60, reports
+  );
+  const missingLine = concerns.find((c) => c.startsWith('Missing topics'));
+  assert(missingLine.includes('NEW_G7_T4_TOPIC'), 'same grade: Term 4 (higher term, same grade) is selected as most recent');
+  assert(!missingLine.includes('OLD_G7_T2_TOPIC'), 'same grade: Term 2 (lower term, same grade) is NOT selected');
+}
+{
+  // Inverse grade transition, presented out of order: Grade 7 Term 1
+  // still outranks Grade 6 Term 4 regardless of array order.
+  const reports = [
+    coverageReport({ grade: 7, term: 1, missingTopics: ['NEW_GRADE7_T1_TOPIC'] }),
+    coverageReport({ grade: 6, term: 4, missingTopics: ['OLD_GRADE6_T4_TOPIC'] }),
+  ];
+  const { concerns } = masteryService.buildStrengthsAndConcerns(
+    progressReport({ eventCount: 2, trend: 'flat' }), true, 60, reports
+  );
+  const missingLine = concerns.find((c) => c.startsWith('Missing topics'));
+  assert(missingLine.includes('NEW_GRADE7_T1_TOPIC'), 'inverse order: Grade 7 Term 1 remains selected as most recent regardless of input order');
+}
+
 // ── Summary ──────────────────────────────────────────────────────────────
 console.log(`\n${passed} passed, ${failed} failed`);
 if (failed > 0) process.exit(1);

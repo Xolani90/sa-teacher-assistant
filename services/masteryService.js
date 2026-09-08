@@ -183,7 +183,7 @@ function buildStrengthsAndConcerns(progressReport, coverageDataAvailable, averag
   // Surface specific missing topics from the most recent (grade, term)
   // coverage group, if any — most actionable for a teacher reading this.
   const latestCoverage = [...coverageReportsForSubject].sort(
-    (a, b) => b.term - a.term || b.grade - a.grade
+    (a, b) => b.grade - a.grade || b.term - a.term
   )[0];
   if (latestCoverage && latestCoverage.dataAvailable && latestCoverage.missingTopics.length > 0) {
     concerns.push(`Missing topics (most recent term): ${latestCoverage.missingTopics.join(', ')}`);
