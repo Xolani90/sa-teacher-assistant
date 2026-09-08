@@ -97,6 +97,24 @@ const app = express();
 // same IP (the proxy) and rate limits fire incorrectly.
 app.set('trust proxy', 1);
 
+// ── Rate limiting (global) ───────────────────────────────────────────────────
+// RL-ORDER-01 fix: this must run before ANY route/static handler that can
+// send a response, including public static files, /privacy, and /.
+// Previously this was registered after those three surfaces, so they never
+// reached this middleware at all and were completely unthrottled. Moved here
+// — directly after trust-proxy, before anything that can short-circuit the
+// stack — so it genuinely applies "ahead of all routes" as already documented
+// in docs/releases/RC1-MILESTONE.md. Configuration (windowMs/max/keying/
+// message) is unchanged from before the move.
+app.use(rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200,
+  standardHeaders: true,
+  legacyHeaders: false,
+  trustProxy: true,
+  message: { error: 'Too many requests — please try again later.' },
+}));
+
 // ── Static files ─────────────────────────────────────────────────────────────
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -128,16 +146,6 @@ const { requireAdminSecret, adminLimiter } = require('./utils/adminAuth');
 // /api is now teacher-facing (requireTeacherAuth), not admin-facing.
 // /admin/stats and /admin/grant-pro remain on requireAdminSecret, unchanged.
 const { requireTeacherAuth, apiLimiter } = require('./utils/teacherAuth');
-
-// ── Rate limiting ──────────────────────────────────────────────────────────
-app.use(rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 200,
-  standardHeaders: true,
-  legacyHeaders: false,
-  trustProxy: true,
-  message: { error: 'Too many requests — please try again later.' },
-}));
 
 const webhookLimiter = rateLimit({
   windowMs: 60 * 1000,
