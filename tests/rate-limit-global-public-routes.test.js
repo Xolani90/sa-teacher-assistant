@@ -38,6 +38,7 @@
 
 const { spawn } = require('child_process');
 const http = require('http');
+const net = require('net');
 const path = require('path');
 const fs = require('fs');
 
@@ -85,15 +86,25 @@ function getStaticAsset(port) {
   return request(port, { path: '/about.html', method: 'GET' });
 }
 
+// TCP-level readiness probe, not an HTTP request: connects to the port and
+// immediately closes once the connection succeeds, without ever sending
+// bytes through Express. This deliberately avoids GET /healthz (or any
+// other route) here, because every route in server.js — including
+// /healthz — sits behind the global rate limiter this test measures.
+// An HTTP readiness poll would consume part of the same 200-request
+// budget the threshold loop below assumes is untouched. See
+// tests/rate-limit-global-public-routes.test.js history for the
+// regression this caused.
 function waitForServer(port, timeoutMs = 8000) {
   const start = Date.now();
   return new Promise((resolve, reject) => {
     (function attempt() {
-      const req = http.get({ host: 'localhost', port, path: '/healthz' }, res => {
-        res.resume();
+      const socket = net.connect({ host: 'localhost', port }, () => {
+        socket.destroy();
         resolve();
       });
-      req.on('error', () => {
+      socket.on('error', () => {
+        socket.destroy();
         if (Date.now() - start > timeoutMs) return reject(new Error('server did not start in time'));
         setTimeout(attempt, 150);
       });
