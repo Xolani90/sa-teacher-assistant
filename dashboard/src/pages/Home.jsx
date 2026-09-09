@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTeacher } from '../auth/TeacherContext';
 import Layout from '../components/Layout';
 import { Card, Button, Spinner, IconBadge, SectionHeader, Pill, ErrorBanner } from '../components/ui';
+import { parseSqliteUtc } from '../utils/dateFormat';
 
 // Real commands the WhatsApp bot actually supports today (see README.md
 // "Supported commands"). The command bar below is a reference/copy tool,
@@ -44,6 +45,19 @@ const NOT_YET_ON_DASHBOARD = [
   { icon: '🎯', tone: 'amber', title: 'Intervention Insights', note: 'Coming to the dashboard' },
 ];
 
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const THREE_WEEKS_MS = 21 * 24 * 60 * 60 * 1000;
+
+// Counts items whose createdAt falls within the last `windowMs`, relative
+// to `now`. Shared by the weekly pulse and the needs-attention nudge below
+// so both agree on what "recent" means.
+function countRecent(items, windowMs, now) {
+  return items.filter((item) => {
+    const created = parseSqliteUtc(item.createdAt);
+    return created && now - created.getTime() <= windowMs;
+  }).length;
+}
+
 // Real stats only — computed from the two endpoints that actually exist
 // (GET /api/classes, GET /api/learners). No fabricated coverage,
 // performance, or "hours saved" numbers until a backend service
@@ -57,6 +71,14 @@ export default function Home() {
   const [error, setError] = useState(null);
   const [classes, setClasses] = useState([]);
   const [learnerCount, setLearnerCount] = useState(0);
+
+  // Weekly pulse + needs-attention nudge: a second, independent fetch from
+  // the stats above. It's deliberately allowed to fail quietly (see catch
+  // below) — a hiccup fetching "how active was I this week" shouldn't take
+  // down the classes/learners stats that already work, and it's not
+  // something worth an ErrorBanner over.
+  const [pulse, setPulse] = useState(null); // null = not loaded / unavailable
+  const [needsAttention, setNeedsAttention] = useState([]);
 
   const [activeCommand, setActiveCommand] = useState(COMMANDS[0]);
   const [copied, setCopied] = useState(false);
@@ -72,8 +94,50 @@ export default function Home() {
           authedFetch('/api/learners'),
         ]);
         if (cancelled) return;
-        setClasses(classesRes?.classes || []);
+        const loadedClasses = classesRes?.classes || [];
+        setClasses(loadedClasses);
         setLearnerCount((learnersRes?.learners || []).length);
+
+        // Independent try/catch: this section is a bonus view on top of
+        // data other pages already own (Assessments Workspace,
+        // Observations, Reflections & Goals) — if it fails to load, the
+        // rest of Overview should still work normally.
+        try {
+          const [assessmentsRes, observationsRes, reflectionsRes] = await Promise.all([
+            authedFetch('/api/assessments'),
+            authedFetch('/api/observations'),
+            authedFetch('/api/reflections'),
+          ]);
+          if (cancelled) return;
+          const assessments = assessmentsRes?.assessments || [];
+          const observations = observationsRes?.observations || [];
+          const reflections = reflectionsRes?.reflections || [];
+          const now = Date.now();
+
+          setPulse({
+            assessments: countRecent(assessments, SEVEN_DAYS_MS, now),
+            observations: countRecent(observations, SEVEN_DAYS_MS, now),
+            reflections: countRecent(reflections, SEVEN_DAYS_MS, now),
+          });
+
+          const classIdsWithRecentAssessment = new Set(
+            assessments
+              .filter((a) => {
+                const created = parseSqliteUtc(a.createdAt);
+                return created && now - created.getTime() <= THREE_WEEKS_MS;
+              })
+              .map((a) => a.class?.id)
+              .filter((id) => id != null)
+          );
+          setNeedsAttention(
+            loadedClasses.filter((c) => !classIdsWithRecentAssessment.has(c.id)).slice(0, 3)
+          );
+        } catch {
+          if (!cancelled) {
+            setPulse(null);
+            setNeedsAttention([]);
+          }
+        }
       } catch (err) {
         if (!cancelled) {
           setError(err?.message || 'Could not load your dashboard.');
@@ -244,6 +308,79 @@ export default function Home() {
           </div>
         )}
       </section>
+      )}
+
+      {/* Weekly pulse — real activity counts, not a fabricated "hours
+          saved" metric. Only rendered once loaded successfully; if the
+          background fetch failed, `pulse` stays null and this section
+          simply doesn't appear (see the independent try/catch above) —
+          Overview as a whole still works. */}
+      {!error && !loading && pulse && (
+        <section className="mb-7">
+          <SectionHeader title="This week" subtitle="Real activity from your account, last 7 days" />
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-4">
+            <Card className="p-5">
+              <div className="flex items-center gap-4">
+                <IconBadge tone="mint">📝</IconBadge>
+                <div>
+                  <div className="text-2xl font-bold leading-tight tracking-tight text-accent">{pulse.assessments}</div>
+                  <div className="mt-1 text-sm text-text-secondary">
+                    Assessment{pulse.assessments === 1 ? '' : 's'} captured
+                  </div>
+                </div>
+              </div>
+            </Card>
+            <Card className="p-5">
+              <div className="flex items-center gap-4">
+                <IconBadge tone="indigo">◎</IconBadge>
+                <div>
+                  <div className="text-2xl font-bold leading-tight tracking-tight text-accent">{pulse.observations}</div>
+                  <div className="mt-1 text-sm text-text-secondary">
+                    Observation{pulse.observations === 1 ? '' : 's'} logged
+                  </div>
+                </div>
+              </div>
+            </Card>
+            <Card className="p-5">
+              <div className="flex items-center gap-4">
+                <IconBadge tone="lavender">✎</IconBadge>
+                <div>
+                  <div className="text-2xl font-bold leading-tight tracking-tight text-accent">{pulse.reflections}</div>
+                  <div className="mt-1 text-sm text-text-secondary">
+                    Reflection{pulse.reflections === 1 ? '' : 's'} added
+                  </div>
+                </div>
+              </div>
+            </Card>
+          </div>
+        </section>
+      )}
+
+      {/* Needs a nudge — classes with no assessment captured in the last
+          3 weeks. Deterministic, derived entirely from real
+          GET /api/assessments + GET /api/classes data (no AI, no
+          heuristic scoring) — same "class has an assessment or it
+          doesn't" check a teacher could do by hand. Capped at 3 so it
+          reads as a nudge, not a guilt list. */}
+      {!error && !loading && needsAttention.length > 0 && (
+        <section className="mb-7">
+          <SectionHeader title="Could use a nudge" subtitle="No assessment captured in the last 3 weeks" />
+          <div className="grid grid-cols-[repeat(auto-fit,minmax(240px,1fr))] gap-4">
+            {needsAttention.map((c) => (
+              <Card key={c.id} onClick={() => navigate(`/classes/${c.id}`)} className="p-5">
+                <div className="flex items-center gap-3">
+                  <IconBadge tone="amber" size={40}>👥</IconBadge>
+                  <div className="min-w-0">
+                    <div className="truncate text-base font-semibold">{c.name}</div>
+                    <div className="text-xs text-text-secondary">
+                      {[c.grade && `Grade ${c.grade}`, c.subject].filter(Boolean).join(' · ') || 'No grade/subject set'}
+                    </div>
+                  </div>
+                </div>
+              </Card>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* AI tools — honest roadmap, styled with the same polish */}

@@ -1,6 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import { useTeacher } from '../auth/TeacherContext';
 import { useTheme } from '../theme/ThemeContext';
+import CommandPalette from './CommandPalette';
 import logo from '../assets/logo.png';
 
 // Dashboard IA v1: flat sidebar, no grouping headers.
@@ -14,7 +15,10 @@ import logo from '../assets/logo.png';
 // optionally be generated from — related-but-distinct concepts a teacher
 // should be able to move between without scanning past unrelated items
 // (Observations, Reflections, Incident Book) in the sidebar.
-const NAV_ITEMS = [
+// Exported so CommandPalette.jsx can reuse the exact same destination
+// list/order for its "Go to" results, instead of maintaining a second copy
+// that could drift out of sync with the sidebar.
+export const NAV_ITEMS = [
   { to: '/app', label: 'Overview', icon: '◆', end: true },
   { to: '/classes', label: 'Classes', icon: '▤' },
   { to: '/resources', label: 'Resources', icon: '▦' },
@@ -125,6 +129,38 @@ export default function Layout({ children }) {
           }}
         >
           <button
+            onClick={() => window.dispatchEvent(new CustomEvent('open-command-palette'))}
+            aria-label="Quick jump search"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 'var(--space-2)',
+              background: 'var(--color-surface)',
+              border: '1px solid var(--color-border)',
+              borderRadius: 'var(--radius-full)',
+              padding: '0.4rem 0.85rem',
+              fontSize: 'var(--text-sm)',
+              color: 'var(--color-text-secondary)',
+              cursor: 'pointer',
+              marginRight: 'auto',
+            }}
+          >
+            <span aria-hidden="true">⌕</span>
+            Search
+            <kbd
+              style={{
+                marginLeft: 'var(--space-2)',
+                fontSize: 'var(--text-xs)',
+                border: '1px solid var(--color-border-strong)',
+                borderRadius: 'var(--radius-xs, 4px)',
+                padding: '0.05rem 0.35rem',
+                color: 'var(--color-text-tertiary)',
+              }}
+            >
+              ⌘K
+            </kbd>
+          </button>
+          <button
             onClick={handleLogout}
             style={{
               background: 'none',
@@ -159,6 +195,8 @@ export default function Layout({ children }) {
           {children}
         </main>
       </div>
+
+      <CommandPalette />
     </div>
   );
 }

@@ -28,6 +28,17 @@ const CLASSES = [
 const OK_ROUTES = {
   '/api/classes': { body: { classes: CLASSES } },
   '/api/learners': { body: { learners: [{ id: 'l1' }, { id: 'l2' }] } },
+  // Every class has a recent assessment by default, so the "Could use a
+  // nudge" section stays out of the way of tests that aren't specifically
+  // about it — see the 'needs-attention nudge' describe block below for
+  // tests that override this.
+  '/api/assessments': { body: { assessments: CLASSES.map((c, i) => ({
+    id: i + 1,
+    createdAt: new Date().toISOString().replace('T', ' ').slice(0, 19),
+    class: { id: c.id },
+  })) } },
+  '/api/observations': { body: { observations: [] } },
+  '/api/reflections': { body: { reflections: [] } },
 };
 
 function renderHome(options) {
@@ -93,7 +104,10 @@ describe('Home', () => {
     renderHome();
 
     expect(await screen.findByText('Classes')).toBeInTheDocument();
-    expect(screen.getByText('3')).toBeInTheDocument(); // classes.length
+    // getAllByText: the default OK_ROUTES assessments fixture also makes
+    // the weekly pulse's "Assessments captured" count equal 3, same as
+    // classes.length — both are legitimately on the page at once.
+    expect(screen.getAllByText('3').length).toBeGreaterThan(0); // classes.length
     expect(screen.getByText('Learners')).toBeInTheDocument();
     expect(screen.getByText('2')).toBeInTheDocument(); // learners.length
   });
@@ -205,5 +219,98 @@ describe('Home', () => {
     expect(screen.getByText('Coverage Reports')).toBeInTheDocument();
     expect(screen.getByText('Intervention Insights')).toBeInTheDocument();
     expect(screen.getAllByText('Coming to the dashboard').length).toBe(2);
+  });
+
+  describe('weekly pulse', () => {
+    const now = new Date();
+    const daysAgo = (n) => new Date(now.getTime() - n * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+
+    it('counts only items created in the last 7 days, per category', async () => {
+      mockFetchRoutes({
+        ...OK_ROUTES,
+        '/api/learners': { body: { learners: [{ id: 'l1' }, { id: 'l2' }, { id: 'l3' }, { id: 'l4' }, { id: 'l5' }] } },
+        '/api/assessments': { body: { assessments: [
+          { id: 1, createdAt: daysAgo(1), class: { id: 'class-1' } },
+          { id: 2, createdAt: daysAgo(2), class: { id: 'class-1' } },
+          { id: 3, createdAt: daysAgo(3), class: { id: 'class-1' } },
+          { id: 4, createdAt: daysAgo(4), class: { id: 'class-1' } },
+          { id: 5, createdAt: daysAgo(10), class: { id: 'class-1' } }, // outside window
+        ] } },
+        '/api/observations': { body: { observations: [
+          { id: 1, createdAt: daysAgo(2) },
+        ] } },
+        '/api/reflections': { body: { reflections: [] } },
+      });
+      renderHome();
+
+      await screen.findByText('This week');
+      expect(screen.getByText('4')).toBeInTheDocument(); // assessments this week
+      expect(screen.getByText('Assessments captured')).toBeInTheDocument();
+      expect(screen.getByText('1')).toBeInTheDocument(); // observations this week
+      expect(screen.getByText('Observation logged')).toBeInTheDocument(); // singular
+      expect(screen.getByText('0')).toBeInTheDocument(); // reflections this week
+    });
+
+    it('does not render the weekly pulse section when the background fetch fails', async () => {
+      mockFetchRoutes({
+        ...OK_ROUTES,
+        '/api/assessments': { body: { error: 'boom' }, ok: false, status: 500 },
+      });
+      renderHome();
+
+      await screen.findByText('Classes'); // main stats still load
+      expect(screen.queryByText('This week')).not.toBeInTheDocument();
+    });
+  });
+
+  describe('needs-attention nudge', () => {
+    const now = new Date();
+    const daysAgo = (n) => new Date(now.getTime() - n * 24 * 60 * 60 * 1000).toISOString().replace('T', ' ').slice(0, 19);
+
+    it('surfaces a class with no assessment in the last 3 weeks', async () => {
+      mockFetchRoutes({
+        ...OK_ROUTES,
+        '/api/assessments': { body: { assessments: [
+          { id: 1, createdAt: daysAgo(2), class: { id: 'class-1' } },
+        ] } },
+      });
+      renderHome();
+
+      await screen.findByText('Could use a nudge');
+      // Both class-2 and class-3 also appear in "My Classes" above, so
+      // there are two matching cards each — this only confirms the nudge
+      // section itself rendered them, not uniqueness across the page.
+      expect(screen.getAllByText('Grade 3 Literacy').length).toBeGreaterThan(0);
+      expect(screen.getAllByText('Unassigned Group').length).toBeGreaterThan(0);
+      expect(screen.getByText('No assessment captured in the last 3 weeks')).toBeInTheDocument();
+    });
+
+    it('does not render the nudge section when every class has a recent assessment', async () => {
+      mockFetchRoutes({
+        ...OK_ROUTES,
+        '/api/assessments': { body: { assessments: [
+          { id: 1, createdAt: daysAgo(1), class: { id: 'class-1' } },
+          { id: 2, createdAt: daysAgo(1), class: { id: 'class-2' } },
+          { id: 3, createdAt: daysAgo(1), class: { id: 'class-3' } },
+        ] } },
+      });
+      renderHome();
+
+      await screen.findByText('Classes');
+      expect(screen.queryByText('Could use a nudge')).not.toBeInTheDocument();
+    });
+
+    it('ignores assessments older than 3 weeks when deciding if a class needs a nudge', async () => {
+      mockFetchRoutes({
+        ...OK_ROUTES,
+        '/api/assessments': { body: { assessments: [
+          { id: 1, createdAt: daysAgo(30), class: { id: 'class-1' } },
+        ] } },
+      });
+      renderHome();
+
+      await screen.findByText('Could use a nudge');
+      expect(screen.getAllByText('Grade 8 Mathematics').length).toBeGreaterThan(0);
+    });
   });
 });
