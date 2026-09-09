@@ -655,6 +655,19 @@ deliberate scope choice for a bug.
 - No dashboard yet (PR29–32 analytics/QMS workspace/reporting/home analytics — RC2)
 - No mobile app (WhatsApp-only for RC1)
 - Localisation deferred to RC2
+- **Backup/restore:** Render provides daily disk snapshots (verified live,
+  2026-09-09), but the current Render plan exposes only destructive
+  in-place restoration and no isolated restore-to-new-disk/clone target.
+  The non-production restore drill required by ADR-020 and the
+  Infrastructure checklist below could not be safely executed as a
+  result. Production was not used as a restore target and no production
+  data was overwritten during this verification. This is an accepted
+  operational limitation, not a passed restore drill — see the
+  `Restore-from-backup tested at least once` checkbox below, which
+  remains unchecked and must not be read as PASS. ADR-021
+  (application-level backup) remains deferred beyond RC1.
+- **Payments (Yoco):** out of RC1 pilot scope per explicit project-owner
+  decision, 2026-09-09. Deferred to a post-RC1 phase.
 
 ---
 
@@ -756,7 +769,9 @@ Go/No-Go
 RC1 may be released only when:
 
 - [ ] Phase A passed
-- [ ] Phase B passed
+- [ ] Phase B passed (backup/restore: accepted operational limitation per
+      Accepted Limitations above, not a passed restore drill — see
+      Infrastructure checklist)
 - [ ] Deployment Verification passed
 - [ ] Phase C completed successfully
 - [ ] No Critical or High defects remain open
