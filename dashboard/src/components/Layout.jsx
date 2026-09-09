@@ -14,7 +14,7 @@ import logo from '../assets/logo.png';
 // Blueprint (ADR-005) is reusable question metadata that an Assessment can
 // optionally be generated from — related-but-distinct concepts a teacher
 // should be able to move between without scanning past unrelated items
-// (Observations, Reflections, Incident Book) in the sidebar.
+// (Observations, Reflections, Incidents) in the sidebar.
 // Exported so CommandPalette.jsx can reuse the exact same destination
 // list/order for its "Go to" results, instead of maintaining a second copy
 // that could drift out of sync with the sidebar.
@@ -26,7 +26,7 @@ export const NAV_ITEMS = [
   { to: '/blueprints', label: 'Assessment Blueprints', icon: '⚖' },
   { to: '/observations', label: 'Observations', icon: '◎' },
   { to: '/reflections', label: 'Reflections & Goals', icon: '✎' },
-  { to: '/incidents', label: 'Incident Book', icon: '⚠' },
+  { to: '/incidents', label: 'Incidents', icon: '⚠' },
   { to: '/qms', label: 'QMS & Readiness', icon: '✓' },
 ];
 
