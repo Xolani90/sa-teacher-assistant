@@ -43,14 +43,30 @@ has been running as a numbered sequence of priorities:
 
 Progress this session (2026-09-09) — logged in the checklist's
 "Verification log" section:
-- Live deployment reachable (`/healthz` 200, SPA shell served at `/`).
+- Live deployment reachable (`/healthz` 200).
+- **The dashboard is at `/app`, not the bare domain.** `/` serves the
+  public marketing landing page from `public/index.html` (1.4 MB,
+  login-free by design — payment-processor domain verification needs a
+  no-login page at the root); the SPA shell is at `/app`. The checklist's
+  first Setup box originally pointed at the bare domain and was corrected.
+  Do the browser pass against `/app`.
 - Confirmed the deployed bundle is built from current `main`, so the
   checklist verifies today's code and not a stale deploy.
 - API auth boundary verified live: all 21 GET endpoints return 401
   unauthenticated; garbage, wrong-scheme, empty, wrong-secret, expired,
   and unsigned `alg: none` tokens are all rejected.
 - Confirmed no teacher data reaches an unauthenticated visitor — inner SPA
-  URLs return only the 401-byte shell, no server-side rendering path.
+  URLs return only the shell, no server-side rendering path.
+- Fixed the dashboard test suite: **184/184 passing (was 182/184).**
+  `Login.test.jsx`'s failure had been carried across several commits as
+  "pre-existing, unrelated" — it was neither. The test mounted its Home
+  stub at `/` and asserted navigation there, but `Login.jsx` correctly
+  navigates to `/app`, so the test was asserting a route the app has never
+  had. Its `/` route is now a named tripwire, verified to fail loudly if
+  `navigate('/')` is ever reintroduced. The second failure
+  (`GrowthPlanPanel`, "keeps the form open when saving fails") was a
+  parallel-load flake — ~900ms alone, over 5000ms under a full run — fixed
+  by raising `testTimeout` suite-wide in `vite.config.js`.
 
 **Next steps:**
 1. The rest of RC2 P3 — the authenticated browser pass. **This is blocked
@@ -60,7 +76,13 @@ Progress this session (2026-09-09) — logged in the checklist's
    test records for the destructive boxes.
 2. Only after every box is genuinely observed: sign off P3, update
    `RC1-MILESTONE.md`'s dashboard note, and close the RC2 P1 M4 follow-up.
-3. Then pick RC2 P4 from the RC2 Backlog in `RC1-MILESTONE.md`
+3. Two small observations logged during the P3 pass, neither a blocker,
+   both open product calls rather than defects: `App.jsx` has no
+   `path="*"` catch-all and no `path="/"` route, so an unknown in-app URL
+   returns 200 and renders blank instead of a "not found" screen; and
+   there is no standalone `/reflections` page (reflections and growth
+   plans are panels inside `/qms`), which is worth confirming is intended.
+4. Then pick RC2 P4 from the RC2 Backlog in `RC1-MILESTONE.md`
    (localisation, dashboard PR29–32 analytics/QMS/reporting, analytics
    enhancements, advanced coaching, AI capability improvements) — plus the
    `auth_codes` retention/archival decision deferred out of RC1-H-003.
@@ -80,3 +102,9 @@ browser login. Nothing else is blocked.
 - ✓ Searching the deployed bundle for the copy quoted in `1c95ea5`'s
   commit message — those strings are source comments only, stripped by
   minification. Its absence is not evidence of a stale deploy.
+- ✓ Treating `Login.jsx`'s `navigate('/app')` as a bug. It is correct;
+  `/` is the Express-served landing page and `/app` is the SPA home. The
+  test was wrong, and it is now fixed and locked.
+- ✓ Investigating a "blank page at the site root". Checked live
+  2026-09-09: `/` returns the full 1.4 MB landing page, HTTP 200. There
+  is no blank-root defect.

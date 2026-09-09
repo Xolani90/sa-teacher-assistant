@@ -19,8 +19,11 @@ supposed to work.
 
 ## Setup
 
-- [x] Confirm the dashboard loads at `https://sa-teacher-assistant.onrender.com`
-      — verified 2026-09-09 (see Verification log, item 1)
+- [x] Confirm the dashboard loads at
+      `https://sa-teacher-assistant.onrender.com/app` — **note the `/app`
+      path.** The bare domain serves the public marketing landing page by
+      design, not the dashboard. Verified 2026-09-09 (Verification log,
+      item 1)
 - [ ] Log in via `Login.jsx` with a real teacher account
 - [ ] Confirm `ProtectedRoute.jsx` actually blocks dashboard pages when logged
       out (open an inner page URL directly in a private/incognito window
@@ -125,11 +128,29 @@ Performed 2026-09-09 against `https://sa-teacher-assistant.onrender.com`
 observed; nothing here is inferred from source reading alone unless the
 item says so explicitly.
 
-### 1. Deployment reachable
+### 1. Deployment reachable — and the dashboard is at `/app`, not `/`
 
 - `GET /healthz` → `200`,
   `{"status":"ok","service":"SA Teacher Assistant","version":"2.0.0"}`
-- `GET /` → `200`, serves the built SPA shell from `dashboard/dist`
+- `GET /` → `200`, **1,405,551 bytes — the public marketing landing page**
+  (`<title>SA Teacher Assistant — CAPS-Aligned Classroom Materials on
+  WhatsApp</title>`, no `<div id="root">`), served from `public/index.html`
+- `GET /app` → `200`, 402 bytes — the SPA shell
+  (`<title>Teacher Assistant</title>`, `<div id="root">`) from
+  `dashboard/dist`
+
+**Correction to an earlier draft of this log,** which claimed `GET /`
+serves the SPA shell. It does not, and the distinction is load-bearing for
+anyone working through this checklist: `server.js` registers a dedicated
+`app.get('/')` landing-page route *before* the dashboard catch-all,
+deliberately, because payment-processor domain verification requires a
+login-free page at the bare domain root. The teacher app lives at `/app`
+(`App.jsx` mounts `Home` at `path="/app"` behind `ProtectedRoute`).
+
+So **do the browser pass against `/app`, not the bare domain.** Opening
+the bare domain shows the marketing page and proves nothing about the
+dashboard. The original wording of the first Setup box below was misleading
+on exactly this point and has been corrected.
 
 ### 2. The deployed bundle is current — verification would exercise today's code
 
@@ -201,12 +222,26 @@ browser pass below rather than tested by firing them at production.
 ### 4. No data leaks to an unauthenticated visitor via SPA routes
 
 `GET` on `/classes`, `/observations`, `/qms`, `/incidents`, `/reflections`
-with no session each returned `200` with the identical 401-byte SPA shell
+with no session each returned `200` with the identical SPA shell
 — `<div id="root"></div>`, no server-rendered content. There is no
 server-side rendering path that could emit teacher data before
 `ProtectedRoute.jsx` runs, so a direct inner-URL hit cannot show data even
 in principle. `ProtectedRoute.jsx` itself was read and does
 `isAuthenticated ? children : <Navigate to="/login" replace />`.
+
+Two things noticed while doing this, neither a security issue, both worth
+knowing before the browser pass:
+
+- `/reflections` was included in the probe above but is **not** a route in
+  `App.jsx`. Reflections and growth plans are panels inside the QMS page
+  (`src/components/qms/ReflectionPanel.jsx`, `GrowthPlanPanel.jsx`,
+  rendered by `src/pages/QMS.jsx`), so exercise them at `/qms` — there is
+  no standalone `/reflections` page to visit.
+- `App.jsx` has no catch-all `path="*"` route and no `path="/"` route, while
+  `server.js`'s SPA fallback returns `index.html` for any unmatched GET.
+  An unknown in-app URL (a typo, a stale bookmark) therefore returns 200
+  and renders nothing — a blank page rather than a "not found" screen.
+  Recorded as an observation only; not fixed here, and not a P3 blocker.
 
 ### What is still outstanding, and why it cannot be closed from here
 

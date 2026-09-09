@@ -18,11 +18,25 @@ function mockFetchRoutes(routes) {
   return fetchMock;
 }
 
+/**
+ * Mirrors App.jsx's real route table for the two paths this file cares
+ * about. Home is mounted at `/app`, NOT `/` — `/` is a login-free public
+ * landing page served by Express from `public/index.html` (see the
+ * "Public landing page" route in `server.js`, which exists because
+ * payment-processor domain verification requires a no-login page at the
+ * bare domain root) and never reaches the SPA at all.
+ *
+ * The `/` route below is therefore a tripwire, not a destination: if
+ * Login.jsx is ever changed back to `navigate('/')`, this test fails with
+ * "landing page, not the app" instead of rendering blank and leaving the
+ * next reader to work out why.
+ */
 function renderLogin() {
   return renderWithProviders(
     <Routes>
       <Route path="/login" element={<Login />} />
-      <Route path="/" element={<div>Home screen</div>} />
+      <Route path="/app" element={<div>Home screen</div>} />
+      <Route path="/" element={<div>landing page, not the app</div>} />
     </Routes>,
     { route: '/login' }
   );
@@ -103,7 +117,7 @@ describe('Login', () => {
     await waitFor(() => expect(screen.getByLabelText('Verification code')).toBeInTheDocument());
   });
 
-  it('logs in and navigates to / when the code is verified successfully', async () => {
+  it('logs in and navigates to /app when the code is verified successfully', async () => {
     mockFetchRoutes({
       'request-code': { body: { success: true } },
       'verify-code': {
@@ -119,6 +133,7 @@ describe('Login', () => {
     await user.click(screen.getByRole('button', { name: /verify & log in/i }));
 
     expect(await screen.findByText('Home screen')).toBeInTheDocument();
+    expect(screen.queryByText('landing page, not the app')).not.toBeInTheDocument();
   });
 
   it('shows "incorrect or expired code" specifically on a 401, not the generic error', async () => {
