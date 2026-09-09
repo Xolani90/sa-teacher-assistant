@@ -652,7 +652,16 @@ could fail. Listed here so nobody discovers them mid-pilot and mistakes a
 deliberate scope choice for a bug.
 
 - English-only coaching messages (localisation deferred to RC2, per ADR-018's message-renderer seam)
-- No dashboard yet (PR29–32 analytics/QMS workspace/reporting/home analytics — RC2)
+- **Dashboard:** stale as of RC2 P1 — a built, deployed, auth-gated teacher
+  dashboard exists (`dashboard/`, served from `dashboard/dist` at the
+  production root via `server.js`, built by `render.yaml`'s deploy command),
+  covering classes, learners, observations, resources, blueprints, incidents,
+  QMS/coaching, and assessment PDFs against ~24 REST endpoints in
+  `routes/api.js`. This was not verified end-to-end (live click-through,
+  auth token issuance, and per-page correctness against production data) as
+  part of this pass — that remains a genuine RC2 follow-up — but the earlier
+  "No dashboard yet" framing here was incorrect and is corrected to avoid
+  hiding a real, already-shipped surface from pilot planning.
 - No mobile app (WhatsApp-only for RC1)
 - Localisation deferred to RC2
 - **Backup/restore:** Render provides daily disk snapshots (verified live,

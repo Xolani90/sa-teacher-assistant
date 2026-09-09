@@ -66,7 +66,9 @@ const ASSESS_MENU_OPTIONS = {
   '1': 'Upload marks for analysis',
   '2': 'Start interactive mark capture (NEW TEST)',
   '3': 'Print a blueprint question paper',
-  '4': 'Intervention plan for strugglers',
+  '4': 'Create a new blueprint',
+  '5': 'Intervention plan for strugglers',
+  '6': 'Class-wide intervention overview',
   '0': 'Back to main menu',
 };
 
@@ -99,8 +101,9 @@ const ACCOUNT_MENU_ID = 'mainMenu.account';
 const ACCOUNT_MENU_OPTIONS = {
   '1': 'My progress (curriculum coverage)',
   '2': 'My assessment history',
-  '3': 'My usage / plan status',
-  '4': 'My profile',
+  '3': 'My saved resources',
+  '4': 'My usage / plan status',
+  '5': 'My profile',
   '0': 'Back to main menu',
 };
 
@@ -436,8 +439,14 @@ async function handleMainMenuFlow(from, text, deps) {
       case 'Print a blueprint question paper':
         await deps.reDispatchAsText(from, 'PRINT');
         return true;
+      case 'Create a new blueprint':
+        await deps.reDispatchAsText(from, 'NEW BLUEPRINT');
+        return true;
       case 'Intervention plan for strugglers':
         await deps.safeSendMessage(from, `Tell me a bit more \u2014 e.g. "intervention plan for my Grade 7 Maths strugglers".`);
+        return true;
+      case 'Class-wide intervention overview':
+        await deps.reDispatchAsText(from, 'CLASS INTERVENTION');
         return true;
       default:
         return false;
@@ -510,6 +519,9 @@ async function handleMainMenuFlow(from, text, deps) {
         return true;
       case 'My assessment history':
         await deps.reDispatchAsText(from, 'MY ASSESSMENTS');
+        return true;
+      case 'My saved resources':
+        await deps.reDispatchAsText(from, 'MY RESOURCES');
         return true;
       case 'My usage / plan status':
         await deps.reDispatchAsText(from, 'STATUS');
