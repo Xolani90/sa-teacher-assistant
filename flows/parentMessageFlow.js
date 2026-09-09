@@ -1,5 +1,7 @@
 'use strict';
 
+const { getAiFailureMessage } = require('../services/aiAvailability');
+
 /**
  * Parent message conversation flow — extracted from routes/webhook.js.
  *
@@ -178,7 +180,7 @@ async function handleParentMessageFlow(from, text, preClassifiedIntent = null, d
         } catch (err) {
           console.error('[WEBHOOK] Quick parent message generation failed:', err.message);
           rollbackUsage(quota, from);
-          await safeSendMessage(from, `❌ *Generation failed*\n\nSomething went wrong. Please try again.`);
+          await safeSendMessage(from, getAiFailureMessage(err, `❌ *Generation failed*\n\nSomething went wrong. Please try again.`));
         }
       } else {
         // Ask for learner name
@@ -246,7 +248,7 @@ async function handleParentMessageFlow(from, text, preClassifiedIntent = null, d
     } catch (err) {
       console.error('[WEBHOOK] Parent message generation failed:', err.message);
       rollbackUsage(quota, from);
-      await safeSendMessage(from, `❌ *Generation failed*\n\nSomething went wrong. Please try again.`);
+      await safeSendMessage(from, getAiFailureMessage(err, `❌ *Generation failed*\n\nSomething went wrong. Please try again.`));
       parentMessageState.delete(phoneHash);
     }
     return true;
@@ -294,7 +296,7 @@ async function handleParentMessageFlow(from, text, preClassifiedIntent = null, d
     } catch (err) {
       console.error('[WEBHOOK] Translation failed:', err.message);
       rollbackUsage(translateQuota, from);
-      await safeSendMessage(from, `❌ *Translation failed*\n\nSomething went wrong. Please try again.`);
+      await safeSendMessage(from, getAiFailureMessage(err, `❌ *Translation failed*\n\nSomething went wrong. Please try again.`));
       parentMessageState.delete(phoneHash);
     }
     return true;

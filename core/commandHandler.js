@@ -10,6 +10,8 @@
 
 'use strict';
 
+const { getAiFailureMessage } = require('../services/aiAvailability');
+
 /**
  * Handles special keyword commands.
  * Returns true if the command was handled (skip normal processing).
@@ -1023,7 +1025,7 @@ async function handleCommand(from, text, deps) {
     } catch (err) {
       console.error('[WEBHOOK] Formal letter generation failed:', err.message);
       deps.rollbackUsage(formalQuota, from);
-      await deps.safeSendMessage(from, `❌ *Generation failed*\n\nSomething went wrong. Please try again.`);
+      await deps.safeSendMessage(from, getAiFailureMessage(err, `❌ *Generation failed*\n\nSomething went wrong. Please try again.`));
     }
     return true;
   }

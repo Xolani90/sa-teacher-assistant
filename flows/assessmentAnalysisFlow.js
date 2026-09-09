@@ -1,5 +1,7 @@
 'use strict';
 
+const { getAiFailureMessage } = require('../services/aiAvailability');
+
 /**
  * Assessment analysis / diagnostics conversation flow — extracted from
  * routes/webhook.js.
@@ -238,7 +240,7 @@ async function handleAssessmentAnalysisFlow(from, text, preClassifiedIntent = nu
     } catch (err) {
       console.error('[WEBHOOK] Assessment analysis generation failed:', err.message);
       rollbackUsage(quota, from);
-      await safeSendMessage(from, `❌ Something went wrong generating that analysis. Please try again.`);
+      await safeSendMessage(from, getAiFailureMessage(err, `❌ Something went wrong generating that analysis. Please try again.`));
     }
     assessmentAnalysisState.delete(phoneHash);
     return true;

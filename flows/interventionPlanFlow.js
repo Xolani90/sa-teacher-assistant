@@ -1,5 +1,7 @@
 'use strict';
 
+const { getAiFailureMessage } = require('../services/aiAvailability');
+
 /**
  * Intervention plan / SBA support conversation flow — extracted from
  * routes/webhook.js.
@@ -270,7 +272,7 @@ async function generateInterventionOutput(from, state, phoneHash, deps) {
   } catch (err) {
     console.error('[WEBHOOK] Intervention plan generation failed:', err.message);
     rollbackUsage(quota, from);
-    await safeSendMessage(from, `❌ Something went wrong generating that. Please try again.`);
+    await safeSendMessage(from, getAiFailureMessage(err, `❌ Something went wrong generating that. Please try again.`));
   }
   interventionPlanState.delete(phoneHash);
 }

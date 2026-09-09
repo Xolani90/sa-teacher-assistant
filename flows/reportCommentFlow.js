@@ -1,5 +1,7 @@
 'use strict';
 
+const { getAiFailureMessage } = require('../services/aiAvailability');
+
 /**
  * Report comment conversation flow — extracted from routes/webhook.js.
  *
@@ -245,7 +247,7 @@ async function handleReportCommentFlow(from, text, preClassifiedIntent = null, d
             mark: learner.mark,
             outOf: learner.outOf,
             behaviourNotes: null,
-            comment: `[Generation failed for ${learner.name}]`,
+            comment: getAiFailureMessage(err, `[Generation failed for ${learner.name}]`),
           });
         }
       }
@@ -296,7 +298,7 @@ async function handleReportCommentFlow(from, text, preClassifiedIntent = null, d
         mark: currentLearner.mark,
         outOf: currentLearner.outOf,
         behaviourNotes: behaviourNotes,
-        comment: `[Generation failed for ${currentLearner.name}]`,
+        comment: getAiFailureMessage(err, `[Generation failed for ${currentLearner.name}]`),
       });
     }
 
@@ -428,7 +430,7 @@ async function handleReportCommentFlow(from, text, preClassifiedIntent = null, d
       console.error('[REPORT_COMMENT_FLOW] Report comment generation failed:', err.message);
       // Roll back usage increment for free-tier teachers
       rollbackUsage(quota, from);
-      await safeSendMessage(from, `❌ *Generation failed*\n\nSomething went wrong. Please try again.`);
+      await safeSendMessage(from, getAiFailureMessage(err, `❌ *Generation failed*\n\nSomething went wrong. Please try again.`));
       reportCommentState.delete(phoneHash);
     }
     return true;

@@ -24,6 +24,7 @@ const { resolveCurrentTopic, topicMatchesCurrentATP } = require('../services/cur
 const mentalMaths = require('../services/mentalMathsSessionService');
 const lessonPlanHomework = require('../utils/lessonPlanHomework');
 const { openMenu, closeMenu } = require('../services/navigationService');
+const { getAiFailureMessage } = require('../services/aiAvailability');
 
 // ── Mental Maths session wizard menus ───────────────────────────────────
 //
@@ -536,7 +537,7 @@ async function triggerGeneration({ from, intent, originalText = null, deps }) {
     // Roll back usage increment for free-tier teachers
     rollbackUsage(quota, from);
     await safeSendMessage(from,
-      `Something went wrong on my end — please try again in a moment. If it keeps happening, reply *HELP*.`
+      getAiFailureMessage(err, `Something went wrong on my end — please try again in a moment. If it keeps happening, reply *HELP*.`)
     ).catch(() => {}); // best-effort — don't double-throw
     return null;
   });
