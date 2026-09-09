@@ -76,8 +76,11 @@ describe('QMS page', () => {
 
     await screen.findByText('Your curriculum coverage is ahead of pace this term.');
 
-    expect(screen.queryByText(/reflections/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/growth plans/i)).not.toBeInTheDocument();
+    // Scoped to <main>: the sidebar's own "Reflections & Goals" nav link
+    // text would otherwise match a bare /reflections/i query too.
+    const main = screen.getByRole('main');
+    expect(within(main).queryByText(/reflections/i)).not.toBeInTheDocument();
+    expect(within(main).queryByText(/growth plans/i)).not.toBeInTheDocument();
   });
 
   it('only fetches /api/tse/status — no /api/reflections or /api/growth-plans calls', async () => {
