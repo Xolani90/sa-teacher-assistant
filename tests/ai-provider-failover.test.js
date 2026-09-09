@@ -543,7 +543,7 @@ async function run() {
     const result = await aiService.generateContent('prompt', 'worksheet');
 
     assert(result === 'gemini via header auth', 'Y: Gemini request still succeeds after switching to header auth');
-    assert(capturedPath === '/v1beta/models/gemini-2.5-flash:generateContent', 'Y: request path has no query string / no key in URL');
+    assert(capturedPath === '/v1beta/models/gemini-3.6-flash:generateContent', 'Y: request path has no query string / no key in URL');
     assert(!/key=/.test(capturedPath || ''), 'Y: URL does not contain "key=" anywhere');
     assert(!(capturedPath || '').includes('test-gemini-key'), 'Y: URL does not contain the literal Gemini key');
     assert(capturedHeaders && capturedHeaders['x-goog-api-key'] === 'test-gemini-key', 'Y: key is sent via x-goog-api-key header');

@@ -52,27 +52,34 @@ const MODEL_CONFIG = {
     default:     { model: 'gpt-4o-mini', max_tokens: 3000 },
   },
   gemini: {
-    // gemini-2.5-flash — Google's free-tier-eligible text model. One model
-    // for every intent (unlike Anthropic/OpenAI's haiku/sonnet split) since
+    // gemini-3.6-flash — the previously-configured gemini-2.5-flash was
+    // retired ("no longer available to new users" per the Gemini API's own
+    // 404 response); 3.6 Flash is Google's current stable, generally-
+    // available Flash-tier text model as of this change. One model for
+    // every intent (unlike Anthropic/OpenAI's haiku/sonnet split) since
     // Gemini is a tertiary backup, not a cost/quality-tuned primary path.
-    lessonPlan:  { model: 'gemini-2.5-flash', max_tokens: 6000 },
-    worksheet:   { model: 'gemini-2.5-flash', max_tokens: 4096 },
-    test:        { model: 'gemini-2.5-flash', max_tokens: 6000 },
-    examPaper:   { model: 'gemini-2.5-flash', max_tokens: 8000, timeoutMs: 120_000 },
-    rubric:      { model: 'gemini-2.5-flash', max_tokens: 3000 },
-    sbaTask:     { model: 'gemini-2.5-flash', max_tokens: 6000, timeoutMs: 90_000 },
-    moderationPack: { model: 'gemini-2.5-flash', max_tokens: 8000, timeoutMs: 120_000 },
-    explanation: { model: 'gemini-2.5-flash', max_tokens: 2048 },
-    reportComment: { model: 'gemini-2.5-flash', max_tokens: 1024 },
-    atp:         { model: 'gemini-2.5-flash', max_tokens: 8000, timeoutMs: 120_000 },
-    assessmentAnalysis: { model: 'gemini-2.5-flash', max_tokens: 4096 },
-    interventionPlan:   { model: 'gemini-2.5-flash', max_tokens: 4096 },
-    classifier:  { model: 'gemini-2.5-flash', max_tokens: 600, timeoutMs: 12_000 },
-    conversational: { model: 'gemini-2.5-flash', max_tokens: 400, timeoutMs: 15_000 },
-    imageMarks:  { model: 'gemini-2.5-flash', max_tokens: 2048, timeoutMs: 30_000 },
-    curriculumQuery: { model: 'gemini-2.5-flash', max_tokens: 1200 },
-    fullInterventionPlan: { model: 'gemini-2.5-flash', max_tokens: 5000, timeoutMs: 120_000 },
-    default:     { model: 'gemini-2.5-flash', max_tokens: 4096 },
+    // Note: Google's 3.6 Flash release deprecated the temperature/top_p/
+    // top_k sampling parameters — the API now silently ignores them rather
+    // than erroring, so generateWithGemini()'s optional temperature pass-
+    // through remains harmless but has no effect on this model.
+    lessonPlan:  { model: 'gemini-3.6-flash', max_tokens: 6000 },
+    worksheet:   { model: 'gemini-3.6-flash', max_tokens: 4096 },
+    test:        { model: 'gemini-3.6-flash', max_tokens: 6000 },
+    examPaper:   { model: 'gemini-3.6-flash', max_tokens: 8000, timeoutMs: 120_000 },
+    rubric:      { model: 'gemini-3.6-flash', max_tokens: 3000 },
+    sbaTask:     { model: 'gemini-3.6-flash', max_tokens: 6000, timeoutMs: 90_000 },
+    moderationPack: { model: 'gemini-3.6-flash', max_tokens: 8000, timeoutMs: 120_000 },
+    explanation: { model: 'gemini-3.6-flash', max_tokens: 2048 },
+    reportComment: { model: 'gemini-3.6-flash', max_tokens: 1024 },
+    atp:         { model: 'gemini-3.6-flash', max_tokens: 8000, timeoutMs: 120_000 },
+    assessmentAnalysis: { model: 'gemini-3.6-flash', max_tokens: 4096 },
+    interventionPlan:   { model: 'gemini-3.6-flash', max_tokens: 4096 },
+    classifier:  { model: 'gemini-3.6-flash', max_tokens: 600, timeoutMs: 12_000 },
+    conversational: { model: 'gemini-3.6-flash', max_tokens: 400, timeoutMs: 15_000 },
+    imageMarks:  { model: 'gemini-3.6-flash', max_tokens: 2048, timeoutMs: 30_000 },
+    curriculumQuery: { model: 'gemini-3.6-flash', max_tokens: 1200 },
+    fullInterventionPlan: { model: 'gemini-3.6-flash', max_tokens: 5000, timeoutMs: 120_000 },
+    default:     { model: 'gemini-3.6-flash', max_tokens: 4096 },
   },
 };
 
