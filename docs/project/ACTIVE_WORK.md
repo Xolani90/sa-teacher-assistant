@@ -8,23 +8,36 @@ Update this file whenever the active task changes — not just at session end.
 
 ---
 
-## Current Priority — POST-RC1 (updated 2026-08-10)
+## Current Priority — RC2 P3 (updated 2026-09-09)
 
-**RC-1 is complete and approved** (`docs/testing/RC1_SIGNOFF.md`, commit
-`784d3e8`). All seven RC-1 workflows (W1–W7) individually passed; both
-Major findings raised during the audit (W4-F1, W6-F1) are Resolved with
-verified evidence. Phase B browser verification (below, 2026-08-06) and
-the "Target group size"/W4-F1 work are now historical — folded into and
-superseded by RC-1, not a separate active track.
+**RC-1 is complete, approved, and closed** (`docs/testing/RC1_SIGNOFF.md`,
+approval commit `784d3e8`; closed out through `f836c0c` with the
+backup/restore limitation accepted). All seven RC-1 workflows (W1–W7)
+individually passed; both Major findings raised during the audit (W4-F1,
+W6-F1) are Resolved with verified evidence.
 
-**Active priority right now:** documentation/repository reconciliation
-following RC-1 (see `docs/testing/WORKFLOW_07_OBSERVATIONS.md`,
-`.gitignore`, and this file's own refresh). Once that's approved, the
-next phase is a frontend verification pass (Reflection editing, Class
-Analytics, Class Intervention — both confirmed implemented in code but
-not yet logged as browser-verified), followed by Reporting Centre design.
-See `PROJECT_ROADMAP.md` for the full sequence. **Do not treat anything
-below this point as a current task list** — it's preserved history.
+**Active priority right now: finish RC2 P3 — live end-to-end dashboard
+verification.** Checklist and evidence:
+`docs/governance/RC2-P3-dashboard-live-verification-checklist.md`.
+
+As of 2026-09-09 the unauthenticated half is verified live (deployment
+reachable, deployed bundle confirmed built from current `main`, all 21 GET
+endpoints 401 without a token, forged/expired/`alg: none` tokens rejected,
+no teacher data in the SPA shell). The authenticated half — per-page data
+correctness, write round-trips, PDF download, WhatsApp cross-check — is
+outstanding and **blocked on the operator's own browser login**, since it
+needs a real teacher phone receiving a real WhatsApp OTP against
+production. There is no engineering task hiding behind that block.
+
+RC2 P1 (pilot menu discoverability, `3ab093f`) and RC2 P2 (zero-capital AI
+fallback, `752b8b2`) are both done. After P3 signs off, the next input is
+the RC2 Backlog in `docs/releases/RC1-MILESTONE.md`.
+
+For the short "where were we?" view, read `NEXT_SESSION.md` first — it is
+the current handoff. **Do not treat anything below this point as a current
+task list** — it's preserved history, including the 2026-08-10 "documentation
+reconciliation / frontend verification pass / Reporting Centre design"
+framing that this block replaces.
 
 ---
 

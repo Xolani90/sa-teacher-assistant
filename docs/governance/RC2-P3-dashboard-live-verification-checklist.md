@@ -1,8 +1,11 @@
 # RC2 P3 — Dashboard Live End-to-End Verification Checklist
 
-**STATUS: NOT YET PERFORMED — this is a manual checklist, not a completed
-verification.** Automated coverage for these same code paths already
-passes (111/111 across `blueprints-dashboard-e2e.test.js`,
+**STATUS: PARTIALLY PERFORMED — server-side and unauthenticated checks
+done 2026-09-09 (see "Verification log" below); every box requiring a
+logged-in teacher session in a real browser remains OUTSTANDING.**
+
+Automated coverage for these same code paths already passes (111/111
+across `blueprints-dashboard-e2e.test.js`,
 `growth-plans-dashboard-e2e.test.js`, `reflections-dashboard-e2e.test.js`,
 `resources-dashboard-e2e.test.js`, `resources-dashboard-wiring.test.js`).
 What remains is confirming the same behavior against the real deployed
@@ -16,11 +19,17 @@ supposed to work.
 
 ## Setup
 
-- [ ] Confirm the dashboard loads at `https://sa-teacher-assistant.onrender.com`
+- [x] Confirm the dashboard loads at `https://sa-teacher-assistant.onrender.com`
+      — verified 2026-09-09 (see Verification log, item 1)
 - [ ] Log in via `Login.jsx` with a real teacher account
 - [ ] Confirm `ProtectedRoute.jsx` actually blocks dashboard pages when logged
       out (open an inner page URL directly in a private/incognito window
       with no session — should redirect to Login, not show data)
+      — **half-verified 2026-09-09.** The "not show data" half is proven
+      server-side (Verification log, items 3–4): an inner URL returns only
+      the SPA shell, and every API endpoint refuses an unauthenticated or
+      forged request. The client-side redirect to `/login` itself still
+      needs a real browser and is not claimed here.
 
 ## Home / Classes (`GET /classes`)
 
@@ -109,9 +118,118 @@ supposed to work.
       the corresponding WhatsApp view (e.g. a follow-up REFLECT-related
       command, if one surfaces saved reflections) reflects the change
 
+## Verification log
+
+Performed 2026-09-09 against `https://sa-teacher-assistant.onrender.com`
+(live production). Everything in this section was actually executed and
+observed; nothing here is inferred from source reading alone unless the
+item says so explicitly.
+
+### 1. Deployment reachable
+
+- `GET /healthz` → `200`,
+  `{"status":"ok","service":"SA Teacher Assistant","version":"2.0.0"}`
+- `GET /` → `200`, serves the built SPA shell from `dashboard/dist`
+
+### 2. The deployed bundle is current — verification would exercise today's code
+
+Worth establishing before any of the below is trusted: a stale deploy would
+make the whole checklist verify old code. The live bundle is
+`/assets/index-BuRokdQF.js` (280,104 bytes). It was confirmed to contain
+the most recent `dashboard/src` commit, `1c95ea5` ("Home page presented a
+failed classes/learners fetch as an honest empty account", 2026-09-08), by
+locating that fix's two gating conditions in the minified output:
+
+- stats section — `r?…"Loading your overview…"…:s?null:…"mb-7 grid grid-cols-…"`
+  (i.e. `loading ? Spinner : error ? null : <section>`)
+- My Classes section —
+  `!s&&a.jsxs("section",{className:"mb-7",…{title:"My Classes"`
+  (i.e. `{!error && <section>}`)
+
+Note for anyone repeating this: searching the bundle for the copy quoted in
+that commit message (`"No classes yet — create one on WhatsApp"`,
+`"0 classes, 0 learners"`) returns nothing and does **not** mean the fix is
+missing — those strings only ever existed in source comments and are
+stripped by minification. Check the gating conditions, not the prose.
+
+Also confirmed `main` is fully pushed (`git rev-list --count origin/main..main`
+= 0), so no local work is missing from the deploy. The untracked local
+`dashboard/dist/` (built 2026-09-01, hash `index-CiBzBwa8.js`) is a stale
+developer artifact and is not what production serves.
+
+### 3. API auth boundary — all 21 GET endpoints reject unauthenticated requests
+
+`server.js:427` mounts the API as
+`app.use('/api', apiLimiter, requireTeacherAuth, apiRouter)`, so the gate is
+structural — it applies at the mount point to every route in
+`routes/api.js` rather than per-handler. Confirmed live: with no
+`Authorization` header, all of the following returned `401`:
+
+```
+/api/classes                      /api/observations/1
+/api/learners                     /api/assessments/1/detail
+/api/resources                    /api/assessments/1/pdf
+/api/observations                 /api/resources/1
+/api/reflections                  /api/growth-plans/1
+/api/growth-plans                 /api/blueprints/1
+/api/blueprints                   /api/incidents/1
+/api/qms/topics                   /api/classes/1/detail
+/api/incidents                    /api/classes/1/snapshot
+/api/tse/status                   /api/learners/1/detail
+                                  /api/learners/1/intervention-plan
+```
+
+Token-forgery attempts against `/api/classes`, all `401`:
+
+| Attempt | Result |
+|---|---|
+| `Bearer not-a-jwt-at-all` | 401 |
+| `Basic dXNlcjpwYXNz` (wrong scheme) | 401 |
+| `Bearer ` (empty token) | 401 |
+| valid-shape JWT signed with a wrong secret | 401 |
+| same, already expired | 401 |
+| unsigned `alg: none` JWT with `sub: 1` | 401 |
+
+The `alg: none` case is the one worth noting — that is the classic JWT
+bypass, and `utils/teacherAuth.js` rejects it.
+
+Deliberately **not** probed: `POST`/`PATCH`/`DELETE` endpoints. An
+unauthenticated write probe is only safe if auth works, which is the very
+thing under test, so the write verbs were left to the authenticated
+browser pass below rather than tested by firing them at production.
+
+### 4. No data leaks to an unauthenticated visitor via SPA routes
+
+`GET` on `/classes`, `/observations`, `/qms`, `/incidents`, `/reflections`
+with no session each returned `200` with the identical 401-byte SPA shell
+— `<div id="root"></div>`, no server-rendered content. There is no
+server-side rendering path that could emit teacher data before
+`ProtectedRoute.jsx` runs, so a direct inner-URL hit cannot show data even
+in principle. `ProtectedRoute.jsx` itself was read and does
+`isAuthenticated ? children : <Navigate to="/login" replace />`.
+
+### What is still outstanding, and why it cannot be closed from here
+
+Every remaining box needs an authenticated teacher session, which requires
+a real teacher phone number receiving a real WhatsApp OTP against
+production. That is not something this pass can or should manufacture — it
+needs the operator's own login. Specifically still open: per-page data
+correctness, every `POST`/`PATCH`/`DELETE` round-trip, the assessment PDF
+download, and the WhatsApp cross-check section.
+
+The honest summary: the security boundary around the dashboard is now
+verified live, and the deploy is confirmed current. Whether each page
+renders the right data for a logged-in teacher is untested.
+
 ## Sign-off
 
 Once every box above is checked with a genuine result observed (not
 assumed), update `docs/releases/RC1-MILESTONE.md`'s dashboard note and
 close the RC2 P1 M4 follow-up, citing this checklist and the date
 performed.
+
+The 2026-09-09 partial pass above is deliberately **not** a sign-off and
+does not close M4. The RC1-MILESTONE.md Accepted Limitations line still
+correctly says live end-to-end dashboard verification is an open RC2
+follow-up, and that stays true until the authenticated browser boxes are
+done.
