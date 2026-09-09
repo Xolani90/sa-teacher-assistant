@@ -1565,6 +1565,47 @@ function createGetObservationsHandler({ getObservationHistory }) {
 }
 
 /**
+ * Builds the GET /assessments handler — thin wrapper around
+ * assessmentDetailService.getAssessmentHistory(phoneHash, filters).
+ * Dashboard IA v1: a teacher-wide assessment list (previously only
+ * reachable per-class via ClassDetail). Same convention as
+ * createGetObservationsHandler: no new service layer, ownership scoping
+ * happens inside getAssessmentHistory's SQL itself (WHERE a.phone_hash = ?),
+ * never enforced only by the frontend.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, filters:Object) => Object[]} deps.getAssessmentHistory
+ * @returns {(req, res) => void}
+ */
+function createGetAssessmentsHandler({ getAssessmentHistory }) {
+  /**
+   * GET /api/assessments?grade=&subject=&classId=&limit=
+   *
+   * @returns 200 { assessments: [...] } — scoped to req.teacher.phoneHash;
+   *          an empty array for a teacher with no assessments, not an error
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetAssessments(req, res) {
+    const filters = {
+      grade: req.query.grade || undefined,
+      subject: req.query.subject || undefined,
+      classId: req.query.classId ? Number(req.query.classId) : undefined,
+      limit: req.query.limit ? Number(req.query.limit) : undefined,
+    };
+
+    let assessments;
+    try {
+      assessments = getAssessmentHistory(req.teacher.phoneHash, filters);
+    } catch (err) {
+      console.error('[API] getAssessmentHistory failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    return res.status(200).json({ assessments: assessments || [] });
+  };
+}
+
+/**
  * Builds the GET /assessments/:assessmentId/pdf handler. Generates the
  * Blueprint Assessment PDF on demand (not pre-generated/cached — same
  * on-demand convention as every other PDF route in this codebase, e.g.
@@ -1657,7 +1698,7 @@ const { getClass, updateClass, deleteClass } = require('../services/teacherWorks
 const { getLearnerDetail } = require('../services/learnerDetailService');
 const { getObservationDetail } = require('../services/observationDetailService');
 const { getObservationHistory, resolveObservationRecord } = require('../services/observationRepository');
-const { getAssessmentDetail } = require('../services/assessmentDetailService');
+const { getAssessmentDetail, getAssessmentHistory } = require('../services/assessmentDetailService');
 const { generateBlueprintAssessmentPdf } = require('../services/pdfService');
 const { buildPdfUrl } = require('../core/generationPipeline');
 const { listTopicsOrdered } = require('../utils/qmsTopics');
@@ -1928,6 +1969,10 @@ router.patch(
 );
 
 router.get(
+  '/assessments',
+  createGetAssessmentsHandler({ getAssessmentHistory })
+);
+router.get(
   '/assessments/:assessmentId/detail',
   createGetAssessmentDetailHandler({ getAssessmentDetail })
 );
@@ -2039,6 +2084,7 @@ module.exports.__testExports = {
   createGetObservationDetailHandler,
   createPatchObservationRecordHandler,
   createGetObservationsHandler,
+  createGetAssessmentsHandler,
   createGetAssessmentDetailHandler,
   createGetAssessmentPdfHandler,
   createGetLearnersHandler,

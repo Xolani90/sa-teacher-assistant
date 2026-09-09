@@ -22,6 +22,19 @@ const RESOURCE_TYPE_LABELS = {
   mentalMaths: 'Mental Maths',
 };
 
+// Plural forms for the type-aware "no matching resources" empty state.
+const RESOURCE_TYPE_LABELS_PLURAL = {
+  lessonPlan: 'lesson plans',
+  worksheet: 'worksheets',
+  test: 'tests',
+  atp: 'ATPs',
+  sbaTask: 'SBA tasks',
+  examPaper: 'exam papers',
+  rubric: 'rubrics',
+  moderationPack: 'moderation packs',
+  mentalMaths: 'Mental Maths resources',
+};
+
 /**
  * Resources Workspace — browse/filter saved resources (Feature 2
  * dashboard integration), backed directly by GET /api/resources (a
@@ -31,10 +44,11 @@ const RESOURCE_TYPE_LABELS = {
  * displays exactly what was already persisted, same convention as
  * ObservationWorkspace.jsx composing GET /api/observations.
  *
- * Defaults to showing lesson plans first (the resource type Feature 2
- * is about), but a teacher can filter to any saved resource type —
- * this reuses the general saved_resources infrastructure rather than
- * building a lesson-plan-only page.
+ * Dashboard IA v1: defaults to showing ALL saved resource types (not just
+ * lesson plans) so a teacher landing here from the sidebar never sees a
+ * narrow, possibly-empty filter by default. A teacher can still filter to
+ * any saved resource type — this reuses the general saved_resources
+ * infrastructure rather than building a lesson-plan-only page.
  *
  * Each row links into ResourceDetail (/resources/:id) for the full
  * content and, for a lesson plan, the persisted homework.
@@ -47,7 +61,7 @@ export default function ResourcesWorkspace() {
   const [resources, setResources] = useState([]);
   const [error, setError] = useState(null);
   const [query, setQuery] = useState('');
-  const [typeFilter, setTypeFilter] = useState('lessonPlan');
+  const [typeFilter, setTypeFilter] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -95,7 +109,7 @@ export default function ResourcesWorkspace() {
   return (
     <Layout>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 'var(--space-3)', marginBottom: 'var(--space-5)' }}>
-        <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>Lesson Plans &amp; Resources</h1>
+        <h1 style={{ fontSize: 'var(--text-xl)', fontWeight: 700, letterSpacing: '-0.02em', margin: 0 }}>Resources</h1>
         <input
           type="text"
           placeholder="Search by title, topic, or subject…"
@@ -108,8 +122,8 @@ export default function ResourcesWorkspace() {
 
       <div style={{ display: 'flex', gap: 'var(--space-3)', marginBottom: 'var(--space-5)', flexWrap: 'wrap' }}>
         <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} style={styles.select} aria-label="Filter by resource type">
-          <option value="lessonPlan">Lesson Plans</option>
           <option value="">All resource types</option>
+          <option value="lessonPlan">Lesson Plans</option>
           <option value="worksheet">Worksheets</option>
           <option value="test">Tests</option>
           <option value="sbaTask">SBA Tasks</option>
@@ -127,7 +141,11 @@ export default function ResourcesWorkspace() {
 
       {status === STATUS_READY && resources.length === 0 && (
         <EmptyState
-          title={typeFilter === 'lessonPlan' ? 'No lesson plans saved yet' : 'No resources saved yet'}
+          title={
+            typeFilter
+              ? `No ${RESOURCE_TYPE_LABELS_PLURAL[typeFilter] || RESOURCE_TYPE_LABELS[typeFilter] || 'resources'} saved yet`
+              : 'No resources saved yet — generate one from WhatsApp'
+          }
           description={
             <>
               Generate one from WhatsApp — e.g. <code style={styles.code}>Lesson plan Grade 7 Mathematics fractions</code> —

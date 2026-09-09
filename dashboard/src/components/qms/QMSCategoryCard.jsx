@@ -5,7 +5,7 @@ import QMSCategoryActions from './QMSCategoryActions';
 import { qmsRecommendations } from '../../config/qmsRecommendations';
 
 /**
- * A single expandable evidence category card on the QMS Readiness page.
+ * A single expandable evidence category card on the QMS &amp; Readiness page.
  * Owns expand/collapse state, status badge, and evidence count; delegates
  * recommendation/CTA rendering to QMSCategoryActions. See ADR-012 §4.3.
  */

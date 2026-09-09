@@ -2,7 +2,7 @@
 import { Card, Pill } from '../ui';
 
 /**
- * Strength banner shown at the top of the QMS Readiness page when the
+ * Strength banner shown at the top of the QMS &amp; Readiness page when the
  * backend snapshot includes a non-null `strength` message. Extracted
  * unchanged from the original QMS.jsx per ADR-012 §4.3.
  */

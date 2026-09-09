@@ -11,8 +11,10 @@ import ObservationWorkspace from './pages/ObservationWorkspace';
 import ObservationDetail from './pages/ObservationDetail';
 import ResourcesWorkspace from './pages/ResourcesWorkspace';
 import ResourceDetail from './pages/ResourceDetail';
+import AssessmentsWorkspace from './pages/AssessmentsWorkspace';
 import AssessmentDetail from './pages/AssessmentDetail';
 import QMS from './pages/QMS';
+import ReflectionsGoals from './pages/ReflectionsGoals';
 import IncidentsWorkspace from './pages/IncidentsWorkspace';
 import IncidentDetail from './pages/IncidentDetail';
 import BlueprintsWorkspace from './pages/BlueprintsWorkspace';
@@ -90,6 +92,14 @@ export default function App() {
               }
             />
             <Route
+              path="/assessments"
+              element={
+                <ProtectedRoute>
+                  <AssessmentsWorkspace />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/assessments/:assessmentId"
               element={
                 <ProtectedRoute>
@@ -102,6 +112,14 @@ export default function App() {
               element={
                 <ProtectedRoute>
                   <QMS />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/reflections"
+              element={
+                <ProtectedRoute>
+                  <ReflectionsGoals />
                 </ProtectedRoute>
               }
             />

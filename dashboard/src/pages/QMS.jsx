@@ -6,8 +6,6 @@ import Layout from '../components/Layout';
 import { Card, ErrorBanner, Spinner, SectionHeader, Pill } from '../components/ui';
 import QMSSummaryBanner from '../components/qms/QMSSummaryBanner';
 import QMSCategoryCard from '../components/qms/QMSCategoryCard';
-import ReflectionPanel from '../components/qms/ReflectionPanel';
-import GrowthPlanPanel from '../components/qms/GrowthPlanPanel';
 
 const STATUS_LOADING = 'loading';
 const STATUS_READY = 'ready';
@@ -22,16 +20,21 @@ const CATEGORY_LABELS = {
 };
 
 /**
- * QMS Readiness dashboard page — the QMS Action Centre (ADR-012).
+ * QMS & Readiness dashboard page — the QMS Action Centre (ADR-012).
  *
- * Composes two existing, already-tested backend endpoints:
+ * Composes one existing, already-tested backend endpoint:
  *   - GET /api/tse/status (services/tseEvidenceService.getStatusSnapshot)
- *   - GET /api/reflections (services/reflectionService.listReflections)
  *
  * Per ADR-012, this page remains a single orchestration page. Each
  * evidence category is a QMSCategoryCard that expands inline to show
  * static, rule-based recommendations and CTAs (config/qmsRecommendations.js)
  * — no new backend routes, services, or schema changes in this phase.
+ *
+ * Dashboard IA v1: Reflections and Growth Plans now have their own direct
+ * sidebar destination (see ReflectionsGoals.jsx at /reflections) and are no
+ * longer rendered here — this page no longer fetches /api/reflections or
+ * /api/growth-plans. QMS evidence/gaps/recommendations behaviour is
+ * unchanged.
  */
 export default function QMS() {
   const { authedFetch } = useTeacher();
@@ -39,21 +42,13 @@ export default function QMS() {
   const [status, setStatus] = useState(STATUS_LOADING);
   const [error, setError] = useState(null);
   const [snapshot, setSnapshot] = useState(null);
-  const [reflections, setReflections] = useState([]);
-  const [growthPlans, setGrowthPlans] = useState([]);
 
   const load = useCallback(async () => {
     setStatus(STATUS_LOADING);
     setError(null);
     try {
-      const [snapshotData, reflectionsData, growthPlansData] = await Promise.all([
-        authedFetch('/api/tse/status'),
-        authedFetch('/api/reflections'),
-        authedFetch('/api/growth-plans'),
-      ]);
+      const snapshotData = await authedFetch('/api/tse/status');
       setSnapshot(snapshotData);
-      setReflections(reflectionsData.reflections || []);
-      setGrowthPlans(growthPlansData.growthPlans || []);
       setStatus(STATUS_READY);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Something went wrong loading QMS readiness.');
@@ -88,7 +83,7 @@ export default function QMS() {
     <Layout>
       <div style={{ marginBottom: 'var(--space-6)' }}>
         <h1 style={{ fontSize: 'var(--text-2xl)', fontWeight: 700, margin: 0, letterSpacing: '-0.02em' }}>
-          QMS Readiness
+          QMS &amp; Readiness
         </h1>
         <p style={{ color: 'var(--color-text-secondary)', margin: '0.3rem 0 0' }}>
           A snapshot of the evidence you've already built up this term — expand
@@ -120,10 +115,6 @@ export default function QMS() {
       </Card>
 
       {gaps.length > 0 && <GapsSection gaps={gaps} />}
-
-      <ReflectionPanel reflections={reflections} onChange={load} />
-
-      <GrowthPlanPanel growthPlans={growthPlans} onChange={load} />
     </Layout>
   );
 }

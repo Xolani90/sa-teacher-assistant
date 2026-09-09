@@ -191,4 +191,95 @@ function getAssessmentDetail(phoneHash, assessmentId) {
   };
 }
 
-module.exports = { getAssessmentDetail };
+/**
+ * GET /api/assessments's data source — a teacher-wide, phone_hash-scoped
+ * list of assessments (Dashboard IA v1: Assessments Workspace). Follows
+ * observationRepository.getObservationHistory()'s query-building
+ * convention: base query + WHERE phone_hash, optional filters appended,
+ * deterministic ORDER BY with an id DESC tiebreak.
+ *
+ * classAverage/passRate are computed here via SQL aggregates over
+ * learner_results, the same definitions getAssessmentDetail() above uses
+ * (percentage average; pass = percentage >= 50) — not reinvented.
+ *
+ * @param {string} phoneHash
+ * @param {Object} [filters]
+ * @param {number|string} [filters.grade]
+ * @param {string} [filters.subject]
+ * @param {number} [filters.classId]
+ * @param {number} [filters.limit]
+ * @returns {object[]} — empty array for a teacher with no assessments, not an error
+ */
+function getAssessmentHistory(phoneHash, filters = {}) {
+  const db = getDb();
+
+  if (!phoneHash) {
+    throw new Error('getAssessmentHistory: phoneHash must not be null or empty');
+  }
+
+  let query = `
+    SELECT
+      a.id,
+      a.title,
+      a.grade,
+      a.subject,
+      a.term,
+      a.assessment_type,
+      a.total_marks,
+      a.created_at,
+      a.class_id,
+      c.name as class_name,
+      COUNT(lr.id) as learner_count,
+      AVG(lr.percentage) as class_average,
+      SUM(CASE WHEN lr.percentage >= 50 THEN 1 ELSE 0 END) as pass_count
+    FROM assessments a
+    LEFT JOIN classes c ON c.id = a.class_id
+    LEFT JOIN learner_results lr ON lr.assessment_id = a.id
+    WHERE a.phone_hash = ?
+  `;
+  const params = [phoneHash];
+
+  if (filters.grade) {
+    query += ` AND a.grade = ?`;
+    params.push(filters.grade);
+  }
+
+  if (filters.subject) {
+    query += ` AND a.subject = ?`;
+    params.push(filters.subject);
+  }
+
+  if (filters.classId) {
+    query += ` AND a.class_id = ?`;
+    params.push(filters.classId);
+  }
+
+  // id DESC tiebreak alongside created_at DESC: same rationale as
+  // getObservationHistory — created_at has second-resolution, so ties are
+  // possible and need a deterministic secondary sort.
+  query += ` GROUP BY a.id ORDER BY a.created_at DESC, a.id DESC`;
+
+  if (filters.limit) {
+    query += ` LIMIT ?`;
+    params.push(filters.limit);
+  }
+
+  const rows = db.prepare(query).all(...params);
+
+  return rows.map((row) => ({
+    id: row.id,
+    title: row.title,
+    grade: row.grade,
+    subject: row.subject,
+    term: row.term,
+    assessmentType: row.assessment_type,
+    totalMarks: row.total_marks,
+    createdAt: row.created_at,
+    class: row.class_id ? { id: row.class_id, name: row.class_name } : null,
+    learnerCount: row.learner_count,
+    classAverage: row.learner_count > 0 ? Math.round(row.class_average * 10) / 10 : null,
+    passRate: row.learner_count > 0 ? Math.round((row.pass_count / row.learner_count) * 100) : null,
+  }));
+}
+
+module.exports = { getAssessmentDetail, getAssessmentHistory };

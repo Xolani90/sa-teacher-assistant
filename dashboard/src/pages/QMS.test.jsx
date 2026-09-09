@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { within } from '@testing-library/react';
 import { renderWithProviders, screen, userEvent, waitFor } from '../test/test-utils';
 import QMS from './QMS';
 
@@ -20,52 +21,79 @@ const SNAPSHOT = {
   strength: 'Your curriculum coverage is ahead of pace this term.',
 };
 
-const REFLECTIONS_RESPONSE = {
-  reflections: [{ id: 'r1', term: 2, createdAt: '2026-05-10 09:00:00', content: 'Good lesson today.' }],
-};
-
-const GROWTH_PLANS_RESPONSE = { growthPlans: [] };
-
 function renderQMS() {
   return renderWithProviders(<QMS />, { authenticated: true });
 }
 
 describe('QMS page', () => {
-  it('shows a loading spinner before either request resolves', () => {
+  it('shows a loading spinner before the request resolves', () => {
     vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
     renderQMS();
     expect(screen.getByText(/loading qms readiness/i)).toBeInTheDocument();
   });
 
-  it('renders the summary banner, category cards, gaps, and reflections on success', async () => {
-    mockFetchRoutes({
-      '/tse/status': { body: SNAPSHOT },
-      '/reflections': { body: REFLECTIONS_RESPONSE },
-      '/growth-plans': { body: GROWTH_PLANS_RESPONSE },
-    });
+  it('sidebar label reads "QMS & Readiness"', async () => {
+    mockFetchRoutes({ '/tse/status': { body: SNAPSHOT } });
+    renderQMS();
+
+    await screen.findByText('Curriculum Coverage');
+    expect(screen.getByRole('link', { name: /qms & readiness/i })).toBeInTheDocument();
+  });
+
+  it('page heading reads "QMS & Readiness"', async () => {
+    mockFetchRoutes({ '/tse/status': { body: SNAPSHOT } });
+    renderQMS();
+
+    // Scoped to <main>: the sidebar nav link text now overlaps with the
+    // page heading ("QMS & Readiness" appears in both), and the "Resources"
+    // category card label overlaps with the sidebar's "Resources" nav
+    // link (Dashboard IA v1 renamed "Lesson Plans" -> "Resources").
+    await screen.findByText('Curriculum Coverage');
+    const main = screen.getByRole('main');
+    expect(main.querySelector('h1')).toHaveTextContent('QMS & Readiness');
+  });
+
+  it('renders the summary banner, category cards, and gaps on success', async () => {
+    mockFetchRoutes({ '/tse/status': { body: SNAPSHOT } });
     renderQMS();
 
     expect(await screen.findByText('Your curriculum coverage is ahead of pace this term.')).toBeInTheDocument();
 
     // Category cards, one per configured category, showing their counts.
-    expect(screen.getByText('Curriculum Coverage')).toBeInTheDocument();
-    expect(screen.getByText('Learner Support')).toBeInTheDocument();
-    expect(screen.getByText('Resources')).toBeInTheDocument();
+    const main = screen.getByRole('main');
+    expect(within(main).getByText('Curriculum Coverage')).toBeInTheDocument();
+    expect(within(main).getByText('Learner Support')).toBeInTheDocument();
+    expect(within(main).getByText('Resources')).toBeInTheDocument();
 
     // Gaps section, since SNAPSHOT.gaps is non-empty.
     expect(screen.getByText('Things Worth Following Up')).toBeInTheDocument();
     expect(screen.getByText('3 learners have no assessment in the last 30 days.')).toBeInTheDocument();
+  });
 
-    // Reflections panel wired up with the second endpoint's data.
-    expect(screen.getByText('Good lesson today.')).toBeInTheDocument();
+  it('does not render the Reflections or Growth Plans panels (moved to /reflections)', async () => {
+    mockFetchRoutes({ '/tse/status': { body: SNAPSHOT } });
+    renderQMS();
+
+    await screen.findByText('Your curriculum coverage is ahead of pace this term.');
+
+    expect(screen.queryByText(/reflections/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/growth plans/i)).not.toBeInTheDocument();
+  });
+
+  it('only fetches /api/tse/status — no /api/reflections or /api/growth-plans calls', async () => {
+    const fetchMock = mockFetchRoutes({ '/tse/status': { body: SNAPSHOT } });
+    renderQMS();
+
+    await screen.findByText('Your curriculum coverage is ahead of pace this term.');
+
+    const calledUrls = fetchMock.mock.calls.map((call) => call[0]);
+    expect(calledUrls.some((u) => u.includes('/tse/status'))).toBe(true);
+    expect(calledUrls.some((u) => u.includes('/reflections'))).toBe(false);
+    expect(calledUrls.some((u) => u.includes('/growth-plans'))).toBe(false);
   });
 
   it('omits the gaps section when there are no gaps', async () => {
-    mockFetchRoutes({
-      '/tse/status': { body: { ...SNAPSHOT, gaps: [] } },
-      '/reflections': { body: { reflections: [] } },
-      '/growth-plans': { body: GROWTH_PLANS_RESPONSE },
-    });
+    mockFetchRoutes({ '/tse/status': { body: { ...SNAPSHOT, gaps: [] } } });
     renderQMS();
 
     await screen.findByText('Curriculum Coverage');
@@ -73,50 +101,37 @@ describe('QMS page', () => {
   });
 
   it('omits the summary banner when strength is null', async () => {
-    mockFetchRoutes({
-      '/tse/status': { body: { ...SNAPSHOT, strength: null, gaps: [] } },
-      '/reflections': { body: { reflections: [] } },
-      '/growth-plans': { body: GROWTH_PLANS_RESPONSE },
-    });
+    mockFetchRoutes({ '/tse/status': { body: { ...SNAPSHOT, strength: null, gaps: [] } } });
     renderQMS();
 
     await screen.findByText('Curriculum Coverage');
     expect(screen.queryByText('On track')).not.toBeInTheDocument();
   });
 
-  it('shows one error banner for the whole page if either request fails (Promise.all, unlike ClassDetail)', async () => {
+  it('shows an error banner if the request fails', async () => {
     mockFetchRoutes({
-      '/tse/status': { body: SNAPSHOT },
-      '/reflections': { body: { error: 'Reflections service down' }, ok: false, status: 503 },
-      '/growth-plans': { body: GROWTH_PLANS_RESPONSE },
+      '/tse/status': { body: { error: 'Snapshot service down' }, ok: false, status: 503 },
     });
     renderQMS();
 
-    expect(await screen.findByText('Reflections service down')).toBeInTheDocument();
-    // Nothing from the successful /tse/status call renders either --
-    // Promise.all means one failure takes the whole page down, which is
-    // the deliberate difference from ClassDetail's per-request isolation.
+    expect(await screen.findByText('Snapshot service down')).toBeInTheDocument();
     expect(screen.queryByText('Curriculum Coverage')).not.toBeInTheDocument();
   });
 
-  it('retries both requests when Retry is clicked after an error', async () => {
+  it('retries the request when Retry is clicked after an error', async () => {
     const fetchMock = mockFetchRoutes({
       '/tse/status': { body: { error: 'Snapshot down' }, ok: false, status: 500 },
-      '/reflections': { body: REFLECTIONS_RESPONSE },
-      '/growth-plans': { body: GROWTH_PLANS_RESPONSE },
     });
     const user = userEvent.setup();
     renderQMS();
 
     await screen.findByText('Snapshot down');
 
-    // Fix the failing endpoint before retrying.
-    fetchMock.mockImplementation(async (url) => {
-      if (url.includes('/tse/status')) {
-        return { ok: true, status: 200, text: async () => JSON.stringify(SNAPSHOT) };
-      }
-      return { ok: true, status: 200, text: async () => JSON.stringify(REFLECTIONS_RESPONSE) };
-    });
+    fetchMock.mockImplementation(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(SNAPSHOT),
+    }));
 
     await user.click(screen.getByRole('button', { name: /retry/i }));
 

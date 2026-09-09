@@ -3,14 +3,22 @@ import { useTeacher } from '../auth/TeacherContext';
 import { useTheme } from '../theme/ThemeContext';
 import logo from '../assets/logo.png';
 
+// Dashboard IA v1: flat sidebar, no grouping headers.
+// 'Resources' (was 'Lesson Plans') now covers all saved resource types, not
+// just lesson plans. 'Assessments' and 'Reflections & Goals' are new direct
+// destinations (previously only reachable via ClassDetail / QMS respectively).
+// 'QMS & Readiness' (was 'QMS Readiness') no longer hosts Reflections/Growth
+// Plans — see QMS.jsx and ReflectionsGoals.jsx.
 const NAV_ITEMS = [
   { to: '/app', label: 'Overview', icon: '◆', end: true },
   { to: '/classes', label: 'Classes', icon: '▤' },
-  { to: '/resources', label: 'Lesson Plans', icon: '▦' },
+  { to: '/resources', label: 'Resources', icon: '▦' },
+  { to: '/assessments', label: 'Assessments', icon: '▥' },
   { to: '/observations', label: 'Observations', icon: '◎' },
+  { to: '/reflections', label: 'Reflections & Goals', icon: '✎' },
   { to: '/incidents', label: 'Incident Book', icon: '⚠' },
   { to: '/blueprints', label: 'Assessment Blueprints', icon: '⚖' },
-  { to: '/qms', label: 'QMS Readiness', icon: '✓' },
+  { to: '/qms', label: 'QMS & Readiness', icon: '✓' },
 ];
 
 export default function Layout({ children }) {
