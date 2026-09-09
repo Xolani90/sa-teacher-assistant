@@ -9,15 +9,20 @@ import logo from '../assets/logo.png';
 // destinations (previously only reachable via ClassDetail / QMS respectively).
 // 'QMS & Readiness' (was 'QMS Readiness') no longer hosts Reflections/Growth
 // Plans — see QMS.jsx and ReflectionsGoals.jsx.
+// 'Assessment Blueprints' is placed directly after 'Assessments': a
+// Blueprint (ADR-005) is reusable question metadata that an Assessment can
+// optionally be generated from — related-but-distinct concepts a teacher
+// should be able to move between without scanning past unrelated items
+// (Observations, Reflections, Incident Book) in the sidebar.
 const NAV_ITEMS = [
   { to: '/app', label: 'Overview', icon: '◆', end: true },
   { to: '/classes', label: 'Classes', icon: '▤' },
   { to: '/resources', label: 'Resources', icon: '▦' },
   { to: '/assessments', label: 'Assessments', icon: '▥' },
+  { to: '/blueprints', label: 'Assessment Blueprints', icon: '⚖' },
   { to: '/observations', label: 'Observations', icon: '◎' },
   { to: '/reflections', label: 'Reflections & Goals', icon: '✎' },
   { to: '/incidents', label: 'Incident Book', icon: '⚠' },
-  { to: '/blueprints', label: 'Assessment Blueprints', icon: '⚖' },
   { to: '/qms', label: 'QMS & Readiness', icon: '✓' },
 ];
 
