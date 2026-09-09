@@ -51,6 +51,29 @@ const MODEL_CONFIG = {
     fullInterventionPlan: { model: 'gpt-4o', max_tokens: 4000, timeoutMs: 120_000 },
     default:     { model: 'gpt-4o-mini', max_tokens: 3000 },
   },
+  gemini: {
+    // gemini-2.5-flash — Google's free-tier-eligible text model. One model
+    // for every intent (unlike Anthropic/OpenAI's haiku/sonnet split) since
+    // Gemini is a tertiary backup, not a cost/quality-tuned primary path.
+    lessonPlan:  { model: 'gemini-2.5-flash', max_tokens: 6000 },
+    worksheet:   { model: 'gemini-2.5-flash', max_tokens: 4096 },
+    test:        { model: 'gemini-2.5-flash', max_tokens: 6000 },
+    examPaper:   { model: 'gemini-2.5-flash', max_tokens: 8000, timeoutMs: 120_000 },
+    rubric:      { model: 'gemini-2.5-flash', max_tokens: 3000 },
+    sbaTask:     { model: 'gemini-2.5-flash', max_tokens: 6000, timeoutMs: 90_000 },
+    moderationPack: { model: 'gemini-2.5-flash', max_tokens: 8000, timeoutMs: 120_000 },
+    explanation: { model: 'gemini-2.5-flash', max_tokens: 2048 },
+    reportComment: { model: 'gemini-2.5-flash', max_tokens: 1024 },
+    atp:         { model: 'gemini-2.5-flash', max_tokens: 8000, timeoutMs: 120_000 },
+    assessmentAnalysis: { model: 'gemini-2.5-flash', max_tokens: 4096 },
+    interventionPlan:   { model: 'gemini-2.5-flash', max_tokens: 4096 },
+    classifier:  { model: 'gemini-2.5-flash', max_tokens: 600, timeoutMs: 12_000 },
+    conversational: { model: 'gemini-2.5-flash', max_tokens: 400, timeoutMs: 15_000 },
+    imageMarks:  { model: 'gemini-2.5-flash', max_tokens: 2048, timeoutMs: 30_000 },
+    curriculumQuery: { model: 'gemini-2.5-flash', max_tokens: 1200 },
+    fullInterventionPlan: { model: 'gemini-2.5-flash', max_tokens: 5000, timeoutMs: 120_000 },
+    default:     { model: 'gemini-2.5-flash', max_tokens: 4096 },
+  },
 };
 
 const REQUEST_TIMEOUT_MS = 60_000; // 60 seconds — AI can be slow on long outputs
@@ -211,6 +234,53 @@ async function generateWithOpenAI(prompt, intentType, options = {}) {
 }
 
 /**
+ * Calls Google Gemini API. Tertiary backup — only ever reached after both
+ * Anthropic and OpenAI have failed with a fallback-eligible error. Uses
+ * the same plain-https approach as the other two providers (no SDK), and
+ * returns the same Promise<string> contract, so callers never know which
+ * provider actually produced the content.
+ *
+ * @param {string} prompt
+ * @param {string} intentType
+ * @param {{ systemPrompt?: string, temperature?: number }} [options]
+ * @returns {Promise<string>}
+ */
+async function generateWithGemini(prompt, intentType, options = {}) {
+  const config = MODEL_CONFIG.gemini[intentType] || MODEL_CONFIG.gemini.default;
+  const timeoutMs = config.timeoutMs || REQUEST_TIMEOUT_MS;
+
+  const body = {
+    // Gemini has no separate "system" role on this endpoint — its
+    // transport-specific equivalent is systemInstruction, kept semantically
+    // identical to the systemPrompt used for Anthropic/OpenAI.
+    systemInstruction: { parts: [{ text: options.systemPrompt || buildSystemPrompt() }] },
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: {
+      maxOutputTokens: config.max_tokens,
+      ...(typeof options.temperature === 'number' ? { temperature: options.temperature } : {}),
+    },
+  };
+
+  const response = await httpsPost(
+    'generativelanguage.googleapis.com',
+    `/v1beta/models/${config.model}:generateContent`,
+    { 'x-goog-api-key': process.env.GEMINI_API_KEY },
+    body,
+    timeoutMs
+  );
+
+  const text = response?.candidates?.[0]?.content?.parts?.[0]?.text;
+  if (!text) throw new Error('Empty response from Gemini API');
+
+  const usage = response.usageMetadata;
+  if (usage) {
+    console.log(`[AI] Gemini tokens — prompt: ${usage.promptTokenCount}, completion: ${usage.candidatesTokenCount}`);
+  }
+
+  return text;
+}
+
+/**
  * Builds the system prompt, anchored to the real current date so the AI
  * always generates content for the correct South African academic year.
  * Without this, the model defaults to training-data assumptions and may
@@ -276,22 +346,37 @@ async function generateContent(prompt, intentType = 'default', options = {}) {
   } catch (err) {
     console.error(`[AI] Generation failed:`, err.message);
 
-    // Backup attempt: Anthropic is always primary. OpenAI is attempted
-    // exactly once, only when it's actually configured as a backup and
-    // only when the primary failure is a provider-availability problem
-    // (rate limit, 5xx, timeout, network, malformed response, or credit/
-    // quota/billing exhaustion) rather than an auth failure, a bad
-    // request, or an unrelated application error. No loop, no retry back
-    // to Anthropic, no change to this contract's Promise<string> shape.
-    if (provider === 'anthropic' && process.env.OPENAI_API_KEY) {
+    // Backup chain: Anthropic is always primary. OpenAI is attempted at
+    // most once as secondary backup, and Gemini at most once as tertiary
+    // backup — only when each is actually configured and only when the
+    // preceding failure is a provider-availability problem (rate limit,
+    // 5xx, timeout, network, malformed response, or credit/quota/billing
+    // exhaustion) rather than an auth failure, a bad request, or an
+    // unrelated application error. Maximum 3 total provider attempts, no
+    // loop, never retries a provider already attempted in this request.
+    if (provider === 'anthropic') {
       const category = classifyAiError(err);
-      if (isFallbackEligible(category)) {
+      if (isFallbackEligible(category) && process.env.OPENAI_API_KEY) {
         console.log(`[AI] Primary provider failure (${category}) — attempting OpenAI backup (intent: ${intentType})`);
         try {
           return await generateWithOpenAI(prompt, intentType, options);
-        } catch (backupErr) {
-          console.error(`[AI] Backup provider failed:`, backupErr.message);
-          throw backupErr;
+        } catch (openaiErr) {
+          console.error(`[AI] Backup provider failed:`, openaiErr.message);
+
+          const openaiCategory = classifyAiError(openaiErr);
+          if (isFallbackEligible(openaiCategory) && process.env.GEMINI_API_KEY) {
+            console.log(`[AI] OpenAI backup failure (${openaiCategory}) — attempting Gemini backup (intent: ${intentType})`);
+            try {
+              const result = await generateWithGemini(prompt, intentType, options);
+              console.log(`[AI] Gemini generation succeeded (intent: ${intentType})`);
+              return result;
+            } catch (geminiErr) {
+              console.error(`[AI] Gemini backup failed:`, geminiErr.message);
+              throw geminiErr;
+            }
+          }
+
+          throw openaiErr;
         }
       }
     }

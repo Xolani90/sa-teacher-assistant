@@ -58,7 +58,7 @@ function freshAiService() {
  * Tracks how many times each hostname was called.
  */
 function mockProviders(plan) {
-  const callCounts = { 'api.anthropic.com': 0, 'api.openai.com': 0 };
+  const callCounts = { 'api.anthropic.com': 0, 'api.openai.com': 0, 'generativelanguage.googleapis.com': 0 };
 
   https.request = function mockRequest(options, callback) {
     const host = options.hostname;
@@ -89,11 +89,13 @@ function mockProviders(plan) {
           } else if (behavior.type === 'httpError') {
             res.emit('data', JSON.stringify({ error: { message: behavior.message || 'Provider error' } }));
           } else {
-            // success — shape matches both Anthropic and OpenAI response parsers
+            // success — shape matches each provider's own response parser
             if (host === 'api.anthropic.com') {
               res.emit('data', JSON.stringify({ content: [{ text: behavior.text || 'anthropic content' }], usage: { input_tokens: 10, output_tokens: 20 } }));
-            } else {
+            } else if (host === 'api.openai.com') {
               res.emit('data', JSON.stringify({ choices: [{ message: { content: behavior.text || 'openai content' } }], usage: { prompt_tokens: 10, completion_tokens: 20 } }));
+            } else {
+              res.emit('data', JSON.stringify({ candidates: [{ content: { parts: [{ text: behavior.text || 'gemini content' }] } }], usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 20 } }));
             }
           }
           res.emit('end');
@@ -354,6 +356,216 @@ async function run() {
     assert(threw, 'O: without OPENAI_API_KEY configured, eligible failure still throws (no backup available)');
     assert((counts['api.openai.com'] || 0) === 0, 'O: OpenAI never attempted when not configured');
     process.env.OPENAI_API_KEY = 'test-openai-key';
+    restoreHttps();
+  }
+
+  // ── P. Anthropic + OpenAI eligible failure → Gemini success (3-provider chain) ──
+  {
+    process.env.GEMINI_API_KEY = 'test-gemini-key';
+    const counts = mockProviders({
+      'api.anthropic.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'api.openai.com': { type: 'httpError', status: 503, message: 'OpenAI also unavailable' },
+      'generativelanguage.googleapis.com': { type: 'success', text: 'gemini backup content' },
+    });
+    const aiService = freshAiService();
+    const result = await aiService.generateContent('prompt', 'worksheet');
+    assert(result === 'gemini backup content', 'P: Anthropic+OpenAI failure falls back to Gemini content');
+    assert(counts['api.anthropic.com'] === 1, 'P: Anthropic attempted once');
+    assert(counts['api.openai.com'] === 1, 'P: OpenAI attempted once');
+    assert(counts['generativelanguage.googleapis.com'] === 1, 'P: Gemini attempted exactly once');
+    restoreHttps();
+  }
+
+  // ── Q. All three providers fail → exactly 3 attempts, no loop, no 4th attempt ──
+  {
+    const counts = mockProviders({
+      'api.anthropic.com': { type: 'httpError', status: 500, message: 'Anthropic down' },
+      'api.openai.com': { type: 'httpError', status: 429, message: 'OpenAI rate limited' },
+      'generativelanguage.googleapis.com': { type: 'httpError', status: 503, message: 'Gemini down' },
+    });
+    const aiService = freshAiService();
+    let threw = false;
+    let errMessage = '';
+    try {
+      await aiService.generateContent('prompt', 'worksheet');
+    } catch (err) {
+      threw = true;
+      errMessage = err.message;
+    }
+    assert(threw, 'Q: all three providers failing throws (final AI-unavailable path)');
+    assert(counts['api.anthropic.com'] === 1, 'Q: Anthropic <= 1 attempt');
+    assert(counts['api.openai.com'] === 1, 'Q: OpenAI <= 1 attempt');
+    assert(counts['generativelanguage.googleapis.com'] === 1, 'Q: Gemini <= 1 attempt (no loop, no 4th attempt)');
+    assert(/Gemini down/.test(errMessage), 'Q: the final (Gemini) provider error is what propagates');
+    restoreHttps();
+  }
+
+  // ── R. Gemini 429 → no further attempt, final failure path ─────────────
+  {
+    const counts = mockProviders({
+      'api.anthropic.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'api.openai.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'generativelanguage.googleapis.com': { type: 'httpError', status: 429, message: 'Gemini rate limited' },
+    });
+    const aiService = freshAiService();
+    let threw = false;
+    try { await aiService.generateContent('prompt', 'worksheet'); } catch { threw = true; }
+    assert(threw, 'R: Gemini 429 still ends in final failure (no fourth provider to try)');
+    assert(counts['generativelanguage.googleapis.com'] === 1, 'R: Gemini attempted exactly once');
+    restoreHttps();
+  }
+
+  // ── S. Gemini 5xx → no further attempt, final failure path ─────────────
+  {
+    const counts = mockProviders({
+      'api.anthropic.com': { type: 'httpError', status: 500, message: 'down' },
+      'api.openai.com': { type: 'httpError', status: 500, message: 'down' },
+      'generativelanguage.googleapis.com': { type: 'httpError', status: 503, message: 'Gemini overloaded' },
+    });
+    const aiService = freshAiService();
+    let threw = false;
+    try { await aiService.generateContent('prompt', 'worksheet'); } catch { threw = true; }
+    assert(threw, 'S: Gemini 5xx still ends in final failure');
+    assert(counts['generativelanguage.googleapis.com'] === 1, 'S: Gemini attempted exactly once');
+    restoreHttps();
+  }
+
+  // ── T. Gemini timeout/network failure → final failure path, no loop ────
+  {
+    const timeoutCounts = mockProviders({
+      'api.anthropic.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'api.openai.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'generativelanguage.googleapis.com': { type: 'timeout' },
+    });
+    let aiService = freshAiService();
+    let threw = false;
+    try { await aiService.generateContent('prompt', 'worksheet'); } catch { threw = true; }
+    assert(threw, 'T: Gemini timeout ends in final failure');
+    assert(timeoutCounts['generativelanguage.googleapis.com'] === 1, 'T: Gemini attempted exactly once on timeout');
+    restoreHttps();
+
+    const networkCounts = mockProviders({
+      'api.anthropic.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'api.openai.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'generativelanguage.googleapis.com': { type: 'network', message: 'ECONNRESET' },
+    });
+    aiService = freshAiService();
+    threw = false;
+    try { await aiService.generateContent('prompt', 'worksheet'); } catch { threw = true; }
+    assert(threw, 'T: Gemini network failure ends in final failure');
+    assert(networkCounts['generativelanguage.googleapis.com'] === 1, 'T: Gemini attempted exactly once on network failure');
+    restoreHttps();
+  }
+
+  // ── U. Gemini malformed response → classified as provider failure, final failure path ──
+  {
+    const counts = mockProviders({
+      'api.anthropic.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'api.openai.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'generativelanguage.googleapis.com': { type: 'malformed' },
+    });
+    const aiService = freshAiService();
+    let threw = false;
+    try { await aiService.generateContent('prompt', 'worksheet'); } catch { threw = true; }
+    assert(threw, 'U: Gemini malformed response ends in final failure');
+    assert(counts['generativelanguage.googleapis.com'] === 1, 'U: Gemini attempted exactly once');
+    restoreHttps();
+  }
+
+  // ── V. Maximum-attempt guarantee across the full chain ──────────────────
+  {
+    const counts = mockProviders({
+      'api.anthropic.com': { type: 'httpError', status: 500, message: 'down' },
+      'api.openai.com': { type: 'httpError', status: 500, message: 'down' },
+      'generativelanguage.googleapis.com': { type: 'httpError', status: 500, message: 'down' },
+    });
+    const aiService = freshAiService();
+    try { await aiService.generateContent('prompt', 'worksheet'); } catch { /* expected */ }
+    assert(counts['api.anthropic.com'] <= 1, 'V: Anthropic attempts <= 1');
+    assert(counts['api.openai.com'] <= 1, 'V: OpenAI attempts <= 1');
+    assert(counts['generativelanguage.googleapis.com'] <= 1, 'V: Gemini attempts <= 1');
+    restoreHttps();
+  }
+
+  // ── W. Provider-neutral output parity: Gemini success matches the same contract ──
+  {
+    const counts = mockProviders({
+      'api.anthropic.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'api.openai.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'generativelanguage.googleapis.com': { type: 'success', text: 'a complete worksheet document from gemini' },
+    });
+    const aiService = freshAiService();
+    const result = await aiService.generateContent('prompt', 'worksheet');
+    assert(typeof result === 'string' && result.length > 0, 'W: Gemini fallback result is a non-empty string — identical Promise<string> contract, no provider-specific downstream shape');
+    assert(counts['generativelanguage.googleapis.com'] === 1, 'W: single Gemini attempt');
+    restoreHttps();
+  }
+
+  // ── X. Gemini not configured → chain stops at OpenAI, no crash ──────────
+  {
+    delete process.env.GEMINI_API_KEY;
+    const counts = mockProviders({
+      'api.anthropic.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'api.openai.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+    });
+    const aiService = freshAiService();
+    let threw = false;
+    try { await aiService.generateContent('prompt', 'worksheet'); } catch { threw = true; }
+    assert(threw, 'X: without GEMINI_API_KEY, chain stops after OpenAI (no crash, no Gemini attempt)');
+    assert((counts['generativelanguage.googleapis.com'] || 0) === 0, 'X: Gemini never attempted when not configured');
+    process.env.GEMINI_API_KEY = 'test-gemini-key';
+    restoreHttps();
+  }
+
+  // ── Y. Gemini authentication: key sent via x-goog-api-key header, never in URL ──
+  {
+    let capturedPath = null;
+    let capturedHeaders = null;
+
+    mockProviders({
+      'api.anthropic.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'api.openai.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'generativelanguage.googleapis.com': { type: 'success', text: 'gemini via header auth' },
+    });
+    // Wrap the mock (installed by mockProviders) to inspect the exact
+    // options passed to https.request for the Gemini call, without
+    // changing its response behavior.
+    const underlyingMock = https.request;
+    https.request = function inspectingRequest(options, callback) {
+      if (options.hostname === 'generativelanguage.googleapis.com') {
+        capturedPath = options.path;
+        capturedHeaders = options.headers;
+      }
+      return underlyingMock(options, callback);
+    };
+
+    const aiService = freshAiService();
+    const result = await aiService.generateContent('prompt', 'worksheet');
+
+    assert(result === 'gemini via header auth', 'Y: Gemini request still succeeds after switching to header auth');
+    assert(capturedPath === '/v1beta/models/gemini-2.5-flash:generateContent', 'Y: request path has no query string / no key in URL');
+    assert(!/key=/.test(capturedPath || ''), 'Y: URL does not contain "key=" anywhere');
+    assert(!(capturedPath || '').includes('test-gemini-key'), 'Y: URL does not contain the literal Gemini key');
+    assert(capturedHeaders && capturedHeaders['x-goog-api-key'] === 'test-gemini-key', 'Y: key is sent via x-goog-api-key header');
+    restoreHttps();
+  }
+
+  // ── Z. Gemini key never appears in a thrown error message ───────────────
+  {
+    const counts = mockProviders({
+      'api.anthropic.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'api.openai.com': { type: 'httpError', status: 429, message: 'Rate limit exceeded' },
+      'generativelanguage.googleapis.com': { type: 'httpError', status: 500, message: 'Gemini internal error' },
+    });
+    const aiService = freshAiService();
+    let errMessage = '';
+    try {
+      await aiService.generateContent('prompt', 'worksheet');
+    } catch (err) {
+      errMessage = err.message;
+    }
+    assert(!errMessage.includes('test-gemini-key'), 'Z: thrown error message never contains the Gemini API key');
+    assert(!/key=/.test(errMessage), 'Z: thrown error message contains no "key=" fragment');
     restoreHttps();
   }
 
