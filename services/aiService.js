@@ -2,6 +2,7 @@
 
 const https = require('https');
 const { recordCall } = require('../utils/aiCostMonitor');
+const { classifyAiError, isFallbackEligible } = require('./aiAvailability');
 
 // ── Model configuration ────────────────────────────────────────────────────
 // We use claude-haiku for speed/cost on explanations and worksheets,
@@ -274,6 +275,27 @@ async function generateContent(prompt, intentType = 'default', options = {}) {
     }
   } catch (err) {
     console.error(`[AI] Generation failed:`, err.message);
+
+    // Backup attempt: Anthropic is always primary. OpenAI is attempted
+    // exactly once, only when it's actually configured as a backup and
+    // only when the primary failure is a provider-availability problem
+    // (rate limit, 5xx, timeout, network, malformed response, or credit/
+    // quota/billing exhaustion) rather than an auth failure, a bad
+    // request, or an unrelated application error. No loop, no retry back
+    // to Anthropic, no change to this contract's Promise<string> shape.
+    if (provider === 'anthropic' && process.env.OPENAI_API_KEY) {
+      const category = classifyAiError(err);
+      if (isFallbackEligible(category)) {
+        console.log(`[AI] Primary provider failure (${category}) — attempting OpenAI backup (intent: ${intentType})`);
+        try {
+          return await generateWithOpenAI(prompt, intentType, options);
+        } catch (backupErr) {
+          console.error(`[AI] Backup provider failed:`, backupErr.message);
+          throw backupErr;
+        }
+      }
+    }
+
     throw err;
   }
 }

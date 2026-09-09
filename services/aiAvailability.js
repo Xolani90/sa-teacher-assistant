@@ -45,13 +45,22 @@ function getAiStatus() {
   return { status: AI_AVAILABLE, reason: null };
 }
 
+// HTTP 400 is only ever a fallback-eligible provider failure when the
+// message clearly identifies provider-side credit/quota/billing exhaustion
+// (e.g. Anthropic's "Your credit balance is too low..."). A generic/other
+// 400 — malformed request, invalid parameter, application-level mistake —
+// must stay classified as 'unknown' (not fallback-eligible) so a bug in
+// our own request never silently masks itself as a provider outage.
+const CREDIT_EXHAUSTION_400_PATTERN =
+  /credit balance is too low|insufficient credit|insufficient quota|quota exceeded|quota exhausted|billing.{0,20}(balance|exhaust)|out of credits|purchase credits|usage limit reached/i;
+
 /**
  * Classifies a rejection from generateContent()/generateWithVision() using
  * the actual error strings services/aiService.js throws today (detectProvider(),
  * httpsPost(), generateWithAnthropic/OpenAI). No new error shapes invented.
  *
  * @param {Error|string} err
- * @returns {'missing_key'|'auth_failed'|'rate_limited'|'provider_error'|'timeout'|'network'|'malformed_response'|'unknown'}
+ * @returns {'missing_key'|'auth_failed'|'rate_limited'|'provider_error'|'timeout'|'network'|'malformed_response'|'credit_exhausted'|'unknown'}
  */
 function classifyAiError(err) {
   const msg = String((err && err.message) || err || '');
@@ -62,7 +71,39 @@ function classifyAiError(err) {
   if (/timed out/i.test(msg)) return 'timeout';
   if (/Network error/i.test(msg)) return 'network';
   if (/Empty response|Failed to parse API response/i.test(msg)) return 'malformed_response';
+  // Checked after the specific 401/403/429/5xx checks above, and only
+  // matches 400 responses whose message explicitly names a credit/quota/
+  // billing exhaustion condition — never a bare "API 400:".
+  if (/API 400:/i.test(msg) && CREDIT_EXHAUSTION_400_PATTERN.test(msg)) return 'credit_exhausted';
   return 'unknown';
+}
+
+// Categories that represent the *provider* being unavailable — worth
+// attempting a different provider for. Deliberately excludes auth_failed
+// (a bad/revoked key won't be fixed by switching providers' request, and
+// re-sending the same-shaped request to a second provider on an auth error
+// risks masking a real credential problem), missing_key (no provider
+// configured — nothing to fail over from), and unknown (generic/invalid
+// request or application error — switching providers wouldn't help and
+// could mask a real bug).
+const FALLBACK_ELIGIBLE_CATEGORIES = new Set([
+  'rate_limited',
+  'provider_error',
+  'timeout',
+  'network',
+  'malformed_response',
+  'credit_exhausted',
+]);
+
+/**
+ * True when a classified error category represents a provider-availability
+ * failure worth attempting a backup provider for, per FALLBACK_ELIGIBLE_CATEGORIES.
+ *
+ * @param {string} category - result of classifyAiError()
+ * @returns {boolean}
+ */
+function isFallbackEligible(category) {
+  return FALLBACK_ELIGIBLE_CATEGORIES.has(category);
 }
 
 /**
@@ -124,6 +165,7 @@ module.exports = {
   isProviderConfigured,
   getAiStatus,
   classifyAiError,
+  isFallbackEligible,
   isRetryPointless,
   buildAiUnavailableMessage,
   getAiFailureMessage,
