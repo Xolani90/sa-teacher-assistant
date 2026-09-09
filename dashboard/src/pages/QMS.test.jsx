@@ -21,6 +21,33 @@ const SNAPSHOT = {
   strength: 'Your curriculum coverage is ahead of pace this term.',
 };
 
+const INSUFFICIENT_INSIGHTS = {
+  status: 'insufficient_data',
+  summary: null,
+  recommendations: [],
+  generatedAt: '2026-09-09T00:00:00.000Z',
+};
+
+const RISING_INSIGHTS = {
+  status: 'ok',
+  summary: null,
+  recommendations: [
+    {
+      topicId: 'TOPIC_A',
+      topicLabel: 'Formative Assessment',
+      ruleId: 'trend_rising',
+      messageId: 'trend_rising',
+      templateData: { currentConfidence: 0.7, previousConfidence: 0.4 },
+      recommendation: 'Your evidence for Formative Assessment is trending upward.',
+      confidence: 0.7,
+      confidenceLabel: 'high',
+      evidence: { reflections: 3, growthPlans: 1 },
+      explanation: 'Based on recent reflections and an active growth plan.',
+    },
+  ],
+  generatedAt: '2026-09-09T00:00:00.000Z',
+};
+
 function renderQMS() {
   return renderWithProviders(<QMS />, { authenticated: true });
 }
@@ -33,7 +60,7 @@ describe('QMS page', () => {
   });
 
   it('sidebar label reads "QMS & Readiness"', async () => {
-    mockFetchRoutes({ '/tse/status': { body: SNAPSHOT } });
+    mockFetchRoutes({ '/tse/status': { body: SNAPSHOT }, '/coaching/insights': { body: INSUFFICIENT_INSIGHTS } });
     renderQMS();
 
     await screen.findByText('Curriculum Coverage');
@@ -41,7 +68,7 @@ describe('QMS page', () => {
   });
 
   it('page heading reads "QMS & Readiness"', async () => {
-    mockFetchRoutes({ '/tse/status': { body: SNAPSHOT } });
+    mockFetchRoutes({ '/tse/status': { body: SNAPSHOT }, '/coaching/insights': { body: INSUFFICIENT_INSIGHTS } });
     renderQMS();
 
     // Scoped to <main>: the sidebar nav link text now overlaps with the
@@ -54,7 +81,7 @@ describe('QMS page', () => {
   });
 
   it('renders the summary banner, category cards, and gaps on success', async () => {
-    mockFetchRoutes({ '/tse/status': { body: SNAPSHOT } });
+    mockFetchRoutes({ '/tse/status': { body: SNAPSHOT }, '/coaching/insights': { body: INSUFFICIENT_INSIGHTS } });
     renderQMS();
 
     expect(await screen.findByText('Your curriculum coverage is ahead of pace this term.')).toBeInTheDocument();
@@ -71,7 +98,7 @@ describe('QMS page', () => {
   });
 
   it('does not render the Reflections or Growth Plans panels (moved to /reflections)', async () => {
-    mockFetchRoutes({ '/tse/status': { body: SNAPSHOT } });
+    mockFetchRoutes({ '/tse/status': { body: SNAPSHOT }, '/coaching/insights': { body: INSUFFICIENT_INSIGHTS } });
     renderQMS();
 
     await screen.findByText('Your curriculum coverage is ahead of pace this term.');
@@ -84,7 +111,7 @@ describe('QMS page', () => {
   });
 
   it('only fetches /api/tse/status — no /api/reflections or /api/growth-plans calls', async () => {
-    const fetchMock = mockFetchRoutes({ '/tse/status': { body: SNAPSHOT } });
+    const fetchMock = mockFetchRoutes({ '/tse/status': { body: SNAPSHOT }, '/coaching/insights': { body: INSUFFICIENT_INSIGHTS } });
     renderQMS();
 
     await screen.findByText('Your curriculum coverage is ahead of pace this term.');
@@ -96,7 +123,7 @@ describe('QMS page', () => {
   });
 
   it('omits the gaps section when there are no gaps', async () => {
-    mockFetchRoutes({ '/tse/status': { body: { ...SNAPSHOT, gaps: [] } } });
+    mockFetchRoutes({ '/tse/status': { body: { ...SNAPSHOT, gaps: [] } }, '/coaching/insights': { body: INSUFFICIENT_INSIGHTS } });
     renderQMS();
 
     await screen.findByText('Curriculum Coverage');
@@ -104,7 +131,7 @@ describe('QMS page', () => {
   });
 
   it('omits the summary banner when strength is null', async () => {
-    mockFetchRoutes({ '/tse/status': { body: { ...SNAPSHOT, strength: null, gaps: [] } } });
+    mockFetchRoutes({ '/tse/status': { body: { ...SNAPSHOT, strength: null, gaps: [] } }, '/coaching/insights': { body: INSUFFICIENT_INSIGHTS } });
     renderQMS();
 
     await screen.findByText('Curriculum Coverage');
@@ -139,5 +166,40 @@ describe('QMS page', () => {
     await user.click(screen.getByRole('button', { name: /retry/i }));
 
     await waitFor(() => expect(screen.getByText('Curriculum Coverage')).toBeInTheDocument());
+  });
+
+  it('shows the Coaching Insights panel with a rendered recommendation on trend data', async () => {
+    mockFetchRoutes({
+      '/tse/status': { body: SNAPSHOT },
+      '/coaching/insights': { body: RISING_INSIGHTS },
+    });
+    renderQMS();
+
+    expect(await screen.findByText('Coaching Insights')).toBeInTheDocument();
+    expect(screen.getByText('Your evidence for Formative Assessment is trending upward.')).toBeInTheDocument();
+  });
+
+  it('shows an insufficient-evidence empty state in Coaching Insights when data is thin', async () => {
+    mockFetchRoutes({
+      '/tse/status': { body: SNAPSHOT },
+      '/coaching/insights': { body: INSUFFICIENT_INSIGHTS },
+    });
+    renderQMS();
+
+    expect(await screen.findByText('Coaching Insights')).toBeInTheDocument();
+    expect(screen.getByText('Not enough evidence yet')).toBeInTheDocument();
+  });
+
+  it('omits the Coaching Insights panel entirely (not an error state) if that fetch fails', async () => {
+    mockFetchRoutes({
+      '/tse/status': { body: SNAPSHOT },
+      '/coaching/insights': { body: { error: 'down' }, ok: false, status: 500 },
+    });
+    renderQMS();
+
+    await screen.findByText('Curriculum Coverage');
+    expect(screen.queryByText('Coaching Insights')).not.toBeInTheDocument();
+    // The rest of the page is completely unaffected by the failure.
+    expect(screen.getByText('Your curriculum coverage is ahead of pace this term.')).toBeInTheDocument();
   });
 });

@@ -887,6 +887,50 @@ function createGetQmsTopicsHandler({ listTopicsOrdered }) {
 }
 
 /**
+ * Builds the GET /coaching/insights handler (PR40 dashboard surface,
+ * per ADR-016 §9 / ADR-INDEX's "dashboard later" note — the WhatsApp
+ * side of PR40 presentation shipped as ADR-018's coachingMessageRenderer;
+ * this is the deferred teacher-dashboard half of the same milestone).
+ *
+ * Thin passthrough only: getCoachingInsights(phoneHash) already does
+ * every bit of analysis (insufficient-data guard, evidence gathering,
+ * confidence, trend-aware rule evaluation via coachingTrendService,
+ * message rendering via coachingMessageRenderer) and is fully covered
+ * by tests/coachingEngineService.test.js, tests/coachingTrendService.test.js
+ * and tests/coachingMessageRenderer.test.js. This handler adds nothing
+ * to that pipeline — no new thresholds, no new rules, no reformatting
+ * of the rendered recommendation text — it only exposes the existing
+ * read-only result over HTTP, scoped to the authenticated teacher.
+ *
+ * @param {Object} deps
+ * @param {(phoneHash:string, options?:Object) => Object} deps.getCoachingInsights
+ * @returns {(req, res) => void}
+ */
+function createGetCoachingInsightsHandler({ getCoachingInsights }) {
+  /**
+   * GET /api/coaching/insights
+   * Read-only, scoped to req.teacher.phoneHash (set by requireTeacherAuth,
+   * same as every other route in this file — no route-local auth logic).
+   *
+   * @returns 200 { status, summary, recommendations, generatedAt } —
+   *          identical shape to getCoachingInsights()'s return value;
+   *          status is 'insufficient_data' or 'ok', never an error state
+   *          on its own (insufficient data is a normal, expected result).
+   * @returns 500 if the underlying service throws
+   */
+  return function handleGetCoachingInsights(req, res) {
+    let insights;
+    try {
+      insights = getCoachingInsights(req.teacher.phoneHash);
+    } catch (err) {
+      console.error('[API] getCoachingInsights failed:', err.message);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+    return res.status(200).json(insights);
+  };
+}
+
+/**
  * Builds the PATCH /classes/:classId handler (Phase 6 — class editing).
  *
  * services/teacherWorkspaceService.js#updateClass already existed, fully
@@ -1703,6 +1747,7 @@ const { generateBlueprintAssessmentPdf } = require('../services/pdfService');
 const { buildPdfUrl } = require('../core/generationPipeline');
 const { listTopicsOrdered } = require('../utils/qmsTopics');
 const { createIncident, getIncident, listIncidents, updateIncident, deleteIncident } = require('../services/incidentService');
+const { getCoachingInsights } = require('../services/coachingEngineService');
 
 /**
  * Feature 3 — Teacher Incident Book API. Same shape/conventions as the
@@ -2043,6 +2088,11 @@ router.get(
 );
 
 router.get(
+  '/coaching/insights',
+  createGetCoachingInsightsHandler({ getCoachingInsights })
+);
+
+router.get(
   '/incidents',
   createGetIncidentsHandler({ listIncidents })
 );
@@ -2099,6 +2149,7 @@ module.exports.__testExports = {
   createPatchGrowthPlanHandler,
   createDeleteGrowthPlanHandler,
   createGetQmsTopicsHandler,
+  createGetCoachingInsightsHandler,
   createGetBlueprintsHandler,
   createGetBlueprintDetailHandler,
 };

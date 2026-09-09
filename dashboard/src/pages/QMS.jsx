@@ -6,6 +6,7 @@ import Layout from '../components/Layout';
 import { Card, ErrorBanner, Spinner, SectionHeader, Pill } from '../components/ui';
 import QMSSummaryBanner from '../components/qms/QMSSummaryBanner';
 import QMSCategoryCard from '../components/qms/QMSCategoryCard';
+import CoachingInsightsPanel from '../components/qms/CoachingInsightsPanel';
 
 const STATUS_LOADING = 'loading';
 const STATUS_READY = 'ready';
@@ -22,13 +23,22 @@ const CATEGORY_LABELS = {
 /**
  * QMS & Readiness dashboard page — the QMS Action Centre (ADR-012).
  *
- * Composes one existing, already-tested backend endpoint:
+ * Composes two backend endpoints:
  *   - GET /api/tse/status (services/tseEvidenceService.getStatusSnapshot)
+ *   - GET /api/coaching/insights (services/coachingEngineService.getCoachingInsights)
  *
- * Per ADR-012, this page remains a single orchestration page. Each
- * evidence category is a QMSCategoryCard that expands inline to show
- * static, rule-based recommendations and CTAs (config/qmsRecommendations.js)
- * — no new backend routes, services, or schema changes in this phase.
+ * Per ADR-012, the primary evidence-by-category layout remains a single
+ * orchestration page. Each evidence category is a QMSCategoryCard that
+ * expands inline to show static, rule-based recommendations and CTAs
+ * (config/qmsRecommendations.js) — no schema changes in this phase.
+ *
+ * The Coaching Insights section (CoachingInsightsPanel) is PR40's
+ * dashboard surface for ADR-016's trend-aware coaching engine (PR38/PR39
+ * already compute confidence trends and trend-based recommendations for
+ * WhatsApp via ADR-018's coachingMessageRenderer) — it fetches
+ * independently and degrades quietly if that call fails, exactly like
+ * the dashboard's weekly-pulse card, so it never blocks or errors the
+ * rest of this page.
  *
  * Dashboard IA v1: Reflections and Growth Plans now have their own direct
  * sidebar destination (see ReflectionsGoals.jsx at /reflections) and are no
@@ -42,6 +52,13 @@ export default function QMS() {
   const [status, setStatus] = useState(STATUS_LOADING);
   const [error, setError] = useState(null);
   const [snapshot, setSnapshot] = useState(null);
+  // Coaching insights are fetched and rendered independently of the
+  // primary tse/status snapshot above — a failure here never blocks or
+  // errors the rest of the page (same "fails independently and quietly"
+  // pattern used for the dashboard's weekly-pulse card). null means
+  // "not loaded yet or failed to load", in which case the panel simply
+  // isn't rendered rather than showing a misleading empty/error state.
+  const [coachingInsights, setCoachingInsights] = useState(null);
 
   const load = useCallback(async () => {
     setStatus(STATUS_LOADING);
@@ -56,9 +73,20 @@ export default function QMS() {
     }
   }, [authedFetch]);
 
+  const loadCoachingInsights = useCallback(async () => {
+    try {
+      const data = await authedFetch('/api/coaching/insights');
+      setCoachingInsights(data);
+    } catch (err) {
+      // Deliberately silent — see the state comment above.
+      console.error('Failed to load coaching insights:', err);
+    }
+  }, [authedFetch]);
+
   useEffect(() => {
     load();
-  }, [load]);
+    loadCoachingInsights();
+  }, [load, loadCoachingInsights]);
 
   if (status === STATUS_LOADING) {
     return (
@@ -115,6 +143,8 @@ export default function QMS() {
       </Card>
 
       {gaps.length > 0 && <GapsSection gaps={gaps} />}
+
+      {coachingInsights && <CoachingInsightsPanel insights={coachingInsights} />}
     </Layout>
   );
 }
