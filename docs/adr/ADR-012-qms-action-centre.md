@@ -2,8 +2,13 @@
 
 ## 1. Status
 
-**Accepted (design) — not yet implemented.** No code changes accompany
-this document. The implementation PR follows the plan in §10.
+**Accepted and implemented** (commit `a9f660a`, "feat(qms): implement QMS
+Action Centre per ADR-012"). This status line was stale — the design below
+was already built and tested (`QMSCategoryCard`, `QMSCategoryActions`,
+`config/qmsRecommendations.js`) prior to RC2 P3's audit finding it. The
+Type 1/2/3 CTA mapping in §4.1 matches the shipped implementation exactly;
+no Type 3 ("Coming soon") button exists yet, consistent with Open
+Question 2 in §9.
 
 **Depends on:** ADR-010 (QMS/TSE relationship), ADR-011 (QMS domain
 model), ADR-008 (teacher authentication — the dashboard this feature
